@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uptokey — One place to connect your AI APIs, local models, and public sources</title>
+<meta name="description" content="Uptokey is a local, OpenAI-compatible proxy at 127.0.0.1:11435/v1. Provider keys stay in your operating system's native vault.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=Instrument+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#000000; --fg:#f8f8f8; --muted:#a3a3a3; --primary:#c44dff; --primary-fg:#000000;
+  --surface:#121212; --border:#2a2a2a; --ok:#96ff70;
+}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Instrument Sans",ui-sans-serif,system-ui,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--primary);text-decoration:none}
+a:hover{color:var(--fg)}
+@keyframes marquee-about{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}
+</style>
+</head>
+<body>
+<div style="min-height:100dvh;background:var(--bg);color:var(--fg);font-family:'Instrument Sans',ui-sans-serif,system-ui,sans-serif">
+
+  <header style="border-bottom:1px solid var(--border)">
+    <div style="max-width:900px;margin:0 auto;padding:24px 20px;display:flex;align-items:center;gap:12px">
+      <span style="font-size:20px;font-weight:600;letter-spacing:-0.02em">Uptokey</span>
+      <span style="margin-left:auto;font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">v0.1 — Open beta</span>
+    </div>
+  </header>
+
+  <div style="border-bottom:1px solid var(--border);overflow:hidden;padding:12px 0">
+    <p style="max-width:900px;margin:0 auto 10px;padding:0 20px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em">Languages coming to Uptokey</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;max-width:900px;margin:0 auto;padding:0 20px">
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">English</span>
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">Português (Brasil)</span>
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">Español</span>
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">Français</span>
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">Deutsch</span>
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">Italiano</span>
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">日本語</span>
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">한국어</span>
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">中文（简体）</span>
+      <span style="font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px">العربية</span>
+    </div>
+  </div>
+
+  <section style="max-width:900px;margin:0 auto;padding:64px 20px 32px">
+    <h1 style="margin:0;max-width:34rem;font-size:clamp(32px,5vw,46px);line-height:1.14;font-weight:600;letter-spacing:-0.025em;text-wrap:pretty">
+      One place to connect your AI APIs, local models, and public sources.
+    </h1>
+    <p style="margin:20px 0 0;max-width:32rem;font-size:17px;color:var(--muted);text-wrap:pretty">
+      Your keys stay on your machine. Connection state stays visible.
+    </p>
+    <p style="margin:10px 0 0;max-width:32rem;font-size:14px;color:var(--muted)">
+      Native OS vault. Connection state you can see — ok / blocked / unreported.
+    </p>
+  </section>
+
+  <section style="max-width:900px;margin:0 auto;padding:32px 20px">
+    <p style="margin:0;font-size:14px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em">What it is</p>
+    <p style="margin:16px 0 0;font-size:16px;color:var(--fg);text-wrap:pretty;max-width:38rem">
+      Uptokey is a local, OpenAI-compatible proxy at 127.0.0.1:11435/v1. Provider keys stay in your operating system's native vault — never in plaintext, never in the browser. You choose which provider or local model handles each request, and the connection status is always visible: ok, blocked, or unreported.
+    </p>
+  </section>
+
+  <section style="max-width:900px;margin:0 auto;padding:40px 20px">
+    <div style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))">
+      <article style="border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:24px">
+        <h3 style="margin:0;font-size:17px;font-weight:600">The app</h3>
+        <p style="margin:10px 0 0;font-size:14px;color:var(--muted)">Explore the dashboard in the browser. Keys are never in the composer. Pairing is only needed for real calls.</p>
+      </article>
+      <article style="border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:24px">
+        <h3 style="margin:0;font-size:17px;font-weight:600">The proxy</h3>
+        <p style="margin:10px 0 0;font-size:14px;color:var(--muted)">127.0.0.1:11435/v1. OS vault. Works with Cline, Continue, Aider, and any OpenAI-compatible client.</p>
+      </article>
+      <article style="border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:24px">
+        <h3 style="margin:0;font-size:17px;font-weight:600">The state</h3>
+        <p style="margin:10px 0 0;font-size:14px;color:var(--muted)">Stay in control of your token usage. No invented balance, no silent swap.</p>
+      </article>
+    </div>
+  </section>
+
+  <section style="max-width:900px;margin:0 auto;padding:40px 20px">
+    <p style="margin:0;font-size:14px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em">Status</p>
+    <p style="margin:16px 0 0;font-size:16px;color:var(--fg);max-width:38rem;text-wrap:pretty">
+      Open beta. Open source, licensed under AGPL-3.0-or-later. Built and maintained solo — this page exists to explain the project to anyone considering helping build it.
+    </p>
+  </section>
+
+  <section style="max-width:900px;margin:0 auto;padding:40px 20px">
+    <p style="margin:0;font-size:14px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em">Supporters</p>
+    <div style="position:relative;overflow:hidden;margin-top:16px">
+      <div style="pointer-events:none;position:absolute;top:0;bottom:0;left:0;z-index:10;width:48px;background:linear-gradient(to right,var(--bg),transparent)"></div>
+      <div style="pointer-events:none;position:absolute;top:0;bottom:0;right:0;z-index:10;width:48px;background:linear-gradient(to left,var(--bg),transparent)"></div>
+      <div style="display:flex;gap:24px;width:max-content;animation:marquee-about 40s linear infinite">
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">AWS Activate</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">Google for Startups</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">Cloudflare</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">GitHub</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">MongoDB Atlas</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">OVHcloud</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">Algolia</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">Sentry</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">JetBrains</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">AWS Activate</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">Google for Startups</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">Cloudflare</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">GitHub</span>
+        <span style="font-size:14px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 18px;white-space:nowrap">MongoDB Atlas</span>
+      </div>
+    </div>
+  </section>
+
+  <section style="max-width:900px;margin:0 auto;padding:40px 20px">
+    <div style="border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:28px;display:flex;flex-wrap:wrap;align-items:center;gap:16px;justify-content:space-between">
+      <div>
+        <h3 style="margin:0;font-size:17px;font-weight:600">Support the project</h3>
+        <p style="margin:8px 0 0;font-size:14px;color:var(--muted)">Sponsorship is optional support, not a software license.</p>
+      </div>
+      <a href="https://github.com/sponsors/MedBizu" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;justify-content:center;height:40px;padding:0 20px;border-radius:6px;background:var(--primary);color:var(--primary-fg);font-weight:600;font-size:14px">Donate</a>
+    </div>
+  </section>
+
+  <footer style="border-top:1px solid var(--border);padding:32px 20px;max-width:900px;margin:0 auto">
+    <p style="margin:0;font-size:13px;color:var(--muted)">hello@uptokey.com</p>
+    <p style="margin:8px 0 0;font-size:12px;color:var(--muted)">© 2026 Uptokey™ by Tecaless · Open source · AGPL-3.0-or-later</p>
+  </footer>
+
+</div>
+</body>
+</html>
