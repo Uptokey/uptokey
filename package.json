@@ -1,0 +1,23 @@
+{
+  "name": "@uptokey/monorepo",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "secret-scan": "trufflehog git file://. --since-commit HEAD"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Uptokey/uptokey.git"
+  },
+  "homepage": "https://github.com/Uptokey",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

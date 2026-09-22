@@ -1,0 +1,63 @@
+# Controle de Versão
+.git
+.gitignore
+
+# Dependências e Builds
+node_modules/
+dist/
+build/
+.next/
+.out/
+target/
+
+# Configurações, Segredos e Chaves Privadas
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.db
+quimera.db
+quimera.db-journal
+*.crt
+*.cert
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Logs e Arquivos de Sistema
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Regras Locais de Agentes de IA
+.clauderules
+CLAUDE.md
+.cursorrules
+.cursor/
+.windsurfrules
+.clinerules
+.roomodes
+.aider*
+AGENTS.md
+GEMINI.md
+ANTIGRAVITY.md
+.agents/
+CODEX.md
+.codexrules
+CHATGPT.md
+.chatgpt/
+KIMI.md
+.kimirules
+GROK.md
+.grokrules
+.copilot-instructions.md
+.github/copilot-instructions.md
