@@ -1,6 +1,6 @@
 {
     "schema":  "uptokey-public-source-v2",
-    "generatedAtUtc":  "2026-10-11T16:06:56.8873284Z",
+    "generatedAtUtc":  "2026-10-11T16:11:08.8553774Z",
     "sourceCommit":  "859fd4a5bfe952bb03cc54086c51034c122ba23c",
     "sourceWorkingTree":  "dirty",
     "files":  [
@@ -7543,8 +7543,8 @@
                   {
                       "Source":  "packaging/public-source/README.md",
                       "Destination":  "README.md",
-                      "SourceSha256":  "e93adefd767b35c762303e45a69402ca23ec95e9c5a77f1dd00844e6bdd13140",
-                      "Sha256":  "e93adefd767b35c762303e45a69402ca23ec95e9c5a77f1dd00844e6bdd13140"
+                      "SourceSha256":  "874c66326a0181a493b3e427b39175ce33a8dd633b2a25b73d0e7ed4aa9a4932",
+                      "Sha256":  "874c66326a0181a493b3e427b39175ce33a8dd633b2a25b73d0e7ed4aa9a4932"
                   },
                   {
                       "Source":  "packaging/public-source/scripts/verify-public-source.mjs",

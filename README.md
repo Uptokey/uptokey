@@ -2,6 +2,8 @@
 
 A coding assistant in your terminal, with a local service for your provider connections, project tools and conversations. Provider API keys are stored in the operating system's secret store.
 
+[Website](https://www.uptokey.com) · [Documentation](https://docs.uptokey.com) · [npm package](https://www.npmjs.com/package/uptokey)
+
 - **Portable terminal beta:** Windows, macOS and Linux, on x64 or ARM64, with Node.js **22.12.0 or newer**. npm installs the matching renderer and runtime; no separate Bun setup is needed. Platform execution results accompany each release artifact.
 - **Local API:** `http://127.0.0.1:21435/v1` by default.
 - **License:** AGPL-3.0-or-later. See `LICENSE` and the included third-party notices.
