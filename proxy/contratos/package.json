@@ -1,0 +1,231 @@
+{
+  "name": "@uptokey/sync-contract",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "exports": {
+    "./interactive-terminal": {
+      "types": "./interactive-terminal.d.ts",
+      "import": "./interactive-terminal.js",
+      "default": "./interactive-terminal.js"
+    },
+    "./video": {
+      "types": "./video.d.ts",
+      "import": "./video.js",
+      "default": "./video.js"
+    },
+    "./image": {
+      "types": "./image.d.ts",
+      "import": "./image.js",
+      "default": "./image.js"
+    },
+    "./speech": {
+      "types": "./speech.d.ts",
+      "import": "./speech.js",
+      "default": "./speech.js"
+    },
+    "./filesystem": {
+      "types": "./filesystem.d.ts",
+      "import": "./filesystem.js",
+      "default": "./filesystem.js"
+    },
+    "./composition": {
+      "types": "./composition.d.ts",
+      "import": "./composition.js",
+      "default": "./composition.js"
+    },
+    "./workflow": {
+      "types": "./workflow.d.ts",
+      "import": "./workflow.js",
+      "default": "./workflow.js"
+    },
+    "./canonical": {
+      "types": "./canonical.d.ts",
+      "import": "./canonical.js"
+    },
+    "./envelope": {
+      "types": "./envelope.d.ts",
+      "import": "./envelope.js"
+    },
+    "./limits": {
+      "types": "./limits.d.ts",
+      "import": "./limits.js"
+    },
+    "./plain-data": {
+      "types": "./plain-data.d.ts",
+      "import": "./plain-data.js"
+    },
+    "./rate-subject": {
+      "types": "./rate-subject.d.ts",
+      "import": "./rate-subject.js"
+    },
+    "./tailnet-origin": {
+      "types": "./tailnet-origin.d.ts",
+      "import": "./tailnet-origin.js",
+      "default": "./tailnet-origin.js"
+    },
+    "./hosted-pending": {
+      "types": "./hosted-pending.d.ts",
+      "import": "./hosted-pending.js"
+    },
+    "./hosted-receipt": {
+      "types": "./hosted-receipt.d.ts",
+      "import": "./hosted-receipt.js"
+    },
+    "./server": {
+      "types": "./server.d.ts",
+      "import": "./server.js"
+    },
+    "./browser": {
+      "types": "./browser.d.ts",
+      "import": "./browser.js",
+      "default": "./browser.js"
+    },
+    "./web": {
+      "types": "./web.d.ts",
+      "import": "./web.js",
+      "default": "./web.js"
+    },
+    "./benchmark": {
+      "types": "./benchmark.d.ts",
+      "import": "./benchmark.js",
+      "default": "./benchmark.js"
+    },
+    "./gateway": {
+      "types": "./gateway.d.ts",
+      "import": "./gateway.js",
+      "default": "./gateway.js"
+    },
+    "./data-envelope": {
+      "types": "./data-envelope.d.ts",
+      "import": "./data-envelope.js",
+      "default": "./data-envelope.js"
+    },
+    "./catalog": {
+      "types": "./catalog.d.ts",
+      "import": "./catalog.js",
+      "default": "./catalog.js"
+    },
+    "./connections": {
+      "types": "./connections.d.ts",
+      "import": "./connections.js",
+      "default": "./connections.js"
+    },
+    "./recipe": {
+      "types": "./recipe.d.ts",
+      "import": "./recipe.js",
+      "default": "./recipe.js"
+    },
+    "./recipe-safety": {
+      "types": "./recipe-safety.d.ts",
+      "import": "./recipe-safety.js",
+      "default": "./recipe-safety.js"
+    },
+    "./reflection-grant": {
+      "types": "./reflection-grant.d.ts",
+      "import": "./reflection-grant.js",
+      "default": "./reflection-grant.js"
+    },
+    "./channel": {
+      "types": "./channel.d.ts",
+      "import": "./channel.js",
+      "default": "./channel.js"
+    },
+    "./transcription": {
+      "types": "./transcription.d.ts",
+      "import": "./transcription.js",
+      "default": "./transcription.js"
+    },
+    "./embeddings": {
+      "types": "./embeddings.d.ts",
+      "import": "./embeddings.js",
+      "default": "./embeddings.js"
+    },
+    "./media-profile": {
+      "types": "./media-profile.d.ts",
+      "import": "./media-profile.js",
+      "default": "./media-profile.js"
+    },
+    "./project-agent": {
+      "types": "./project-agent.d.ts",
+      "import": "./project-agent.js",
+      "default": "./project-agent.js"
+    },
+    "./client-keys": {
+      "types": "./client-keys.d.ts",
+      "import": "./client-keys.js",
+      "default": "./client-keys.js"
+    },
+    "./openrouter-management": {
+      "types": "./openrouter-management.d.ts",
+      "import": "./openrouter-management.js",
+      "default": "./openrouter-management.js"
+    },
+    "./conversation": {
+      "types": "./conversation.d.ts",
+      "import": "./conversation.js",
+      "default": "./conversation.js"
+    },
+    "./multimodel": {
+      "types": "./multimodel.d.ts",
+      "import": "./multimodel.js",
+      "default": "./multimodel.js"
+    },
+    "./diagnostic": {
+      "types": "./diagnostic.d.ts",
+      "import": "./diagnostic.js",
+      "default": "./diagnostic.js"
+    },
+    "./voice-session": {
+      "types": "./voice-session.d.ts",
+      "import": "./voice-session.js",
+      "default": "./voice-session.js"
+    },
+    "./audio-chat": {
+      "types": "./audio-chat.d.ts",
+      "import": "./audio-chat.js",
+      "default": "./audio-chat.js"
+    },
+    "./modality-adaptation": {
+      "types": "./modality-adaptation.d.ts",
+      "import": "./modality-adaptation.js",
+      "default": "./modality-adaptation.js"
+    },
+    "./audio-container": {
+      "types": "./audio-container.d.ts",
+      "import": "./audio-container.js",
+      "default": "./audio-container.js"
+    },
+    "./settings": {
+      "types": "./settings.d.ts",
+      "import": "./settings.js",
+      "default": "./settings.js"
+    },
+    "./egress": {
+      "types": "./egress.d.ts",
+      "import": "./egress.js"
+    },
+    "./agents-cli": {
+      "types": "./agents-cli.d.ts",
+      "import": "./agents-cli.js",
+      "default": "./agents-cli.js"
+    },
+    "./browser-identity": {
+      "types": "./browser-identity.d.ts",
+      "import": "./browser-identity.js",
+      "default": "./browser-identity.js"
+    },
+    "./service-access": {
+      "types": "./service-access.d.ts",
+      "import": "./service-access.js",
+      "default": "./service-access.js"
+    }
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "13.3.2"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "quimera-api-instruments",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "General API instruments and semantic intention selection module for Uptokey",
+  "scripts": {
+    "test": "node --experimental-strip-types --test --test-concurrency=1 test/*.test.ts test/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "verify": "node verify.mjs"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "0.6.0",
+    "@uptokey/sync-contract": "file:../../contratos",
+    "ajv": "^8.20.0",
+    "ajv-formats": "3.0.1",
+    "rss-parser": "^3.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

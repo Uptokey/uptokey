@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "paths": { "@opencode-ai/sdk/v2": ["./src/tui/frontend/vendor/opencode-sdk/index.ts"] }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["src/tui/frontend"]
+}

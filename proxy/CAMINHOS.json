@@ -1,0 +1,104 @@
+{
+  "schema": "uptokey-proxy-paths-v1",
+  "base": ".",
+  "migrationState": "in_progress",
+  "aliases": {
+    "CORE": {
+      "current": "proxy/core",
+      "target": "proxy/core"
+    },
+    "CONTRACT": {
+      "current": "proxy/contratos",
+      "target": "proxy/contratos"
+    },
+    "INTEGRATIONS": {
+      "current": "proxy/integracoes",
+      "target": "proxy/integracoes"
+    },
+    "PWA": {
+      "current": "quimera/uptokey/uptokey-pwa",
+      "target": null
+    },
+    "TAURI": {
+      "current": "quimera/tauri",
+      "target": null
+    },
+    "VSCODE": {
+      "current": "quimera/uptokey/vscode-extension",
+      "target": null
+    },
+    "CHROME": {
+      "current": "quimera/uptokey/chrome-extension",
+      "target": null
+    },
+    "ORCHESTRATOR": {
+      "current": "quimera/uptokey/ai-orchestrator",
+      "target": null
+    },
+    "CLI": {
+      "current": "proxy/core/src/cli.ts",
+      "target": "proxy/core/src/cli.ts"
+    },
+    "TUI": {
+      "current": "proxy/core/src/tui",
+      "target": "proxy/core/src/tui"
+    },
+    "BRIDGE": {
+      "current": "quimera/uptokey/uptokey-pwa/src/design-bridge",
+      "target": null
+    },
+    "DESIGN": {
+      "current": "quimera/uptokey/uptokey-pwa/design",
+      "target": null
+    },
+    "CONTROL_PLANE": {
+      "current": "quimera/uptokey/control-plane",
+      "target": null
+    },
+    "HOSTED_AI": {
+      "current": "quimera/uptokey/hosted-ai",
+      "target": null
+    },
+    "CLOUDFLARE": {
+      "current": "quimera/uptokey/cloudflare",
+      "target": null
+    },
+    "REFERENCES": {
+      "current": "open-source-evaluation/clones",
+      "target": "proxy/referencias"
+    },
+    "INVENTORY": {
+      "current": "open-source-evaluation/clones-inventory.json",
+      "target": null
+    }
+  },
+  "protected": [
+    ".env variants and examples",
+    "native vault/service namespace",
+    "local databases/session/profile directories",
+    "UPTOKEY_QUIMERA_DATA_DIR and .uptokey-quimera",
+    "open-source-evaluation/9router-runtime-data"
+  ],
+  "historicalCandidates": [
+    "proxy-local",
+    "uptokey-pwa",
+    "sync-contract",
+    "dashboard",
+    "uptokey-mcp-sync-extract",
+    "uptokey-sync-extract",
+    "uptokey1.0.0"
+  ],
+  "rules": [
+    "target is never current until verified migration",
+    "Do not duplicate active source",
+    "Preserve unique legacy capabilities before archival",
+    "No data movement by code refactor"
+  ],
+  "codeCut": {
+    "state": "verified_core_integrations",
+    "at": "2026-09-25T11:27:52.069Z",
+    "files": 2744,
+    "evidence": "output/proxy-programa/core-cut-evidence.json",
+    "remaining": "joint package acceptance and legacy reconciliation"
+  }
+}

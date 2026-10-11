@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "packageId": "E2-20",
+  "contractStatus": "published_additive",
+  "note": "Lab W0-shaped stubs. Do NOT claim published into shared sync-contract. Merge pending sole ownership / product PR.",
+  "integrationOrigin": "expansao-2/20-work/contracts",
+  "handler": "lab.W5DiagnosticAdapter",
+  "defaultEnabled": false,
+  "forbidden": {
+    "osCaMutation": true,
+    "dnsMutation": true,
+    "globalProxy": true,
+    "insecureSkipVerify": true,
+    "wildcardOrigins": true,
+    "credentialDump": true
+  },
+  "limits": {
+    "maxSessionTtlMs": 900000,
+    "maxOrigins": 5,
+    "maxConnections": 16,
+    "maxBodyBytes": 1048576,
+    "maxTotalBytes": 52428800,
+    "maxRetentionHours": 24
+  },
+  "errorCodes": [
+    "diagnostic_disabled",
+    "ownership_scope_unverified",
+    "target_not_authorized",
+    "backend_unavailable",
+    "port_conflict",
+    "certificate_untrusted",
+    "pinned_client_unsupported",
+    "collection_not_authorized",
+    "scope_expired",
+    "process_identity_unknown",
+    "restore_conflict",
+    "plan_invalid",
+    "revision_mismatch",
+    "wildcard_origin_forbidden",
+    "insecure_skip_verify_forbidden"
+  ],
+  "operations": [
+    {
+      "operationId": "diagnostic.discover",
+      "specId": "E2-20-D",
+      "input": ["platform", "mode", "localAppRef"],
+      "output": ["support", "version", "license", "configurationRequired", "capture=false"],
+      "effectsAdmitted": []
+    },
+    {
+      "operationId": "diagnostic.plan",
+      "specId": "E2-20-P",
+      "input": ["appRef", "ownershipEvidenceRef", "origins[]", "mode", "collectPolicyRef", "expiresAt", "limits"],
+      "output": ["planRef", "confidence", "destinations", "effectsExplicit"],
+      "effectsAdmitted": ["plan_materialize"]
+    },
+    {
+      "operationId": "diagnostic.start",
+      "specId": "E2-20-S",
+      "input": ["approvedPlanRef", "requestId"],
+      "output": ["sessionRef", "boundEndpoint", "state", "receiptRef"],
+      "effectsAdmitted": ["bind_loopback_proxy", "session_ca_ephemeral"]
+    },
+    {
+      "operationId": "diagnostic.certificate.inspect",
+      "specId": "E2-20-C",
+      "input": ["sessionRef"],
+      "output": ["fingerprint", "issuer", "validity", "scope", "trustState", "privateKeyExported=false"],
+      "effectsAdmitted": []
+    },
+    {
+      "operationId": "diagnostic.route.plan",
+      "specId": "E2-20-R",
+      "input": ["sessionRef", "expectedRevision", "aliasMap"],
+      "output": ["diff", "plan"],
+      "effectsAdmitted": ["route_diff_propose"]
+    },
+    {
+      "operationId": "diagnostic.observe",
+      "specId": "E2-20-O",
+      "input": ["sessionRef", "cursor"],
+      "output": ["records", "droppedCount", "collectionState", "nextCursor"],
+      "effectsAdmitted": []
+    },
+    {
+      "operationId": "diagnostic.export",
+      "specId": "E2-20-O",
+      "input": ["sessionRef", "cursor", "format", "manifesto"],
+      "output": ["records", "artifactRef", "droppedCount", "collectionState"],
+      "effectsAdmitted": ["artifact_export_authorized"]
+    },
+    {
+      "operationId": "diagnostic.stop",
+      "specId": "E2-20-X",
+      "input": ["sessionRef", "expectedRevision"],
+      "output": ["state", "resourcesRemaining"],
+      "effectsAdmitted": ["stop_capture", "destroy_session_ca"]
+    }
+  ]
+}

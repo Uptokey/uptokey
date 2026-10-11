@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-30T00:00:00.000Z",
+  "origin": "https://github.com/anomalyco/opencode.git",
+  "commit": "b471c2b4495747353af768fbf2e0790c9d820ce2",
+  "sourceMode": "file-copy-of-pinned-snapshot-with-local-modifications-listed-in-UPSTREAM.json",
+  "destination": "vendor",
+  "note": "packages/tui/src, packages/sdk/js/src/v2/gen/types.gen.ts and packages/plugin/src/tui.ts of the pinned commit; license MIT, copyright 2025 opencode"
+}

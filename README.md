@@ -1,29 +1,95 @@
-# Uptokey 🔑
+# Uptokey
 
-> Assistente de IA Open Source, Local-First e Zero-Knowledge com Armazenamento de Chaves no Cofre Nativo do Sistema Operacional.
-> Repositório Oficial: [github.com/Uptokey/uptokey](https://github.com/Uptokey/uptokey) | Organização: [@Uptokey](https://github.com/Uptokey)
+A coding assistant in your terminal, with a local service for your provider connections, project tools and conversations. Provider API keys are stored in the operating system's secret store.
 
-## Arquitetura em Monorepo
+- **Portable terminal beta:** Windows, macOS and Linux, on x64 or ARM64, with Node.js **22.12.0 or newer**. npm installs the matching renderer and runtime; no separate Bun setup is needed. Platform execution results accompany each release artifact.
+- **Local API:** `http://127.0.0.1:21435/v1` by default.
+- **License:** AGPL-3.0-or-later. See `LICENSE` and the included third-party notices.
 
-- **`packages/core`**: Proxy headless local, gerenciamento de rotas e cofre nativo.
-- **`packages/cli`**: Interface de linha de comando para terminal (`npx @uptokey/cli`).
-- **`apps/pwa`**: Interface web canônica e Design Bridge.
-- **`apps/desktop`**: App Desktop leve em Tauri/Rust.
-- **`extensions/`**: Extensões para VS Code e Google Chrome.
+## Open Uptokey
 
-## Desenvolvimento Local
+With Node.js installed, run one command:
 
-```bash
-# Instalar dependências
-pnpm install
-
-# Rodar typecheck em todos os pacotes
-pnpm typecheck
-
-# Executar testes
-pnpm test
+```sh
+npx --yes uptokey@latest
 ```
 
-## Licença
+This downloads the current public release and opens it without a global install, administrator access or PATH configuration. npm selects the native components for your operating system and processor, including Intel and Apple Silicon Macs.
 
-Distribuído sob a licença [Apache-2.0](./LICENSE).
+The command opens the coding interface in the current folder. To open another project:
+
+```sh
+npx --yes uptokey@latest "./my-project"
+```
+
+The launcher connects to the local service and starts it when needed. If local terminal access needs authorization, it asks you to confirm that access. You do not need to start the service manually for normal terminal use.
+
+## Connect and start coding
+
+1. Enter **`/connect`**. Choose a provider, then enter its API key in the masked credential field. Known providers have connection presets; a custom service may also need an endpoint. Local runtimes may not require a key and must already be running.
+2. Choose a model from the returned list. Discovery uses the provider's account catalog where available; a declared catalog is identified as such. A listed model is not proof of available quota or a successful request.
+3. After saving, the picker closes and the selected **provider and model** appear in the coding interface. Selecting an external model authorizes subsequent requests and their permitted context to go to that destination.
+4. Write a normal request, for example: “Inspect this project and explain how to run its tests.” File tools operate on the authorized project. Review proposed changes and commands when prompted; applied changes have receipts.
+
+Use **`/models`** to switch models, **`/projects`** to select a project and **`/sessions`** to reopen a saved conversation. Saved credentials and the destination preference are reused in the same local service profile. Ordinary letters are text; commands start with `/`, or use the command palette.
+
+Normal conversations are stored locally. **`/temporary`** starts a conversation with temporary retention; it does not promise saved history or a remembered destination. The current processing policy is visible. **`/processing local`** restricts the conversation to local processing; choosing an external model changes that policy explicitly.
+
+See [FIRST-RUN-BETA.md](./proxy/core/FIRST-RUN-BETA.md) for the complete first-use checklist and recovery steps.
+
+## Language and accessibility
+
+English is the default independently of the operating system language. Choose an interface language explicitly:
+
+```sh
+npx --yes uptokey@latest --lang pt-BR
+npx --yes uptokey@latest --screen-reader
+```
+
+Available locales: `en`, `pt-BR`, `es`, `fr`, `de`, `it`, `ja`, `ko`, `zh-CN`, `ar`. The accessible linear presentation uses the same conversations, tools and local service.
+
+Open **`/help`** for the current commands and keyboard controls. `tui`, `code`, `forge` and `--next` are compatibility aliases for the same terminal frontend.
+
+## Diagnose a problem
+
+Inside the terminal, use **`/doctor`**. Outside it:
+
+```sh
+npx --yes uptokey@latest doctor
+npx --yes uptokey@latest version
+npx --yes uptokey@latest help
+npx --yes uptokey@latest tui --help
+```
+
+A successful key save or model discovery does not certify inference. If the first request fails, check the selected account/model, provider access, quota and the reported recovery action. Keep the draft and retry after correcting the cause.
+
+BYOK requests do not require a fresh control-plane login solely because an offline grace period expired. Explicit revocation or suspension still applies. Do not change offline policy settings as a routine onboarding step.
+
+## Other clients and automation
+
+The CLI also exposes explicit administration and automation subcommands; `npx --yes uptokey@latest help` lists them. Terminal coding is the default interactive entry point.
+
+OpenAI-compatible clients can use `http://127.0.0.1:21435/v1` with an authorized **local client token**, not a provider API key. The HTTP interfaces include Chat Completions, Anthropic Messages and the supported text/function-call subset of Responses, with streaming where supported. Unsupported input is rejected before dispatch.
+
+`npx --yes uptokey@latest mcp` exposes the documented stdio tools. See [SPEC-MCP-V1.md](./proxy/core/SPEC-MCP-V1.md). Provider credentials and local vault tokens are not returned as MCP tool results.
+
+The current npm package contains the local core and terminal frontend. This public source tree covers that terminal beta; it does not claim to contain the PWA or Tauri desktop distribution. Other platform packages require their own built and tested renderer.
+
+## Build and verify (maintainers)
+
+From the repository root:
+
+```sh
+npm ci --prefix proxy/integracoes/api-instruments
+npm ci --prefix proxy/integracoes/e2-20-diagnostic
+npm ci --prefix proxy/core
+npm run verify
+npm run typecheck
+npm run build
+npm run build:tui
+npm test
+```
+
+Verification checks the allowlisted file inventory and hashes before compilation. The CI then type-checks the core, builds the CLI and portable terminal frontend, and runs the public-source acceptance tests. None of these commands publishes a package.
+
+Keep API keys out of prompts, repository files, environment examples, client configurations and screenshots. The local API binds to loopback; storing a key locally does not change the privacy terms of the provider you choose.

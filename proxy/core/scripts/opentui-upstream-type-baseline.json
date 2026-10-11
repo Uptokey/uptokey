@@ -1,0 +1,321 @@
+{
+  "schema": "uptokey-opentui-upstream-type-ratchet-v1",
+  "compiler": "7.0.2",
+  "total": 162,
+  "sourceEvidence": "output/spec-conformidade-20261005/strict-tui-baseline.log",
+  "scope": "Only reviewed vendored diagnostics; first-party runtime and fixtures must have zero strict diagnostics. New paths/codes/messages or count increases fail.",
+  "diagnostics": [
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/app.tsx|TS18048|'core' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/app.tsx|TS7006|Parameter 'result' implicitly has an 'any' type.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/bg-pulse-render.ts|TS18048|'dist' is possibly 'undefined'.",
+      "count": 3
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/bg-pulse-render.ts|TS2532|Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-console-org.tsx|TS7006|Parameter 'result' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-console-org.tsx|TS7006|Parameter 'error' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-console-org.tsx|TS7006|Parameter 'item' implicitly has an 'any' type.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-console-org.tsx|TS7006|Parameter 'a' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-console-org.tsx|TS7006|Parameter 'b' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-move-session.tsx|TS7006|Parameter 'result' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-move-session.tsx|TS7006|Parameter 'error' implicitly has an 'any' type.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-provider.tsx|TS18048|'method' is possibly 'undefined'.",
+      "count": 9
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS18046|'session' is of type 'unknown'.",
+      "count": 4
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS2339|Property 'workspaceID' does not exist on type '{}'.",
+      "count": 9
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS2339|Property 'id' does not exist on type '{}'.",
+      "count": 5
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS2339|Property 'title' does not exist on type '{}'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS18046|'x' is of type 'unknown'.",
+      "count": 4
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS18046|'b' is of type 'unknown'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS18046|'a' is of type 'unknown'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS2339|Property 'path' does not exist on type '{}'.",
+      "count": 3
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS2339|Property 'directory' does not exist on type '{}'.",
+      "count": 3
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS2339|Property 'time' does not exist on type '{}'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-session-list.tsx|TS18046|'item' is of type 'unknown'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-skill.tsx|TS7006|Parameter 'result' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-skill.tsx|TS7006|Parameter 'error' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-skill.tsx|TS7006|Parameter 's' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-skill.tsx|TS7006|Parameter 'skill' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-stash.tsx|TS2532|Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-status.tsx|TS18048|'a.name' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-status.tsx|TS2769|No overload matches this call.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-tag.tsx|TS7006|Parameter 'file' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-workspace-file-changes.tsx|TS2345|Argument of type '\"no\" | \"yes\" | undefined' is not assignable to parameter of type 'StoreSetter<\"no\" | \"yes\", [\"active\"]>'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/dialog-workspace-list.tsx|TS7006|Parameter 'err' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/error-component.tsx|TS2532|Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/prompt/autocomplete.tsx|TS7006|Parameter 'item' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/prompt/index.tsx|TS2532|Object is possibly 'undefined'.",
+      "count": 3
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/prompt/index.tsx|TS18048|'firstWord' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/prompt/index.tsx|TS18048|'command' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/prompt/index.tsx|TS7006|Parameter 'error' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/prompt/index.tsx|TS2322|Type 'string | undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/component/prompt/index.tsx|TS2345|Argument of type 'RGBA | undefined' is not assignable to parameter of type 'RGBA'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/local.tsx|TS18048|'value' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/local.tsx|TS2322|Type 'string | undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/local.tsx|TS2345|Argument of type 'Accessor<{ providerID: string | undefined; modelID: string; } | undefined>' is not assignable to parameter of type '() => { providerID: string; modelID: string; } | undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/project.tsx|TS7006|Parameter 'item' implicitly has an 'any' type.",
+      "count": 3
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS2345|Argument of type 'T | undefined' is not assignable to parameter of type 'T'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS7006|Parameter 'x' implicitly has an 'any' type.",
+      "count": 16
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS7006|Parameter 'a' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS7006|Parameter 'b' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS18048|'updated' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS18048|'oldest' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS18048|'messages' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS18048|'part' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS2345|Argument of type 'Part[] | undefined' is not assignable to parameter of type 'Part[]'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS7006|Parameter 'consoleState' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS7006|Parameter 'message' implicitly has an 'any' type.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS7006|Parameter 'item' implicitly has an 'any' type.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/sync.tsx|TS7006|Parameter 'part' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/theme.tsx|TS2345|Argument of type 'ThemeJson | undefined' is not assignable to parameter of type 'ThemeJson'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/context/thinking.ts|TS2532|Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/feature-plugins/home/tips-view.tsx|TS2322|Type 'string | undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/dialog-message.tsx|TS18048|'parts' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/dialog-message.tsx|TS2532|Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/index.tsx|TS2532|Object is possibly 'undefined'.",
+      "count": 3
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/index.tsx|TS7006|Parameter 'res' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/index.tsx|TS7006|Parameter 'error' implicitly has an 'any' type.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/index.tsx|TS18048|'parts' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/index.tsx|TS2322|Type 'PermissionRequest | undefined' is not assignable to type 'PermissionRequest'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/index.tsx|TS2322|Type 'QuestionRequest | undefined' is not assignable to type 'QuestionRequest'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/permission.tsx|TS2345|Argument of type 'keyof T | undefined' is not assignable to parameter of type 'keyof T'.",
+      "count": 5
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/routes/session/subagent-footer.tsx|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/theme/index.ts|TS2345|Argument of type 'RGBA | undefined' is not assignable to parameter of type 'RGBA'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/theme/index.ts|TS2322|Type 'RGBA | undefined' is not assignable to type 'ColorValue'.",
+      "count": 9
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/ui/dialog-export-options.tsx|TS2345|Argument of type '\"assistantMetadata\" | \"filename\" | \"openWithoutSaving\" | \"thinking\" | \"toolDetails\" | undefined' is not assignable to parameter of type 'StoreSetter<\"assistantMetadata\" | \"filename\" | \"openWithoutSaving\" | \"thinking\" | \"toolDetails\", [\"active\"]>'.",
+      "count": 1
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/ui/dialog-select.tsx|TS2532|Object is possibly 'undefined'.",
+      "count": 3
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/ui/dialog-select.tsx|TS18048|'option' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "key": "src/tui/frontend/vendor/opencode-tui/util/filetype.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    }
+  ]
+}

@@ -1,23 +1,22 @@
 {
-  "name": "@uptokey/monorepo",
+  "name": "uptokey-public-source",
+  "version": "0.1.0-beta.10",
   "private": true,
-  "scripts": {
-    "build": "pnpm -r run build",
-    "test": "pnpm -r run test",
-    "typecheck": "pnpm -r run typecheck",
-    "lint": "pnpm -r run lint",
-    "secret-scan": "trufflehog git file://. --since-commit HEAD"
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=22.12.0"
   },
-  "devDependencies": {
-    "typescript": "^5.4.0"
+  "scripts": {
+    "build": "npm --prefix proxy/core run build",
+    "build:tui": "npm --prefix proxy/core run build:tui -- --portable",
+    "test": "node --test test/public-source.test.mjs",
+    "typecheck": "npm --prefix proxy/core run typecheck:core",
+    "verify": "node scripts/verify-public-source.mjs"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/Uptokey/uptokey.git"
   },
-  "homepage": "https://github.com/Uptokey",
-  "engines": {
-    "node": ">=20.0.0",
-    "pnpm": ">=9.0.0"
-  }
+  "homepage": "https://www.uptokey.com",
+  "bugs": "https://github.com/Uptokey/uptokey/issues"
 }

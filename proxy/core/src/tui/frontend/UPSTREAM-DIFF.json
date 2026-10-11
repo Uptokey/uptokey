@@ -1,0 +1,506 @@
+{
+ "revision": "b471c2b4495747353af768fbf2e0790c9d820ce2",
+ "comparedAt": "2026-10-02T15:51:26.398Z",
+ "totals": {
+  "vendoredFiles": 189,
+  "upstreamFiles": 185,
+  "modified": 81,
+  "added": 4,
+  "removed": 0
+ },
+ "modified": [
+  {
+   "file": "app.tsx",
+   "upstreamSha256": "06fb0ff4dcaf71e7aba23116f2dec067693d0619da1abf532866f155a1de01ef",
+   "localSha256": "878e4024bb575ef7f6c388e16d89d4b4b0ce57db07c057e310c2e40bd3dcb651",
+   "linesNotInUpstream": 118
+  },
+  {
+   "file": "clipboard.ts",
+   "upstreamSha256": "9c9f0630a18e9e4701a62e9279b8f4c768ef28bde8cbc96f361299d4eafe1e7b",
+   "localSha256": "75fd18aafd39bde6b5f2ebd2f3cea43e97a6918ecf82d926ffa485d3374a14cb",
+   "linesNotInUpstream": 36
+  },
+  {
+   "file": "component/command-palette.tsx",
+   "upstreamSha256": "bac680d21d9a8f8884918e8d0f95a28a26e606b561a2e4b869746cb31df98c24",
+   "localSha256": "ea32d768c522c5dfa7e048bab7d42254d3bf3660f85353c05467f24843ff1031",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "component/dialog-agent.tsx",
+   "upstreamSha256": "7219dbf69d5071a25c7c1b1fb03f143e3078e8b68d4c528ba931c6d73e00aa9a",
+   "localSha256": "8a0ad6b644fdcaa89fee3eb9c21e3510577d2133ce25b41f34efb8c135c1c41e",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "component/dialog-console-org.tsx",
+   "upstreamSha256": "27f6c0e20eb3588daed8f29a90f4c840f3c5cd1015d0a52fb0a6e6bcbd13aa27",
+   "localSha256": "5c22ebccf631667dd16bef120f08e1d05a8b18886c25fcdb14ebaa9e219fec5e",
+   "linesNotInUpstream": 5
+  },
+  {
+   "file": "component/dialog-debug.tsx",
+   "upstreamSha256": "6e287923f0236fddf72a2c24d332bda1515e63bfe2fc3156921633ab6f4cb5e7",
+   "localSha256": "eacccb01fb16e99187e4de02a617c5ba4eb7e19abae7983f576c0972214c8aa7",
+   "linesNotInUpstream": 14
+  },
+  {
+   "file": "component/dialog-mcp.tsx",
+   "upstreamSha256": "86e03bda46cefa7556338a69213246d9bf40f0af179c85d84bec894032851ae9",
+   "localSha256": "d93de415f248429968998a553f22adcee4b83ccb22643cc42fd5ee616eff379b",
+   "linesNotInUpstream": 6
+  },
+  {
+   "file": "component/dialog-model.tsx",
+   "upstreamSha256": "e30c8949786f66bc139e7f2b748bbb6cba4d5f368689141316b8378fe99ba3a5",
+   "localSha256": "79e5e9e390526578b445f2a5de6d9b058e05e7b0a3dd77ea4a54935ccd2ae06f",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "component/dialog-move-session.tsx",
+   "upstreamSha256": "6e7265168d2bb3524679c1f682a9c00530b4063dc3c0a92bdc82066566006d9e",
+   "localSha256": "77e7d3aaf519a0b7bb1ef00b1570654663c2048294161cf9c71010aa9e8ee4ac",
+   "linesNotInUpstream": 15
+  },
+  {
+   "file": "component/dialog-provider.tsx",
+   "upstreamSha256": "9fa8090a8c54c5260916525552fd25caee462f306acad6facf548e10ca6d776c",
+   "localSha256": "6b0765a5ffe5920da3fe040ca95e8be3d439b30b2b1ce75be15aa5f02f353363",
+   "linesNotInUpstream": 25
+  },
+  {
+   "file": "component/dialog-retry-action.tsx",
+   "upstreamSha256": "e4ae30ff048d8383fcceec9caca66f49e8761e5eeb63363dca15ecb5fc98441e",
+   "localSha256": "2ade0263991a9deee73bb4ba78e577a6cf4d3a347cd20c800fa3305ad8655210",
+   "linesNotInUpstream": 7
+  },
+  {
+   "file": "component/dialog-session-delete-failed.tsx",
+   "upstreamSha256": "d3d0883cf9ca74c712a3da9fe92e4d38cffcb25765f7b8a080fb991a10b42ccb",
+   "localSha256": "3000faeaf4fc306c3a7a2e15099538a9fb6c87a8a508a1e026e1dfd63328fc1c",
+   "linesNotInUpstream": 13
+  },
+  {
+   "file": "component/dialog-session-list.tsx",
+   "upstreamSha256": "d62c1df4e13965c8c5fb6ced17a5ce2c99f12c379bfa0e972f6dc23f8ed1f3ed",
+   "localSha256": "955853faf720598e18461b40440816e4f984d3d1fca9043b29bdc708ad997d84",
+   "linesNotInUpstream": 12
+  },
+  {
+   "file": "component/dialog-session-rename.tsx",
+   "upstreamSha256": "d53c8f5c5f0d17bb7089c3a05da0c8ab841cd11a8ffca2d1ecc58316596dc9a8",
+   "localSha256": "3db62de4373c060a257598769c787ec1533f035d0174dc1a77faefa71f7bdf72",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "component/dialog-skill.tsx",
+   "upstreamSha256": "565edddc8e1a08f059b81828a58a27ce4d98863f4b2cf555f78a1252616dcd2a",
+   "localSha256": "41cb0cbf2a9a0f180047dee3c7e71ff2fb2d8acd8d9ac03e4371bdc49b4b0686",
+   "linesNotInUpstream": 5
+  },
+  {
+   "file": "component/dialog-stash.tsx",
+   "upstreamSha256": "9bd1d9683066dc021ea6fae3a7ae2b7b077662b48a6f5d534f7b6b664d98977a",
+   "localSha256": "ba2ac3be692db012759de4c3e0829c70f3564cea005c9deb403a6094080098de",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "component/dialog-status.tsx",
+   "upstreamSha256": "c058899f51f5cad825e653ac3b6e096bc351dbfb794d137123392775c69e6068",
+   "localSha256": "7f1d188bdda774cc561690ff93164042536a10cc99ba3836d912a49c585e5266",
+   "linesNotInUpstream": 13
+  },
+  {
+   "file": "component/dialog-tag.tsx",
+   "upstreamSha256": "753715c74a1a581a8715abb92af552f0a949c4121a46e519782867af410c8f3e",
+   "localSha256": "5de53110867d4f245b28375151cef58c3abe46f2f1be4a33b78c5bca1cd22ca0",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "component/dialog-theme-list.tsx",
+   "upstreamSha256": "36d440b67edc78e0dd9eceae188bfa7227de60156a8204c769c2c2fa952a1180",
+   "localSha256": "50e23db6fb7025ed1ed2f519b632a86f92ff26c26644879b75d3ae573e03bee1",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "component/dialog-variant.tsx",
+   "upstreamSha256": "18571d34ee3046bfa92e4c5156f9a15fab10bd153add8671d35126abc54da61b",
+   "localSha256": "9ca9e76fc153a3c5fc87f3c16f8314525b96be3e0ed7b914a45c7f8564aacaaf",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "component/dialog-workspace-create.tsx",
+   "upstreamSha256": "a01afe0544ac573325d58d8f06fee65918900ae13635e9f9568c8a03a4662206",
+   "localSha256": "a7fc35fa81535c5319929ca539dacd6e676359ac75bc2e594d7433771fe83ec6",
+   "linesNotInUpstream": 14
+  },
+  {
+   "file": "component/dialog-workspace-file-changes.tsx",
+   "upstreamSha256": "c1f2f529f7bde602020c79a49314c133491b26671eb640794c62393babf851dc",
+   "localSha256": "aa0963a2b602ee30ce3f2d9087967af6abadf3d0b9f7aa4362a10c92de68e985",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "component/dialog-workspace-list.tsx",
+   "upstreamSha256": "ca9570e4c5c82a603907e7f0c1b46c0e924703c3152735b767e3a93a09b54428",
+   "localSha256": "8401b1dc71f6f16daa4b45d1c1b88196c10c372b7791e1cc52bcec5b599eae97",
+   "linesNotInUpstream": 4
+  },
+  {
+   "file": "component/dialog-workspace-unavailable.tsx",
+   "upstreamSha256": "a0dac1b5f2174b351a9fd996d5f0af900c7c17cc4ab4749ea14ffa0ab7f6be13",
+   "localSha256": "6e446c333192e08bb8e841060fc6f1b0f1bf48b8ca6283f333bed2a24252b134",
+   "linesNotInUpstream": 8
+  },
+  {
+   "file": "component/error-component.tsx",
+   "upstreamSha256": "cc8ed381c64e300ec04bb36758e6fce43e3d03ab1ed04c8900ffa396a48306c1",
+   "localSha256": "43ef42b89117c239aa0a71fe287f2a33551c345691974cd2d0c45dc26f184bbf",
+   "linesNotInUpstream": 8
+  },
+  {
+   "file": "component/logo.tsx",
+   "upstreamSha256": "276457d9a75da2daee59588d96e8477a7fb4a939fec7dedf19f28b4f8103e16c",
+   "localSha256": "7a2ce150dea0f08ca128ab0f27249c4db933e0ed1042963c08217a7478592649",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "component/plugin-route-missing.tsx",
+   "upstreamSha256": "8d71d311bec21e5e259d3e2643ab6a11b98544869d9a6912bd6ffc63bca517fb",
+   "localSha256": "15f2093298e6585c49fbc190572ec0a501ca98e8f17e19b7d03ee18a815ba51a",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "component/prompt/autocomplete.tsx",
+   "upstreamSha256": "f1217e48b09cc287085f59c3ac5e26434dc22965eb656d5e0e640163de8279e5",
+   "localSha256": "79fa9c4e93a8bf6fcacc76eae4015dcf41a02fa37e27f8052edb7d275fb8c700",
+   "linesNotInUpstream": 12
+  },
+  {
+   "file": "component/prompt/index.tsx",
+   "upstreamSha256": "e8c0153b5b9dcf5b00e334d6063126dfffe5cb41333b55621d92f54e8d18639c",
+   "localSha256": "0c3af42911543af1442f8ff1cfd26095b3c7523e2761a1225d32f4440ffc9ddd",
+   "linesNotInUpstream": 119
+  },
+  {
+   "file": "component/prompt/move.tsx",
+   "upstreamSha256": "c1b31c30d3850afa3753e68a54cbbc1bee46ecd6b9ed3758ac25c7ecb190e4a0",
+   "localSha256": "1474e2c2ade22ab3fc3af8d3f71c18ad956595095a0f28c4ae555005c2defd0a",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "component/prompt/workspace.tsx",
+   "upstreamSha256": "0b8444cc5d8be9be0277d82b94e4da372ecf62a536608e66bc681b65e546f8e2",
+   "localSha256": "309e99ed42b5a8105f6bb4ce5111aab6c13fe00244514727115ddcec974c903b",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "config/index.tsx",
+   "upstreamSha256": "af04092beb5e7dc58c83708bab0d4c8c18317529acce238b5f48a4e2b319042f",
+   "localSha256": "8f25cd628bc0311ffe9652afb2256134a8f58fd46c642e0d9749392173ce4aa8",
+   "linesNotInUpstream": 14
+  },
+  {
+   "file": "config/keybind.ts",
+   "upstreamSha256": "fa7e49ea9617cf116685629b245455b78b33a6e6c6fbc388c8f7ad3b2fbf4bf2",
+   "localSha256": "7ada356c929ce2e0fb93c8899948ad5792741f647474c95f2a3a908b4f9731d3",
+   "linesNotInUpstream": 4
+  },
+  {
+   "file": "context/clipboard.tsx",
+   "upstreamSha256": "e9aa9a094d1dd13b1d0f3ce7633d0558bfc8876cdee3de2bb3af1dbebc29bcfd",
+   "localSha256": "934a215414256894966085b0a61ea899472e7bf254509c0f4514c741ce7d530c",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "context/kv.tsx",
+   "upstreamSha256": "98a532e2a6d02e0d2a9d8d171f4d1d8a4579e88df6d79902472cc47553d7591c",
+   "localSha256": "678dad0bd48883d34fd16f8c6688a60a20015f6b49b17df3a6fa6b49a79599ba",
+   "linesNotInUpstream": 1
+  },
+  {
+   "file": "context/local.tsx",
+   "upstreamSha256": "a4501acaaead3270b48ec362127390ed6c96f547c3c6daed9ce59cfae52ee9df",
+   "localSha256": "6aa666653b7129c787f10418d628ceced1a84b214ca82e5ad4a20886406b2436",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "context/sdk.tsx",
+   "upstreamSha256": "4210d75fce8ae9f884d472c07792b5482a02a74f6512356f49a0fdcafb67c61c",
+   "localSha256": "d86436b7f2ed4f97e1b9f56cf18c9b3fed22e52368678315ac14eb72f2c660ab",
+   "linesNotInUpstream": 19
+  },
+  {
+   "file": "context/sync.tsx",
+   "upstreamSha256": "452035470d52b6bb3cfd58eea9df612942510126e8f759279c46c1de4899a2ab",
+   "localSha256": "779d6ae135f79087c43abeb1e5a984964e3938ac8910f177e17b7a9327c3f25e",
+   "linesNotInUpstream": 15
+  },
+  {
+   "file": "context/theme.tsx",
+   "upstreamSha256": "ff3a6a30b40d81d1a223a1972427dbb35410e871aeac206de0badc9f493c7f79",
+   "localSha256": "2e86bb3c929a618b80d801e10f34c23bc1dbfc852f69872a866837a0031c3435",
+   "linesNotInUpstream": 11
+  },
+  {
+   "file": "context/thinking.ts",
+   "upstreamSha256": "bda03e663544a8a4346f84e02559e8b723d75291d9a001f6ecfb6c952aac914d",
+   "localSha256": "5bef8206cc04757ea91582cb907e52ebae98806ce7e2ecf43e6b5763aa7ee372",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "editor.ts",
+   "upstreamSha256": "1f5300489534f59c1e59fa387de3b8ad48199ca891e23991de9d5469840299fc",
+   "localSha256": "cf497cb490681ed8f770420a8c7bfdbfbb155daa1c97a98525e901caddf2e9bf",
+   "linesNotInUpstream": 6
+  },
+  {
+   "file": "feature-plugins/home/footer.tsx",
+   "upstreamSha256": "549fc39b71be676776130f336e6d76c2e698a131ab1c3f7e4689678199933110",
+   "localSha256": "9228ebfa2c85bd5571c1485f97e75661e37143fb1e371cde0d158987fca41801",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "feature-plugins/home/tips-view.tsx",
+   "upstreamSha256": "f01ecef2ae37d55bdd5b1b061e8604e0c2a4b35fffb84e40232c42236b759630",
+   "localSha256": "f275bd5c85d82dc11c96256979f3dd2499cedd625c72dea9a2d8ffff1cf7dc4e",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "feature-plugins/home/tips.tsx",
+   "upstreamSha256": "bf8d4c8d148cbb9ec8ab5d424f49a32c32f131c02f35fd61e0446aebd185f108",
+   "localSha256": "afb086c2d6733fd1daa736d085a29d5230874f2ecd757f010fabf4601589ee9a",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "feature-plugins/sidebar/context.tsx",
+   "upstreamSha256": "28b78f80620de763db92bee3aab6debe595ea2320c650e133a4276bd906d600a",
+   "localSha256": "da31cc66f4b926d1206e6e93b77d164f18774344dde140c9a416e2fbec6d86bc",
+   "linesNotInUpstream": 5
+  },
+  {
+   "file": "feature-plugins/sidebar/files.tsx",
+   "upstreamSha256": "49e2c691d56e7f4f7a9eecfa882388e3b19b9bcf8ba13fb932818e7f53e02161",
+   "localSha256": "fe7c598ef139dd3b8ad02aef6d98fac2ac23208a37bf648ba7461ec55aaf8bec",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "feature-plugins/sidebar/footer.tsx",
+   "upstreamSha256": "4cc399de5d61fc3d17f669347c0173b2267ad22ad4cd434dd846f49676368bbc",
+   "localSha256": "a3da679fca6926d776e2c51da59cf6c00590cb19d70291f7173bbfd9f8a5ef22",
+   "linesNotInUpstream": 7
+  },
+  {
+   "file": "feature-plugins/sidebar/lsp.tsx",
+   "upstreamSha256": "b3641ee19a164bbe67a77f92bdcc321c2d4d09fc000858a6e1e9a5c4b41420e0",
+   "localSha256": "c52d65bf20cf877a24a68fba558acba1b3dc52cc5be1c09fd7f57156bf7d348c",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "feature-plugins/sidebar/mcp.tsx",
+   "upstreamSha256": "7811bf2af39b94c3afb5af124ecbe1fbe488594ffc483a9d9e05619ca96c1297",
+   "localSha256": "666bda2c3654b1c03eee651cca293bd4b0213199152fb7fcf068de76fe767c01",
+   "linesNotInUpstream": 7
+  },
+  {
+   "file": "feature-plugins/sidebar/todo.tsx",
+   "upstreamSha256": "41538baa708c5574ce63c3c5861256eb6e7011f275bcb8ede91bc5409b1ce5a5",
+   "localSha256": "2eaf969af26c2191e15089585709899383c67dd2c2007fe44423435d4ddfd9e0",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "feature-plugins/system/diff-viewer-file-tree.tsx",
+   "upstreamSha256": "5de654577f3f063ef487a7a92f4a05f266a4dc9cf6b6ca8c18d3516f3ee6dac3",
+   "localSha256": "d78c36468e763bc7d364ae7c2c460735131cf88ee4168ce20105d4f8bfca0a06",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "feature-plugins/system/diff-viewer-ui.tsx",
+   "upstreamSha256": "66ea06c597ebe9bbe59bf0979ec7792eb3c3ec97ae9611b72fe3b632bf6beda6",
+   "localSha256": "350b4b13efe1157fcd6d6f951a809b48d430f8948e2d1cb14b8fc4f8752179e6",
+   "linesNotInUpstream": 1
+  },
+  {
+   "file": "feature-plugins/system/diff-viewer.tsx",
+   "upstreamSha256": "94863dba476bbe1d1e27c6e6d7c868085901d85e18c8b23091897dbc370fbcd8",
+   "localSha256": "8a6d2e7cb8cacf29070287a36a7805cd43bf1065ca662de2be5b7f5e83d67c29",
+   "linesNotInUpstream": 87
+  },
+  {
+   "file": "feature-plugins/system/plugins.tsx",
+   "upstreamSha256": "2efa8ab984063bf4a4aca7d6b8800bf7e3792282baa927b825c151648c577f42",
+   "localSha256": "f08dbdb3af0470af8d348c8ff45fdf8f954c3da932360729a72a783a047a3b30",
+   "linesNotInUpstream": 21
+  },
+  {
+   "file": "feature-plugins/system/which-key.tsx",
+   "upstreamSha256": "0a369c411af2b638cdcb43766a0ab75323ef3db889a6d542af0d181c6858ca2f",
+   "localSha256": "aea881d8be0d6f828fb3c0e11a5dbe990e3456e350fc45eba609e49e00c07306",
+   "linesNotInUpstream": 37
+  },
+  {
+   "file": "keymap.tsx",
+   "upstreamSha256": "af8ea46dc937346e9ec6b9df395b2bb3fae6367fe6df4c609103dab56301988a",
+   "localSha256": "0967ae76c83f60594166e695b226619036105269655a47be8ad77ec1e10cc4c0",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "plugin/adapters.tsx",
+   "upstreamSha256": "ecff9bb3a2d1acf0f4ee6d1dacf213ee059d88fa22cedced8cafa51dfb4eb353",
+   "localSha256": "84fb7cca02077eeb6af22c1ec75ec4a57641da2bead7191d2caf5b33015c1129",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "plugin/runtime.tsx",
+   "upstreamSha256": "bdc12f38844d2dc9e7b1ba3537e52dc9f43aa62fd6d837f93ba39b16ff3ec5af",
+   "localSha256": "3eff6617b4d798ca2d974d85192a80bfd8eb320b1ffc08ee3b14ef91efa74f89",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "prompt/history.tsx",
+   "upstreamSha256": "ebf619998f067afd0d0c590b98366cb8bf87a527cd0ef366679ec883084def27",
+   "localSha256": "5630445c149269cb2421ab276702f7cfe008535f18eaca09252c5b656e7942ea",
+   "linesNotInUpstream": 8
+  },
+  {
+   "file": "prompt/stash.tsx",
+   "upstreamSha256": "aeb2d7c75d89e7c90129607924feef2beb949f5b34c9e88d1a75a60e3b11c3d3",
+   "localSha256": "8f75ac715cb1b17743ba42b04cff1e6889e69e1f71856dac03cb77efafe915a4",
+   "linesNotInUpstream": 12
+  },
+  {
+   "file": "routes/session/dialog-fork-from-timeline.tsx",
+   "upstreamSha256": "4576a566c2ed74212cbeef3086bf5ba9f60f18645a355eb5adcdb43dc601a28a",
+   "localSha256": "b22e2ce22a2be1d22829e85206c5893303233b3d1345106daf7b9d9010f10550",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "routes/session/dialog-message.tsx",
+   "upstreamSha256": "ade5f236c06db375df42b2808a31437b6c22f594ff1d006a60b26179bd06c494",
+   "localSha256": "445455333d44d0a7562787a1cb28e8954d64656b15be8b6b6a4cb40dc864efb7",
+   "linesNotInUpstream": 8
+  },
+  {
+   "file": "routes/session/dialog-subagent.tsx",
+   "upstreamSha256": "44bf1a6d03539b80a2716bae7880e3ed8bf3974172fbebb336b237568d67ac32",
+   "localSha256": "08d12c9848522d3ccb7e39ceaf8de056ff08533d230f161613a082758ef7f1a5",
+   "linesNotInUpstream": 4
+  },
+  {
+   "file": "routes/session/dialog-timeline.tsx",
+   "upstreamSha256": "f2de0e76ac2293a49b41359a6986a496861ba32f4632e2ddf1656745833d1a5d",
+   "localSha256": "a2885122244832e3fedcf0b8e9f943746f185e79ec5a341a732060b2d22dcd10",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "routes/session/footer.tsx",
+   "upstreamSha256": "4cbcd0723806abf923da9b3add53aa62885c1c70ad6aa68ca96be674d904083f",
+   "localSha256": "fa5d1c48a5a8121abaddeab3691c072e7b576f68cd5c594c91d9bf772797dbcf",
+   "linesNotInUpstream": 5
+  },
+  {
+   "file": "routes/session/index.tsx",
+   "upstreamSha256": "bf7706ae0c8f1841cadf70aab74bd102ceae7d1597ba6f839f35cd073fbc17eb",
+   "localSha256": "e6ecd92d480facdee8f4091eb8f6862ce805a8e61b9988a384142547ed3d045b",
+   "linesNotInUpstream": 141
+  },
+  {
+   "file": "routes/session/permission.tsx",
+   "upstreamSha256": "c4074d9189a9ba12754bbe043abf0ee6bbd2fc459d1d97a27fc1802ce2632086",
+   "localSha256": "b1f3166631cda6edcc4c84327c42758cd380df299892d8fdbde511908a14d381",
+   "linesNotInUpstream": 36
+  },
+  {
+   "file": "routes/session/question.tsx",
+   "upstreamSha256": "18e72df817700049e31728c1837e8d6e46d4db8f62048bc69e465e38a5cee39f",
+   "localSha256": "65f3c4646eb86d94ad34f392a15e954c017bd02cf16b388c99948828179eb90e",
+   "linesNotInUpstream": 31
+  },
+  {
+   "file": "routes/session/sidebar.tsx",
+   "upstreamSha256": "9837bf1e52b033e04afc9faa625062f9808880f011728fa6ba41dfb523ca8bc1",
+   "localSha256": "848b42915ba8ad4f83cf20493b1756124b9becf81cdd6c55f495eb2ad05248eb",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "routes/session/subagent-footer.tsx",
+   "upstreamSha256": "99aae46b9f8a9863b725945ec1a568588d4c9c50203f4d2f2d67e3fbfd5f3c43",
+   "localSha256": "7f617f7dc3fe351630957c41e90123d9c2632e5150a86f4455a04e57d402405e",
+   "linesNotInUpstream": 6
+  },
+  {
+   "file": "theme/index.ts",
+   "upstreamSha256": "b78ba8e1a897bd47b9094cfba060b6fdffb2f734f936d851f8bef49515244c14",
+   "localSha256": "1236e741b1b5793ab86ba5555d72c456b12f3f9bb997c8ac6841f4c5e716c764",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "ui/dialog-alert.tsx",
+   "upstreamSha256": "9292e748d2ced8a80ca0fe5acabd2be0eed0169940f0bd996168a490dae66a90",
+   "localSha256": "9730955bac00ec1b048283877ec5e0e1955821af9ebbbab354ab6ae17ff94861",
+   "linesNotInUpstream": 4
+  },
+  {
+   "file": "ui/dialog-confirm.tsx",
+   "upstreamSha256": "9957e32b0d4bede47b9edf5cdcb3c73a456cf7ef276ab705611765185f1a6bfe",
+   "localSha256": "bd208563ebcfde813548bb3b1d079764731fb5e82fe1f9e32379dfae8d5203b7",
+   "linesNotInUpstream": 6
+  },
+  {
+   "file": "ui/dialog-export-options.tsx",
+   "upstreamSha256": "e54874b3e2c225c167c841895865f59469d52c6e9937c03c50d2923abd7e84a2",
+   "localSha256": "3eb5f4b61c184408d620edec5acba4c06beb4ff76a099b5edddf04fa6a5a5d19",
+   "linesNotInUpstream": 15
+  },
+  {
+   "file": "ui/dialog-help.tsx",
+   "upstreamSha256": "9fd344a579109ea2eadc920416535006905449f21be909e25a29c7a06d4106ac",
+   "localSha256": "3473082f395982a952131aba759a4795f7270900252ed1c9e9d64216ce76b073",
+   "linesNotInUpstream": 6
+  },
+  {
+   "file": "ui/dialog-prompt.tsx",
+   "upstreamSha256": "2786e578f29c9e80881c4fa9f6ce903597407a1c975d08ac3e22e190a8abc9d2",
+   "localSha256": "b13563d528387caccb6c3bff3498f6cd708609acbf6bbc603f4032cfd1087762",
+   "linesNotInUpstream": 6
+  },
+  {
+   "file": "ui/dialog-select.tsx",
+   "upstreamSha256": "761a6d8e16291b1265a9094c973b7f7d9e1f318b835f8d2cde537c94234d8866",
+   "localSha256": "fe246c06e46ccb3e5bef250e618d4c1ea27694f89cafa497db65b1805b16c948",
+   "linesNotInUpstream": 21
+  },
+  {
+   "file": "ui/dialog.tsx",
+   "upstreamSha256": "f2dcd7ffdb13c186a8ac415772d40606abbeaf3fadbe0ad0a15dbc599c668a07",
+   "localSha256": "cab16ec266699d7349877e005e60097f02ca158cae9049d9795051809351d516",
+   "linesNotInUpstream": 4
+  },
+  {
+   "file": "ui/toast.tsx",
+   "upstreamSha256": "4556a53ffd6472a7991e7138e12967058d9f94f71b971bd1cc9d7b4816aa43d3",
+   "localSha256": "b9bd9e65bc0f9578a307a44f548c1d5f33a9abdf65c7c90f13f61f1f1211e858",
+   "linesNotInUpstream": 2
+  },
+  {
+   "file": "util/locale.ts",
+   "upstreamSha256": "f3732973aed87dc4685cc01367023ef421d7857c34ff210a7a507ac4a11f6214",
+   "localSha256": "5a1b60dcda373558e7dc2f91c5ace62668ae99bda87eb73503b11c6bee5801aa",
+   "linesNotInUpstream": 3
+  },
+  {
+   "file": "util/selection.ts",
+   "upstreamSha256": "cf35dd79b85e4445ba5307f788e693e6a06c936dc7cd010e50e6796a1782b4cd",
+   "localSha256": "6fe6de3ab22b0604e5d85a453970011b3a2d45b1c89165caaaf8c8368116065d",
+   "linesNotInUpstream": 46
+  }
+ ],
+ "added": [
+  "LICENSE",
+  "context/clipboard-types.ts",
+  "package.json",
+  "theme/assets/uptokey.json"
+ ],
+ "removed": []
+}

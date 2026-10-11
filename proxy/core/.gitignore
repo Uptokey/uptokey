@@ -1,0 +1,12 @@
+.env
+.env.*
+node_modules/
+.uptokey/
+coverage/
+dist/
+*.log
+datasets/
+# OpenTUI frontend: canary install and local build/test outputs (large runtime binaries)
+canary/
+output/tui-*/
+output/uptokey-tui-frontend-*/

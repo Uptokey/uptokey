@@ -1,0 +1,29 @@
+[extend]
+useDefault = true
+
+# These values are deterministic test markers and tokenizer identifiers. Each
+# exception is limited to the generic API-key detector, an exact source path,
+# and the exact non-secret text. New values or files remain blocking findings.
+[[allowlists]]
+description = "Deterministic journey fixture keys"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''proxy/core/scripts/lib/journey-(?:connect|jev)\.mjs$''']
+regexes = ['''(?:fixture_key_canary_91|ts_fixture_key_4242)''']
+
+[[allowlists]]
+description = "Documented conservative tokenizer identifiers"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''proxy/core/src/(?:token-catalog|token-estimate|protocol-capability|workspace/context-projection)\.ts$''']
+regexes = ['''(?:uptokey:(?:conservative-chars4(?:\+documented-media)?)|uptokey-(?:conservative-chars4|chars4-v1|bytes-chars4-v1))''']
+
+[[allowlists]]
+description = "Localized keyboard help text"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''proxy/core/src/tui/messages/(?:de|es|it)\.ts$''']
+regexes = ['''PgUp/PgDn''']
