@@ -1,6 +1,6 @@
 {
     "schema":  "uptokey-public-source-v2",
-    "generatedAtUtc":  "2026-10-11T15:56:39.0913959Z",
+    "generatedAtUtc":  "2026-10-11T16:04:39.4611712Z",
     "sourceCommit":  "859fd4a5bfe952bb03cc54086c51034c122ba23c",
     "sourceWorkingTree":  "dirty",
     "files":  [
@@ -19,8 +19,8 @@
                   {
                       "Source":  "packaging/public-source/.github/workflows/secret-scan.yml",
                       "Destination":  ".github/workflows/secret-scan.yml",
-                      "SourceSha256":  "696229a2755a5210fb2e8c6319ae11747162338ba8fc910b9ed75e77217803b2",
-                      "Sha256":  "696229a2755a5210fb2e8c6319ae11747162338ba8fc910b9ed75e77217803b2"
+                      "SourceSha256":  "2a2ef5cbf71bc648e36ec8b4d9b7f669f0bca8cd0a31bcc6e1d46b80115c725c",
+                      "Sha256":  "2a2ef5cbf71bc648e36ec8b4d9b7f669f0bca8cd0a31bcc6e1d46b80115c725c"
                   },
                   {
                       "Source":  "packaging/public-source/.gitignore",
