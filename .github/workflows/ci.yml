@@ -1,47 +1,37 @@
-name: CI Pipeline (5 Gates)
+name: Public source CI
 
 on:
-  push:
-    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-source-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  validate:
+  build-and-test:
     name: 5-Gates Continuous Integration
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 9
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Gate 1 - Secret Scanning
-        uses: trufflesecurity/trufflehog-main-action@main
-        with:
-          path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
-
-      - name: Gate 2 - Code Quality & Lint
-        run: pnpm run lint
-
-      - name: Gate 3 - Typecheck
-        run: pnpm run typecheck
-
-      - name: Gate 4 - Automated Tests
-        run: pnpm run test
-
-      - name: Gate 5 - Monorepo Build
-        run: pnpm run build
+          node-version: 22.23.2
+          cache: npm
+          cache-dependency-path: |
+            proxy/core/package-lock.json
+            proxy/integracoes/api-instruments/package-lock.json
+            proxy/integracoes/e2-20-diagnostic/package-lock.json
+      - run: npm ci --prefix proxy/integracoes/api-instruments
+      - run: npm ci --prefix proxy/integracoes/e2-20-diagnostic
+      - run: npm ci --prefix proxy/core
+      - run: npm run verify
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run build:tui
+      - run: npm test

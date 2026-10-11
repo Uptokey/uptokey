@@ -1,0 +1,161 @@
+{
+  "upstreamName": "OpenCode TUI (packages/tui) + SDK v2 types + plugin/tui types",
+  "repository": "https://github.com/anomalyco/opencode",
+  "revision": "b471c2b4495747353af768fbf2e0790c9d820ce2",
+  "revisionDate": "2026-09-26T14:56:38-05:00",
+  "packageVersions": {
+    "tui": "1.18.32",
+    "sdk": "1.18.32",
+    "plugin": "1.18.32"
+  },
+  "treeShaPackagesTui": "101cbd080702cad4669c2d02a56aef14be68e2c0",
+  "license": "MIT",
+  "licenseFile": "vendor/LICENSE-opencode-MIT",
+  "licenseSha256": "b5c625d157735f04e1b2b7ceccee849130b554bdb23cd58db55a38a257efbbdd",
+  "copiedAt": "2026-09-30",
+  "vendoredPaths": {
+    "vendor/opencode-tui": "packages/tui/src (185 files, tree sha256 63a5258d… at copy time)",
+    "vendor/opencode-tui-tests": "packages/tui/test (reference only, excluded from tsconfig)",
+    "vendor/opencode-sdk/types.gen.ts": "packages/sdk/js/src/v2/gen/types.gen.ts (types only; runtime client replaced)",
+    "vendor/opencode-plugin/tui.ts": "packages/plugin/src/tui.ts"
+  },
+  "uptokeyShims": {
+    "vendor/opencode-core/*": "minimal re-implementations of @opencode-ai/core/{global,flag,version,open,which,flock,glob} and @opencode-ai/ui/audio stub; state in ~/.uptokey/tui"
+  },
+  "opentui": {
+    "core": "0.4.5",
+    "keymap": "0.4.5",
+    "solid": "0.4.5",
+    "license": "MIT",
+    "nativePrebuilt": "@opentui/core-win32-x64 opentui.dll (3,786,120 bytes) loaded on this host under Smart App Control"
+  },
+  "localModifications": [
+    {
+      "file": "vendor/opencode-tui/context/sdk.tsx",
+      "reason": "OpenCode HTTP/SSE client replaced by the in-process Uptokey backend (uptokey/backend); frame-window event batching kept; Events emitted in the same tick are applied in one batch (microtask), so a resync never renders a frame with messages removed",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/context/sync.tsx",
+      "reason": "Decisions raised by the Uptokey controller (metadata.uptokey) are never auto-approved by the UI auto-permission toggle; Startup milestone traced (debug log only)",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/component/dialog-provider.tsx",
+      "reason": "DialogProvider renders the Uptokey provider onboarding (setup service, masked key, discovery)",
+      "date": "2026-09-30"
+    },
+    {
+      "file": "vendor/opencode-tui/component/logo.tsx",
+      "reason": "OpenCode wordmark replaced by the Uptokey mark and wordmark",
+      "date": "2026-09-30"
+    },
+    {
+      "file": "vendor/opencode-tui/routes/session/permission.tsx",
+      "reason": "uptokey_* decisions use the Uptokey review/approval prompt; Prompt exported",
+      "date": "2026-09-30"
+    },
+    {
+      "file": "vendor/opencode-tui/routes/session/index.tsx",
+      "reason": "uptokey_* tool parts use Uptokey views; InlineTool/BlockTool exported; Plural forms chosen before translation (line/lines, question/questions)",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-plugin/index.ts",
+      "reason": "unused copy (plugin runtime is not used); kept only because it was copied with tui.ts",
+      "date": "2026-09-30"
+    },
+    {
+      "file": "vendor/opencode-tui/component/prompt/index.tsx",
+      "reason": "Folder-mention confirmation before send; localized placeholder and paste summary; slash commands on the home screen run without creating an empty conversation",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/routes/session/footer.tsx",
+      "reason": "Plural form chosen before translation (Permission/Permissions)",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/feature-plugins/sidebar/mcp.tsx",
+      "reason": "Plural form chosen before translation (error/errors)",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/component/dialog-session-list.tsx",
+      "reason": "Group labels use the interface language (Today, localized date) and translated action titles",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/util/locale.ts",
+      "reason": "Times and dates formatted in the interface language instead of the host locale",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/config/keybind.ts",
+      "reason": "Key binding descriptions looked up through tr() for the which-key overlay",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/app.tsx",
+      "reason": "Theme-mode wait bounded (waitForThemeMode 150 ms) and Uptokey commands registered; strings wrapped with tr(); waitForThemeMode bounded to 60 ms; startup milestones traced only when UPTOKEY_TUI_DEBUG_LOG is set",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/keymap.tsx",
+      "reason": "Uptokey key bindings registered alongside the upstream map",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/** (77 files)",
+      "reason": "User-visible strings wrapped with tr() by scripts/localize-vendor.mjs (English source kept as key). Exact file list, upstream/local sha256 and changed-line counts: UPSTREAM-DIFF.json (scripts/upstream-diff.mjs against the pinned clone)",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/context/theme.tsx",
+      "reason": "A built-in theme other than system is ready at once; the terminal palette query (unanswered by ConPTY) no longer holds the first frame",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/prompt/history.tsx",
+      "reason": "Prompts typed in a temporary conversation stay in memory only (never written to prompt-history.jsonl)",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/prompt/stash.tsx",
+      "reason": "Prompts stashed in a temporary conversation stay in memory only (never written to prompt-stash.jsonl)",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/component/prompt/index.tsx",
+      "reason": "A command being submitted may move the window (/projetos switches folder and shows its home) before the input is cleared: what was just sent is not stashed and restored as a draft in the next prompt",
+      "date": "2026-10-01"
+    },
+    {
+      "file": "vendor/opencode-tui/component/prompt/index.tsx",
+      "reason": "A click on the prompt padding focuses the input, and the prompt reclaims the focus when it is blurred with nothing else focused (no dialog): before, one click left the keyboard on nothing and every key was dropped",
+      "date": "2026-10-02"
+    },
+    {
+      "file": "vendor/opencode-tui/theme/assets/uptokey.json",
+      "reason": "Uptokey theme: product palette (Dodger Blue 017AFF, Neon 6C47FF, Turquoise 39C0C8, Safety Orange F96300, Wild Melon F34971, Coral FF9382, Amber F5C900, Tan CDAD7A, Celery AABB5D) on the OpenCode theme structure",
+      "date": "2026-10-02"
+    },
+    {
+      "file": "vendor/opencode-tui/theme/index.ts",
+      "reason": "Registers the uptokey theme",
+      "date": "2026-10-02"
+    },
+    {
+      "file": "vendor/opencode-tui/context/theme.tsx",
+      "reason": "Default theme is uptokey (a theme the person chose is kept)",
+      "date": "2026-10-02"
+    },
+    {
+      "file": "vendor/opencode-tui/routes/session/sidebar.tsx",
+      "reason": "The active sidebar footer fallback displays the Uptokey product wordmark with the canonical package version; upstream module identifiers and MIT notices are preserved.",
+      "date": "2026-10-02"
+    }
+  ],
+  "note": "Local modifications to vendored files are appended to localModifications with file, reason and date; unmodified files must keep upstream bytes so upstream updates can be diffed.",
+  "diffReport": "UPSTREAM-DIFF.json"
+}

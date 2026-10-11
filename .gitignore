@@ -1,49 +1,10 @@
-# Dependências e Builds
 node_modules/
 dist/
-build/
-.next/
-.out/
-target/
-
-# Configurações e Segredos Locais
+coverage/
+output/
 .env
-.env.local
-*.env
-*.pem
-*.key
-*.db
-quimera.db
-quimera.db-journal
-
-# Logs e IDE
+.env.*
 *.log
-npm-debug.log*
-.vscode/*
-!.vscode/extensions.json
-.idea/
-.DS_Store
-
-# Regras Locais de Agentes de IA (Isolamento Local)
-.clauderules
-CLAUDE.md
-.cursorrules
-.cursor/
-.windsurfrules
-.clinerules
-.roomodes
-.aider*
-AGENTS.md
-GEMINI.md
-ANTIGRAVITY.md
-.agents/
-CODEX.md
-.codexrules
-CHATGPT.md
-.chatgpt/
-KIMI.md
-.kimirules
-GROK.md
-.grokrules
-.copilot-instructions.md
-.github/copilot-instructions.md
+*.db
+*.sqlite*
+*.tsbuildinfo

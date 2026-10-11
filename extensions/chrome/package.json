@@ -1,6 +1,0 @@
-{
-  "name": "@uptokey/chrome",
-  "version": "0.1.0",
-  "description": "Extensão do Uptokey para o Google Chrome (Manifest V3)",
-  "license": "Apache-2.0"
-}

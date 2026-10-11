@@ -1,0 +1,16 @@
+src
+test
+scripts
+vendor
+sync-contract
+npm-placeholder
+node_modules
+*.log
+.env
+.env.*
+bun.lock
+package-lock.json
+tsconfig.json
+CONSISTENCY-AUDIT*.md
+.git
+packaging

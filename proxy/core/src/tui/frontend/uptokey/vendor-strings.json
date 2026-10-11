@@ -1,0 +1,3171 @@
+[
+ {
+  "text": " (select all that apply)",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": " Compaction ",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": " Directory ",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": " Error ",
+  "files": [
+   "vendor/opencode-tui/component/error-component.tsx"
+  ]
+ },
+ {
+  "text": " File ",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": " Stack trace ",
+  "files": [
+   "vendor/opencode-tui/component/error-component.tsx"
+  ]
+ },
+ {
+  "text": "· interrupted",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "(new",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "(new working copy)",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "(not answered)",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "(tab toggle)",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "# Questions",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "# Todos",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "% used",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/context.tsx"
+  ]
+ },
+ {
+  "text": "↳ Loaded",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "⋯ Loading",
+  "files": [
+   "vendor/opencode-tui/component/dialog-mcp.tsx"
+  ]
+ },
+ {
+  "text": "○ Disabled",
+  "files": [
+   "vendor/opencode-tui/component/dialog-mcp.tsx"
+  ]
+ },
+ {
+  "text": "● Tip",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/home/tips-view.tsx"
+  ]
+ },
+ {
+  "text": "✓ copied",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "✓ Enabled",
+  "files": [
+   "vendor/opencode-tui/component/dialog-mcp.tsx"
+  ]
+ },
+ {
+  "text": "Action",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "active",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/mcp.tsx",
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "Add a favorite model to use this shortcut",
+  "files": [
+   "vendor/opencode-tui/context/local.tsx"
+  ]
+ },
+ {
+  "text": "again to confirm",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "again to interrupt",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Agent",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Agent cycle",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Agent cycle reverse",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "agents",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "all",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Always allow",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "An unexpected error stopped the session.",
+  "files": [
+   "vendor/opencode-tui/component/error-component.tsx"
+  ]
+ },
+ {
+  "text": "An unknown error has occurred",
+  "files": [
+   "vendor/opencode-tui/ui/toast.tsx"
+  ]
+ },
+ {
+  "text": "and enable OpenCode Go",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "API key",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Ask anything…",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Asked",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Asking questions…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Attention notification and sound settings",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "Authorization code",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "auto",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Autocomplete",
+  "files": [
+   "vendor/opencode-tui/component/dialog-tag.tsx",
+   "vendor/opencode-tui/component/prompt/autocomplete.tsx"
+  ]
+ },
+ {
+  "text": "Automatically show which-key for pending key sequences in overlay mode",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "background",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Background subagents",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "cancel",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Cancel answer edit",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Cancel permission rejection",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Cancel workspace restore",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-unavailable.tsx"
+  ]
+ },
+ {
+  "text": "Change the workspace for the session",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Check npm registry/auth settings and try again.",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "Choose from all workspaces",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx"
+  ]
+ },
+ {
+  "text": "Choose how you want to recover this broken workspace session.",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx"
+  ]
+ },
+ {
+  "text": "Choose working tree, main branch, or last-turn changes",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Choose workspace",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx"
+  ]
+ },
+ {
+  "text": "Clear answer edit",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Clear prompt",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Click to collapse",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Click to expand",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Close dialog",
+  "files": [
+   "vendor/opencode-tui/ui/dialog.tsx"
+  ]
+ },
+ {
+  "text": "Close diff viewer",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Close help",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-help.tsx"
+  ]
+ },
+ {
+  "text": "Code",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/footer.tsx",
+   "vendor/opencode-tui/routes/session/sidebar.tsx"
+  ]
+ },
+ {
+  "text": "Collapse diff viewer item",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "commands",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Commands",
+  "files": [
+   "vendor/opencode-tui/component/command-palette.tsx"
+  ]
+ },
+ {
+  "text": "Compact session",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Complete autocomplete item",
+  "files": [
+   "vendor/opencode-tui/component/prompt/autocomplete.tsx"
+  ]
+ },
+ {
+  "text": "confirm",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Confirm",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Confirm alert",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-alert.tsx"
+  ]
+ },
+ {
+  "text": "Confirm dialog selection",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-confirm.tsx"
+  ]
+ },
+ {
+  "text": "Confirm permission rejection",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Confirm recovery option",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx"
+  ]
+ },
+ {
+  "text": "Confirm retry option",
+  "files": [
+   "vendor/opencode-tui/component/dialog-retry-action.tsx"
+  ]
+ },
+ {
+  "text": "Confirm workspace option",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-unavailable.tsx"
+  ]
+ },
+ {
+  "text": "Connect a provider to send prompts",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Connect a provider to summarize this session",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Connect from 75+ providers to use other models, including Claude, GPT, Gemini etc",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/footer.tsx"
+  ]
+ },
+ {
+  "text": "Connect provider",
+  "files": [
+   "vendor/opencode-tui/app.tsx",
+   "vendor/opencode-tui/feature-plugins/sidebar/footer.tsx"
+  ]
+ },
+ {
+  "text": "Connected",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx",
+   "vendor/opencode-tui/feature-plugins/sidebar/mcp.tsx"
+  ]
+ },
+ {
+  "text": "Context",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/context.tsx"
+  ]
+ },
+ {
+  "text": "Continue after repeated failures",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "Copied to clipboard",
+  "files": [
+   "vendor/opencode-tui/app.tsx",
+   "vendor/opencode-tui/component/dialog-provider.tsx",
+   "vendor/opencode-tui/ui/dialog.tsx",
+   "vendor/opencode-tui/util/selection.ts"
+  ]
+ },
+ {
+  "text": "Copied worktree path",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "copy",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx",
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Copy",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-message.tsx"
+  ]
+ },
+ {
+  "text": "Copy debug info",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "Copy last assistant message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Copy provider code",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Copy session transcript",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Copy the report and open a GitHub issue to help us fix this.",
+  "files": [
+   "vendor/opencode-tui/component/error-component.tsx"
+  ]
+ },
+ {
+  "text": "Copy worktree path",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Could not load orgs",
+  "files": [
+   "vendor/opencode-tui/component/dialog-console-org.tsx"
+  ]
+ },
+ {
+  "text": "Could not load project directories",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "Could not load skills",
+  "files": [
+   "vendor/opencode-tui/component/dialog-skill.tsx"
+  ]
+ },
+ {
+  "text": "create a new session",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-message.tsx"
+  ]
+ },
+ {
+  "text": "Creating a session failed. Open console for more details.",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Creating workspace failed",
+  "files": [
+   "vendor/opencode-tui/component/prompt/move.tsx",
+   "vendor/opencode-tui/component/prompt/workspace.tsx"
+  ]
+ },
+ {
+  "text": "Cursor shape. Use 'default' to preserve the terminal setting",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "Custom provider",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Date",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "Debug",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "Debug info copied to clipboard",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "Default",
+  "files": [
+   "vendor/opencode-tui/component/dialog-variant.tsx"
+  ]
+ },
+ {
+  "text": "Delegating…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "delete",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx",
+   "vendor/opencode-tui/component/dialog-session-list.tsx",
+   "vendor/opencode-tui/component/dialog-stash.tsx",
+   "vendor/opencode-tui/component/dialog-workspace-list.tsx"
+  ]
+ },
+ {
+  "text": "Delete broken session",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx"
+  ]
+ },
+ {
+  "text": "Delete the workspace and all sessions attached to it.",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx"
+  ]
+ },
+ {
+  "text": "Delete working copy?",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "Delete workspace",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx"
+  ]
+ },
+ {
+  "text": "Deleting",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "Description",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Dialog",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-prompt.tsx",
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Diff",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Diff shortcuts",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "disabled",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "Disabled",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/mcp.tsx"
+  ]
+ },
+ {
+  "text": "Disabled in configuration",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx"
+  ]
+ },
+ {
+  "text": "dismiss",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "don't show again",
+  "files": [
+   "vendor/opencode-tui/component/dialog-retry-action.tsx"
+  ]
+ },
+ {
+  "text": "Edit",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Enable or disable mouse capture (default: true)",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "Enable scroll acceleration",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "enter",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx",
+   "vendor/opencode-tui/routes/session/permission.tsx",
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Enter filename",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "error",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/mcp.tsx"
+  ]
+ },
+ {
+  "text": "Error [",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "errors",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/mcp.tsx"
+  ]
+ },
+ {
+  "text": "esc",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx",
+   "vendor/opencode-tui/component/dialog-provider.tsx",
+   "vendor/opencode-tui/component/dialog-retry-action.tsx",
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx",
+   "vendor/opencode-tui/component/dialog-status.tsx",
+   "vendor/opencode-tui/component/dialog-workspace-file-changes.tsx",
+   "vendor/opencode-tui/component/dialog-workspace-unavailable.tsx",
+   "vendor/opencode-tui/component/prompt/index.tsx",
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx",
+   "vendor/opencode-tui/routes/session/permission.tsx",
+   "vendor/opencode-tui/routes/session/question.tsx",
+   "vendor/opencode-tui/ui/dialog-alert.tsx",
+   "vendor/opencode-tui/ui/dialog-confirm.tsx",
+   "vendor/opencode-tui/ui/dialog-export-options.tsx",
+   "vendor/opencode-tui/ui/dialog-prompt.tsx",
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Existing Workspace",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx"
+  ]
+ },
+ {
+  "text": "exit shell mode",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Exit shell mode",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Exit the app",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Expand all diff viewer folders",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Expand diff viewer item",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Export Options",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "Export session transcript",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Failed to copy session transcript",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Failed to copy to clipboard",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Failed to copy URL to clipboard",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Failed to create workspace",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-list.tsx"
+  ]
+ },
+ {
+  "text": "Failed to delete project copy",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "Failed to delete session",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-list.tsx"
+  ]
+ },
+ {
+  "text": "Failed to Delete Session",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx"
+  ]
+ },
+ {
+  "text": "Failed to delete workspace",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-list.tsx",
+   "vendor/opencode-tui/component/dialog-workspace-list.tsx"
+  ]
+ },
+ {
+  "text": "Failed to export session",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Failed to fork session",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Failed to load diff",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Failed to load workspace adapters",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx"
+  ]
+ },
+ {
+  "text": "Failed to send prompt",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Failed to warp session",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx"
+  ]
+ },
+ {
+  "text": "Favorite",
+  "files": [
+   "vendor/opencode-tui/component/dialog-model.tsx"
+  ]
+ },
+ {
+  "text": "Favorite cycle",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Favorite cycle reverse",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Fetching from the web…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "file",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Filename:",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "files",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Finding files…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "First item",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "First key binding",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "First message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "focus file tree",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "for options",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "Fork",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-message.tsx"
+  ]
+ },
+ {
+  "text": "Fork session",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-fork-from-timeline.tsx",
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Formatters",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx"
+  ]
+ },
+ {
+  "text": "Full session",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-fork-from-timeline.tsx"
+  ]
+ },
+ {
+  "text": "Get started",
+  "files": [
+   "vendor/opencode-tui/routes/session/footer.tsx"
+  ]
+ },
+ {
+  "text": "Getting started",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/footer.tsx"
+  ]
+ },
+ {
+  "text": "Glob \"",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "global",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "go home",
+  "files": [
+   "vendor/opencode-tui/component/plugin-route-missing.tsx"
+  ]
+ },
+ {
+  "text": "Go to",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Go to child session",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Go to parent session",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Grep \"",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Half page down",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Half page up",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Help",
+  "files": [
+   "vendor/opencode-tui/app.tsx",
+   "vendor/opencode-tui/ui/dialog-help.tsx"
+  ]
+ },
+ {
+  "text": "Hide autocomplete",
+  "files": [
+   "vendor/opencode-tui/component/prompt/autocomplete.tsx"
+  ]
+ },
+ {
+  "text": "Home prompt max width: a positive integer for a fixed cap, or 'auto' to scale with terminal width",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "in",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "inactive",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "Include assistant metadata",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "Include thinking",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "Include tool details",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "install",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "Install plugin",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "Installed plugin, but runtime load failed. See console/logs; restart TUI to retry.",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "interrupt",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Interrupt session",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Invalid code",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Jump to last user message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Jump to message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Jump to next diff file",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Jump to next diff hunk",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Jump to previous diff file",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Jump to previous diff hunk",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Jump to the first which-key binding",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Jump to the last which-key binding",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Jump to the next diff hunk",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Jump to the previous diff hunk",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Key",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Last item",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Last key binding",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Last message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Last turn",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Leader key timeout in milliseconds",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "line",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Line down",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Line up",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "lines",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Loading diff…",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Loading orgs…",
+  "files": [
+   "vendor/opencode-tui/component/dialog-console-org.tsx"
+  ]
+ },
+ {
+  "text": "Loading project directories…",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "Loading skill…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "local",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "LSP",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/lsp.tsx",
+   "vendor/opencode-tui/routes/session/footer.tsx"
+  ]
+ },
+ {
+  "text": "LSP Servers",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx"
+  ]
+ },
+ {
+  "text": "LSPs are disabled",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/lsp.tsx"
+  ]
+ },
+ {
+  "text": "LSPs will activate as files are read",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/lsp.tsx"
+  ]
+ },
+ {
+  "text": "Main branch",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Manage workspaces",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "mark reviewed",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Mark selected file reviewed",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "match",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "matches",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "MCP",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/home/footer.tsx",
+   "vendor/opencode-tui/feature-plugins/sidebar/mcp.tsx",
+   "vendor/opencode-tui/routes/session/footer.tsx"
+  ]
+ },
+ {
+  "text": "MCP Servers",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx"
+  ]
+ },
+ {
+  "text": "MCPs",
+  "files": [
+   "vendor/opencode-tui/component/dialog-mcp.tsx"
+  ]
+ },
+ {
+  "text": "Message Actions",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-message.tsx"
+  ]
+ },
+ {
+  "text": "Message copied to clipboard!",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "message reverted",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "message text to clipboard",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-message.tsx"
+  ]
+ },
+ {
+  "text": "Model",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "Model cycle",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Model cycle reverse",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Modified Files",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/files.tsx"
+  ]
+ },
+ {
+  "text": "Move diff viewer down",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Move diff viewer up",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Move keyboard focus between the file tree and patch pane",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Move session",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx",
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Move to another project dir",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Needs auth",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/mcp.tsx"
+  ]
+ },
+ {
+  "text": "Needs authentication (run: opencode mcp auth",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx"
+  ]
+ },
+ {
+  "text": "Needs client ID",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/mcp.tsx"
+  ]
+ },
+ {
+  "text": "new",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "New session",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "New workspace",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx"
+  ]
+ },
+ {
+  "text": "Next",
+  "files": [
+   "vendor/opencode-tui/routes/session/subagent-footer.tsx"
+  ]
+ },
+ {
+  "text": "Next answer",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Next autocomplete item",
+  "files": [
+   "vendor/opencode-tui/component/prompt/autocomplete.tsx"
+  ]
+ },
+ {
+  "text": "Next child session",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Next dialog action",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Next dialog option",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-confirm.tsx"
+  ]
+ },
+ {
+  "text": "Next export option",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "next file",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "next hunk",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Next item",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Next key binding group",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Next message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Next permission option",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Next prompt history",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Next question",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Next retry option",
+  "files": [
+   "vendor/opencode-tui/component/dialog-retry-action.tsx"
+  ]
+ },
+ {
+  "text": "No assistant messages found",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "No diff provided",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "No diff!",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "No files",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer-file-tree.tsx"
+  ]
+ },
+ {
+  "text": "No Formatters",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx"
+  ]
+ },
+ {
+  "text": "No matching items",
+  "files": [
+   "vendor/opencode-tui/component/prompt/autocomplete.tsx"
+  ]
+ },
+ {
+  "text": "No MCP Servers",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx"
+  ]
+ },
+ {
+  "text": "No orgs found",
+  "files": [
+   "vendor/opencode-tui/component/dialog-console-org.tsx"
+  ]
+ },
+ {
+  "text": "No patch available for this file.",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "No Plugins",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx"
+  ]
+ },
+ {
+  "text": "No project directories found",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "No reachable bindings",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "No results found",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "No text content found in last assistant message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "No text parts found in last assistant message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "No variants available",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "None",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx"
+  ]
+ },
+ {
+  "text": "npm package name",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "of",
+  "files": [
+   "vendor/opencode-tui/routes/session/subagent-footer.tsx"
+  ]
+ },
+ {
+  "text": "ok",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-alert.tsx",
+   "vendor/opencode-tui/ui/dialog-help.tsx"
+  ]
+ },
+ {
+  "text": "Open",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/footer.tsx",
+   "vendor/opencode-tui/routes/session/dialog-subagent.tsx",
+   "vendor/opencode-tui/routes/session/sidebar.tsx"
+  ]
+ },
+ {
+  "text": "Open diff viewer",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Open docs",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Open editor",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Open every folder in the file tree",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Open without saving",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "opencode",
+  "files": [
+   "vendor/opencode-tui/component/error-component.tsx"
+  ]
+ },
+ {
+  "text": "opencode crashed",
+  "files": [
+   "vendor/opencode-tui/component/error-component.tsx"
+  ]
+ },
+ {
+  "text": "OpenCode Go is a $10 per month subscription that provides reliable access to popular open coding models with generous usage limits.",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "OpenCode includes free models so you can start immediately.",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/footer.tsx"
+  ]
+ },
+ {
+  "text": "OpenCode Zen gives you access to all the best coding models at the cheapest prices with a single API key.",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "or /redo to restore",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "OS",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "Other",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Package has no TUI target to load in this app.",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "Page diff viewer down",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Page diff viewer up",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Page down",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx",
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Page key bindings down",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Page key bindings up",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Page the which-key panel down",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Page the which-key panel up",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Page up",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx",
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Parent",
+  "files": [
+   "vendor/opencode-tui/routes/session/subagent-footer.tsx"
+  ]
+ },
+ {
+  "text": "Paste",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Patch",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Patch failed",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Patterns",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Permission",
+  "files": [
+   "vendor/opencode-tui/routes/session/footer.tsx",
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Permission required",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Permissions",
+  "files": [
+   "vendor/opencode-tui/routes/session/footer.tsx"
+  ]
+ },
+ {
+  "text": "pin/unpin",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-list.tsx"
+  ]
+ },
+ {
+  "text": "Plugin package name is required",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "Plugin runtime is not available.",
+  "files": [
+   "vendor/opencode-tui/plugin/runtime.tsx"
+  ]
+ },
+ {
+  "text": "Plugins",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx",
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "plugins.install is only available in plugin context",
+  "files": [
+   "vendor/opencode-tui/plugin/adapters.tsx"
+  ]
+ },
+ {
+  "text": "Popular providers",
+  "files": [
+   "vendor/opencode-tui/component/dialog-model.tsx"
+  ]
+ },
+ {
+  "text": "Preparing edit…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Preparing patch…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Preparing write…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Press",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx",
+   "vendor/opencode-tui/ui/dialog-export-options.tsx",
+   "vendor/opencode-tui/ui/dialog-help.tsx"
+  ]
+ },
+ {
+  "text": "Prev",
+  "files": [
+   "vendor/opencode-tui/routes/session/subagent-footer.tsx"
+  ]
+ },
+ {
+  "text": "Previous answer",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Previous autocomplete item",
+  "files": [
+   "vendor/opencode-tui/component/prompt/autocomplete.tsx"
+  ]
+ },
+ {
+  "text": "Previous child session",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Previous dialog action",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Previous dialog option",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-confirm.tsx"
+  ]
+ },
+ {
+  "text": "previous file",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "previous hunk",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Previous item",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Previous key binding group",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Previous message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Previous permission option",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Previous prompt history",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Previous question",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Previous retry option",
+  "files": [
+   "vendor/opencode-tui/component/dialog-retry-action.tsx"
+  ]
+ },
+ {
+  "text": "processing…",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-prompt.tsx"
+  ]
+ },
+ {
+  "text": "Prompt",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Prompt size settings",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "Prompt textarea max height",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "Provider",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Provider id",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Provider ids must start with a lowercase letter or number and only use lowercase letters, numbers, hyphens, and underscores",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Providers",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "question",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Question",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "questions",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "QUEUED",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Quit the diff viewer",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Read",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Reading file…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Redo",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "refresh",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "Reject permission",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Reject question",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Remove editor context",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "rename",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-list.tsx"
+  ]
+ },
+ {
+  "text": "Rename session",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Rename Session",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-rename.tsx"
+  ]
+ },
+ {
+  "text": "Report copied — paste it into a new GitHub issue.",
+  "files": [
+   "vendor/opencode-tui/component/error-component.tsx"
+  ]
+ },
+ {
+  "text": "Restore broken session",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx"
+  ]
+ },
+ {
+  "text": "Restore to new workspace",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx"
+  ]
+ },
+ {
+  "text": "Restore workspace",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-unavailable.tsx"
+  ]
+ },
+ {
+  "text": "results)",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "return",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "Revert",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-message.tsx"
+  ]
+ },
+ {
+  "text": "Review",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Scroll acceleration settings",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "Scroll key bindings down",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Scroll key bindings up",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Scroll the which-key panel down",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Scroll the which-key panel up",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Search",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Search skills…",
+  "files": [
+   "vendor/opencode-tui/component/dialog-skill.tsx"
+  ]
+ },
+ {
+  "text": "Searching content…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Searching web…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "select",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx",
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Select agent",
+  "files": [
+   "vendor/opencode-tui/component/dialog-agent.tsx"
+  ]
+ },
+ {
+  "text": "Select answer",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Select auth method",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Select autocomplete item",
+  "files": [
+   "vendor/opencode-tui/component/prompt/autocomplete.tsx"
+  ]
+ },
+ {
+  "text": "Select item",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-select.tsx"
+  ]
+ },
+ {
+  "text": "Select permission option",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Select the next changed file in file-tree order",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Select the previous changed file in file-tree order",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Session",
+  "files": [
+   "vendor/opencode-tui/app.tsx",
+   "vendor/opencode-tui/component/prompt/index.tsx",
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Session ID",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "Session transcript copied to clipboard!",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Session unshared successfully",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Sessions",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-list.tsx"
+  ]
+ },
+ {
+  "text": "Share this when reporting an issue.",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "Share URL copied to clipboard!",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Shell",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Shell command",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Shell mode",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Show changes compared to main branch",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Show changes from the last assistant turn",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Show command palette",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Show current git changes",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Show key bindings",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Show keyboard shortcuts with",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Show more diff viewer shortcuts",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Show or hide the file tree sidebar",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Show the next which-key group",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Show the previous which-key group",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Skill \"",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Skills",
+  "files": [
+   "vendor/opencode-tui/component/dialog-skill.tsx",
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "space",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "spent",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/context.tsx"
+  ]
+ },
+ {
+  "text": "Stash",
+  "files": [
+   "vendor/opencode-tui/component/dialog-stash.tsx"
+  ]
+ },
+ {
+  "text": "Stash list",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Stash pop",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Stash prompt",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Status",
+  "files": [
+   "vendor/opencode-tui/component/dialog-status.tsx"
+  ]
+ },
+ {
+  "text": "Subagent",
+  "files": [
+   "vendor/opencode-tui/routes/session/subagent-footer.tsx"
+  ]
+ },
+ {
+  "text": "Subagent Actions",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-subagent.tsx"
+  ]
+ },
+ {
+  "text": "submit",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx",
+   "vendor/opencode-tui/ui/dialog-prompt.tsx"
+  ]
+ },
+ {
+  "text": "Submit answer",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Submit answer edit",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "Submit dialog prompt",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-prompt.tsx"
+  ]
+ },
+ {
+  "text": "Submit prompt",
+  "files": [
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Suggested",
+  "files": [
+   "vendor/opencode-tui/component/command-palette.tsx"
+  ]
+ },
+ {
+  "text": "Suspend terminal",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "switch",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-list.tsx"
+  ]
+ },
+ {
+  "text": "Switch agent",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Switch between one selected patch and all patches",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Switch between split and unified diff layout",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Switch diff viewer focus",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Switch diff viewer source",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Switch model",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Switch model variant",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Switch org",
+  "files": [
+   "vendor/opencode-tui/app.tsx",
+   "vendor/opencode-tui/component/dialog-console-org.tsx"
+  ]
+ },
+ {
+  "text": "Switch session",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "switch source",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Switch source",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Switch theme",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Switch which-key between dock and overlay mode",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "System",
+  "files": [
+   "vendor/opencode-tui/app.tsx",
+   "vendor/opencode-tui/feature-plugins/home/tips.tsx",
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx",
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "tab",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx",
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "Tell OpenCode what to do differently",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Terminal",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "Terminal cursor settings",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "The current model does not support any variants.",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "The current session was deleted",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "the subagent's session",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-subagent.tsx"
+  ]
+ },
+ {
+  "text": "Themes",
+  "files": [
+   "vendor/opencode-tui/component/dialog-theme-list.tsx"
+  ]
+ },
+ {
+  "text": "Thinking",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "This keeps the session running despite repeated failures.",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "This only stores a credential. Configure the provider in opencode.json to use it.",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "This session is attached to a workspace that is no longer available.",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-unavailable.tsx"
+  ]
+ },
+ {
+  "text": "This will allow the following patterns until OpenCode is restarted",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "This working copy has file changes. Do you want to delete it anyway?",
+  "files": [
+   "vendor/opencode-tui/component/dialog-move-session.tsx"
+  ]
+ },
+ {
+  "text": "Timeline",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-timeline.tsx"
+  ]
+ },
+ {
+  "text": "to confirm",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "to confirm,",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "to get a key",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "to see all available actions and commands in any context.",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-help.tsx"
+  ]
+ },
+ {
+  "text": "to toggle,",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "Today",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-list.tsx"
+  ]
+ },
+ {
+  "text": "Todo",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/todo.tsx"
+  ]
+ },
+ {
+  "text": "Todo update failed",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "toggle",
+  "files": [
+   "vendor/opencode-tui/component/dialog-mcp.tsx",
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx",
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Toggle console",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Toggle debug panel",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Toggle diff viewer file tree",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Toggle diff viewer item",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Toggle diff viewer split or unified view",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Toggle export option",
+  "files": [
+   "vendor/opencode-tui/ui/dialog-export-options.tsx"
+  ]
+ },
+ {
+  "text": "Toggle install scope",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/plugins.tsx"
+  ]
+ },
+ {
+  "text": "Toggle key bindings layout",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Toggle MCPs",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Toggle pending key preview",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "Toggle permission fullscreen",
+  "files": [
+   "vendor/opencode-tui/routes/session/permission.tsx"
+  ]
+ },
+ {
+  "text": "Toggle reviewed state for the selected file",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Toggle selected diff file reviewed",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Toggle session scrollbar",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Toggle single patch view",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Toggle which-key overlay",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/which-key.tsx"
+  ]
+ },
+ {
+  "text": "tokens",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/sidebar/context.tsx"
+  ]
+ },
+ {
+  "text": "Try to restore this session into a new workspace.",
+  "files": [
+   "vendor/opencode-tui/component/dialog-session-delete-failed.tsx"
+  ]
+ },
+ {
+  "text": "TUI keybinding overrides",
+  "files": [
+   "vendor/opencode-tui/config/keybind.ts"
+  ]
+ },
+ {
+  "text": "TUI scroll speed",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "Type your own answer",
+  "files": [
+   "vendor/opencode-tui/routes/session/question.tsx"
+  ]
+ },
+ {
+  "text": "undo messages and file changes",
+  "files": [
+   "vendor/opencode-tui/routes/session/dialog-message.tsx"
+  ]
+ },
+ {
+  "text": "Undo previous message",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Unknown plugin route:",
+  "files": [
+   "vendor/opencode-tui/component/plugin-route-missing.tsx"
+  ]
+ },
+ {
+  "text": "Unshare session",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Update failed",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Update Failed",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Updating todos…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Use the local project",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx"
+  ]
+ },
+ {
+  "text": "Variant cycle",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "VCS",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Version",
+  "files": [
+   "vendor/opencode-tui/component/dialog-debug.tsx"
+  ]
+ },
+ {
+  "text": "View all workspaces",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx"
+  ]
+ },
+ {
+  "text": "View debug info",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "View status",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "view subagents",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Waiting for authorization…",
+  "files": [
+   "vendor/opencode-tui/component/dialog-provider.tsx"
+  ]
+ },
+ {
+  "text": "Warp",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-create.tsx",
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "WebFetch",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Whether the cursor blinks. Has no effect when style is 'default'",
+  "files": [
+   "vendor/opencode-tui/config/index.tsx"
+  ]
+ },
+ {
+  "text": "Working tree",
+  "files": [
+   "vendor/opencode-tui/feature-plugins/system/diff-viewer.tsx"
+  ]
+ },
+ {
+  "text": "Workspace",
+  "files": [
+   "vendor/opencode-tui/app.tsx",
+   "vendor/opencode-tui/component/prompt/index.tsx"
+  ]
+ },
+ {
+  "text": "Workspace Unavailable",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-unavailable.tsx"
+  ]
+ },
+ {
+  "text": "Workspaces",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-list.tsx"
+  ]
+ },
+ {
+  "text": "Would you like to restore this session into a new workspace?",
+  "files": [
+   "vendor/opencode-tui/component/dialog-workspace-unavailable.tsx"
+  ]
+ },
+ {
+  "text": "Write",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ },
+ {
+  "text": "Write heap snapshot",
+  "files": [
+   "vendor/opencode-tui/app.tsx"
+  ]
+ },
+ {
+  "text": "Writing command…",
+  "files": [
+   "vendor/opencode-tui/routes/session/index.tsx"
+  ]
+ }
+]

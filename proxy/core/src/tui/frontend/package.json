@@ -1,0 +1,28 @@
+{
+  "name": "@uptokey/tui-frontend",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "Uptokey terminal frontend (OpenTUI/Solid, adapted from OpenCode, MIT). Runs on Bun; the core keeps its own Node runtime.",
+  "scripts": {
+    "start": "bun run uptokey/main.tsx",
+    "typecheck": "bun x tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@opentui/core": "0.4.5",
+    "@opentui/keymap": "0.4.5",
+    "@opentui/solid": "0.4.5",
+    "clipboardy": "4.0.0",
+    "diff": "8.0.2",
+    "effect": "4.0.0-beta.83",
+    "fuzzysort": "3.1.0",
+    "opentui-spinner": "0.0.7",
+    "remeda": "2.26.0",
+    "solid-js": "1.9.10",
+    "strip-ansi": "7.1.2"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.13",
+    "typescript": "5.8.2"
+  }
+}

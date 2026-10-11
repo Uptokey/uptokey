@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["bun"],
+    "allowImportingTsExtensions": true,
+    "allowJs": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "noUncheckedIndexedAccess": false,
+    "verbatimModuleSyntax": false,
+    "paths": {
+      "@opencode-ai/sdk/v2": ["./vendor/opencode-sdk/index.ts"],
+      "@opencode-ai/plugin/tui": ["./vendor/opencode-plugin/tui.ts"],
+      "@opencode-ai/core/global": ["./vendor/opencode-core/global.ts"],
+      "@opencode-ai/core/flag/flag": ["./vendor/opencode-core/flag.ts"],
+      "@opencode-ai/core/installation/version": ["./vendor/opencode-core/version.ts"],
+      "@opencode-ai/core/open": ["./vendor/opencode-core/open.ts"],
+      "@opencode-ai/core/util/which": ["./vendor/opencode-core/which.ts"],
+      "@opencode-ai/core/util/flock": ["./vendor/opencode-core/flock.ts"],
+      "@opencode-ai/core/util/glob": ["./vendor/opencode-core/glob.ts"],
+      "@opencode-ai/ui/audio/*": ["./vendor/opencode-core/audio.ts"]
+    }
+  },
+  "include": ["vendor/**/*.ts", "vendor/**/*.tsx", "uptokey/**/*.ts", "uptokey/**/*.tsx"],
+  "exclude": ["node_modules", "vendor/opencode-tui-tests", "**/opencode-plugin/index.ts"]
+}

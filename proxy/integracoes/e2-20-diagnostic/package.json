@@ -1,0 +1,32 @@
+{
+  "name": "@uptokey/e2-20-diagnostic",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Additive Uptokey product adapter: opt-in loopback DiagnosticSession + W5 adapter. Default OFF. No global CA/DNS. Does not mutate sync-contract, proxy-local core, or PWA.",
+  "exports": {
+    ".": "./src/w5-diagnostic-adapter.js",
+    "./session": "./src/diagnostic-session.js",
+    "./contracts": "./contracts/diagnostic.js",
+    "./sanitize": "./src/sanitize.js",
+    "./ephemeral-ca": "./src/ephemeral-ca.js"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.mjs",
+    "check:mitmproxy-version": "node mitmproxy-profile/check-version.mjs"
+  },
+  "dependencies": {
+    "@peculiar/x509": "1.14.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "uptokey",
+    "diagnostic",
+    "mitm",
+    "loopback",
+    "opt-in"
+  ],
+  "license": "AGPL-3.0-or-later"
+}
