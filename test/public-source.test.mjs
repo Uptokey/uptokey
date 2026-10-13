@@ -7,6 +7,8 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = resolve(root, "proxy/core/dist/cli.js");
+const projectedPackage = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+const corePackage = JSON.parse(readFileSync(resolve(root, "proxy/core/package.json"), "utf8"));
 
 function run(...args) {
   const result = spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: "utf8", timeout: 30_000, env: { ...process.env, NO_COLOR: "1" } });
@@ -15,7 +17,8 @@ function run(...args) {
 }
 
 test("compiled public CLI reports the projected release version", () => {
-  assert.match(run("version"), /0\.1\.0-beta\.10/);
+  assert.equal(projectedPackage.version, corePackage.version);
+  assert.equal(run("version").trim(), `v${projectedPackage.version}`);
 });
 
 test("compiled public CLI exposes the canonical AGPL license", () => {
@@ -33,7 +36,8 @@ test("public entry documentation uses the current npm command", () => {
 test("portable TUI build is tied to the public source version and upstream revision", () => {
   const info = JSON.parse(readFileSync(resolve(root, "proxy/core/dist/tui/BUILD_INFO.json"), "utf8"));
   const upstream = JSON.parse(readFileSync(resolve(root, "proxy/core/src/tui/frontend/UPSTREAM.json"), "utf8"));
-  assert.equal(info.version, "0.1.0-beta.10");
+  assert.equal(projectedPackage.version, corePackage.version);
+  assert.equal(info.version, projectedPackage.version);
   assert.equal(info.upstream, upstream.revision);
   assert.equal(info.platform, "portable");
 });

@@ -9,7 +9,7 @@ type Payload = Event
 
 interface Seen {
   info: string
-  parts: Map<string, { json: string; text?: string }>
+  parts: Map<string, { json?: string; text?: string; output?: string; metadata?: string }>
 }
 
 export interface MirrorResult {
@@ -75,7 +75,7 @@ export class SessionMirror {
       if (!known || known.info !== info) {
         events.push({ id: this.id(), type: "message.updated", properties: { sessionID: this.sessionID, info: message.info } } as Payload)
       }
-      const parts = known?.parts ?? new Map<string, { json: string; text?: string }>()
+      const parts = known?.parts ?? new Map<string, { json?: string; text?: string; output?: string; metadata?: string }>()
       const nextPartIds = new Set(message.parts.map((part) => part.id))
       for (const partID of [...parts.keys()]) {
         if (nextPartIds.has(partID)) continue
@@ -83,15 +83,21 @@ export class SessionMirror {
         parts.delete(partID)
       }
       for (const part of message.parts) {
-        const json = JSON.stringify(part)
         const previous = parts.get(part.id)
-        if (previous?.json === json) continue
         const text = part.type === "text" || part.type === "reasoning" ? part.text : undefined
+        const output = part.type === "tool" && part.state.status === "completed" ? part.state.output : undefined
+        // History text is immutable between updates. Serialize all non-text fields, but never
+        // reserialize megabytes of unchanged text (or the old prefix for every streaming delta).
+        const metadata = text !== undefined ? JSON.stringify({ ...part, text: undefined })
+          : output !== undefined && part.type === "tool" ? JSON.stringify({ ...part, state: { ...part.state, output: undefined } }) : undefined
+        const json = text === undefined && output === undefined ? JSON.stringify(part) : undefined
+        if (text !== undefined ? previous?.text === text && previous.metadata === metadata
+          : output !== undefined ? previous?.output === output && previous.metadata === metadata : previous?.json === json) continue
         const growth =
           previous && previous.text !== undefined && text !== undefined && text.length > previous.text.length && text.startsWith(previous.text)
             ? text.slice(previous.text.length)
             : undefined
-        const onlyTextChanged = growth !== undefined && JSON.stringify({ ...part, text: previous!.text }) === previous!.json
+        const onlyTextChanged = growth !== undefined && metadata === previous!.metadata
         if (onlyTextChanged) {
           events.push({
             id: this.id(),
@@ -101,7 +107,7 @@ export class SessionMirror {
         } else {
           events.push({ id: this.id(), type: "message.part.updated", properties: { sessionID: this.sessionID, part: part as Part } } as Payload)
         }
-        parts.set(part.id, { json, ...(text !== undefined ? { text } : {}) })
+        parts.set(part.id, text !== undefined ? { text, metadata } : output !== undefined ? { output, metadata } : { json })
       }
       this.seen.set(message.info.id, { info, parts })
     }

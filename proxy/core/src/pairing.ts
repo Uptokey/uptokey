@@ -1,11 +1,11 @@
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, randomUUID, timingSafeEqual, verify } from "node:crypto";
 import type { SecretStore } from "./secret-store.ts";
 import { normalizeClientName } from "./client-name.ts";
 import { parseWorkspacePublicJwk, type BrowserPublicJwk } from "./workspace/browser-session.ts";
 import { recordClientEnrollment, registrationKey, type ClientEnrollmentPath } from "./workspace/client-registration.ts";
 import { parsePairingAudience, type PairingAudience } from "@uptokey/sync-contract/client-keys";
 import {serialClientAuthority} from "./client-authority-lock.ts";
-import {browserEnrollmentKey} from "./workspace/browser-enrollment.ts";
+import {browserEnrollmentKey,isPublicPwaOrigin} from "./workspace/browser-enrollment.ts";
 
 export const PAIRING_TTL_MS = 5 * 60 * 1_000;
 export const MAX_PENDING_PAIRINGS = 20;
@@ -14,6 +14,8 @@ export interface PairingChallenge {
   id: string;
   userCode: string;
   expiresAt: string;
+  /** Present only for explicit public-PWA pairing; signed by its admitted key. */
+  nonce?: string;
 }
 
 interface PendingPairing extends PairingChallenge {
@@ -21,6 +23,7 @@ interface PendingPairing extends PairingChallenge {
   context?: ContextPairing;
   account?: AccountPairing;
   browserOrigin?: string;
+  publicJwk?: BrowserPublicJwk;
   clientName: string;
   audience: PairingAudience | 'pwa';
   approved: boolean;
@@ -83,9 +86,14 @@ export class PairingService {
     this.wallNow = wallNow;
   }
 
-  create(clientName: string, audience: PairingAudience = "legacy", browserOrigin?: string): PairingChallenge {
+  create(clientName: string, audience: PairingAudience = "legacy", browserOrigin?: string, publicJwk?: unknown): PairingChallenge {
     const admittedAudience = parsePairingAudience(audience);
-    if (browserOrigin !== undefined && (admittedAudience !== 'browser-extension' || !/^chrome-extension:\/\/[a-p]{32}$/.test(browserOrigin))) throw new Error('pairing_origin_invalid');
+    if (admittedAudience === 'pwa' && !isPublicPwaOrigin(browserOrigin) || browserOrigin !== undefined && !(
+      admittedAudience === 'browser-extension' && /^chrome-extension:\/\/[a-p]{32}$/.test(browserOrigin) || admittedAudience === 'pwa' && isPublicPwaOrigin(browserOrigin)
+    )) throw new Error('pairing_origin_invalid');
+    if (publicJwk !== undefined && admittedAudience !== 'pwa') throw Error('pairing_key_invalid');
+    if (admittedAudience === 'pwa' && publicJwk === undefined) throw Error('pairing_key_required');
+    const key = admittedAudience === 'pwa' ? parseWorkspacePublicJwk(publicJwk) : undefined;
     this.pruneExpired();
     if (this.pending.size >= MAX_PENDING_PAIRINGS) throw new Error("pairing_capacity_exceeded");
     const normalizedName = normalizeClientName(clientName);
@@ -98,10 +106,12 @@ export class PairingService {
       clientName: normalizedName,
       audience: admittedAudience,
       ...(browserOrigin ? { browserOrigin } : {}),
+      ...(key ? { publicJwk: key } : {}),
       expiresAt: new Date(wall + PAIRING_TTL_MS).toISOString(),
       approved: false,
       deadline: observed + PAIRING_TTL_MS
     };
+    if(key)challenge.nonce=`uptokey-public-pwa-pairing-v1:${challenge.id}:${createHash('sha256').update(JSON.stringify([admittedAudience,browserOrigin,key])).digest('hex')}:${randomBytes(32).toString('base64url')}`;
     this.pending.set(challenge.id, challenge);
     return this.publicChallenge(challenge);
   }
@@ -185,13 +195,19 @@ export class PairingService {
    * is the human gesture that authorizes enrollment; later consents are per-plan
    * signatures bound to principal/project/plan digest.
    */
-  async consume(id: string, publicJwk?: unknown, browserOrigin?: string): Promise<PairedClient | undefined> {
+  async consume(id: string, publicJwk?: unknown, browserOrigin?: string, signature?: unknown): Promise<PairedClient | undefined> {
     const key = publicJwk === undefined ? undefined : parseWorkspacePublicJwk(publicJwk);
     return this.exclusive(async () => {
       const challenge = this.active(id);
       if (!challenge?.approved || challenge.purpose || challenge.browserOrigin !== browserOrigin) return undefined;
-      const paired = await provisionClient(this.secrets, challenge.clientName, undefined, "pairing", parsePairingAudience(challenge.audience), key, browserOrigin);
-      if(key&&browserOrigin&&challenge.audience==='browser-extension') {
+      if(challenge.audience==='pwa') {
+        if(!key)throw Error('pairing_key_required');
+        if(JSON.stringify(key)!==JSON.stringify(challenge.publicJwk)||!challenge.nonce||typeof signature!=='string'||!/^[A-Za-z0-9_-]{86}$/.test(signature))throw Error('pairing_proof_invalid');
+        const bytes=Buffer.from(signature,'base64url');
+        if(bytes.length!==64||bytes.toString('base64url')!==signature||!verify('sha256',Buffer.from(challenge.nonce),{key:createPublicKey({key:{...key},format:'jwk'}),dsaEncoding:'ieee-p1363'},bytes))throw Error('pairing_proof_invalid');
+      }else if(signature!==undefined)throw Error('pairing_proof_invalid');
+      const paired = await provisionClient(this.secrets, challenge.clientName, challenge.audience==='pwa'?12*60*60*1000:undefined, "pairing", parsePairingAudience(challenge.audience), key, browserOrigin);
+      if(key&&browserOrigin&&(challenge.audience==='browser-extension'||challenge.audience==='pwa')) {
         try {
           await serialClientAuthority(this.secrets,'browser-enrollment:'+browserEnrollmentKey(browserOrigin,key),async()=>{
             const index=browserEnrollmentKey(browserOrigin,key);
@@ -201,6 +217,12 @@ export class PairingService {
             await this.secrets.set(index,paired.clientId);
           });
         } catch(error) {await revokePairedClientAsAdministrator(this.secrets,paired.clientId);throw error;}
+      }
+      // Vault I/O may outlive the approval window. Do not return newly issued
+      // authority after its original one-use challenge has expired.
+      if(challenge.audience==='pwa'&&!this.active(id)) {
+        await revokePairedClientAsAdministrator(this.secrets,paired.clientId);
+        throw Error('pairing_invalid_or_expired');
       }
       this.pending.delete(id);
       return paired;
@@ -256,7 +278,7 @@ export class PairingService {
   }
 
   private publicChallenge(challenge: PendingPairing): PairingChallenge {
-    return { id: challenge.id, userCode: challenge.userCode, expiresAt: challenge.expiresAt };
+    return { id: challenge.id, userCode: challenge.userCode, expiresAt: challenge.expiresAt, ...(challenge.nonce?{nonce:challenge.nonce}:{}) };
   }
 }
 
@@ -270,6 +292,8 @@ async function provisionClient(secrets: SecretStore, clientName: string, ttlMs: 
   // The terminal audience is key-bound: W5 consent needs the enrolled P-256 key, and a bearer
   // alone must not become a TUI identity. Checked before any vault write.
   if (admittedAudience === "tui" && !workspaceKey) throw new Error("pairing_key_required");
+  if (admittedAudience === 'pwa' && (!isPublicPwaOrigin(browserOrigin)||enrolledVia!=='pairing')) throw Error('pairing_origin_invalid');
+  if (admittedAudience === 'pwa' && !workspaceKey) throw Error('pairing_key_required');
   const normalizedName = normalizeClientName(clientName);
   if (!normalizedName) throw new Error("pairing_client_name_required");
   if (ttlMs !== undefined && (!Number.isSafeInteger(ttlMs) || ttlMs < 60_000 || ttlMs > 24 * 60 * 60 * 1_000)) throw new Error("pairing_ttl_invalid");

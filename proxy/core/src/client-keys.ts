@@ -13,7 +13,7 @@ import { canonicalJson } from "@uptokey/sync-contract/canonical";
 import { readClientRegistration, type StoredClientRegistration } from "./workspace/client-registration.ts";
 import { serialClientAuthority as serialMutation } from './client-authority-lock.ts';
 import { sharedSinkAuthority } from './workspace/sink-authority.ts';
-import {browserEnrollmentKey} from './workspace/browser-enrollment.ts';
+import {browserEnrollmentKey,isPublicPwaOrigin} from './workspace/browser-enrollment.ts';
 
 export type ClientKeyError =
   | "token_invalid"
@@ -91,7 +91,8 @@ async function saveOperation(secrets: SecretStore, operationId: string, operatio
 async function hasBrowserSessionLease(secrets: SecretStore, clientId: string): Promise<boolean> {
   const registration = await readClientRegistration(secrets, clientId);
   if(registration?.audience === "pwa" && registration.enrolledVia === "browser-session")return true;
-  if(registration?.audience !== 'browser-extension'||registration.enrolledVia !== 'pairing'||!registration.browserOrigin)return false;
+  if(!registration||registration.enrolledVia !== 'pairing'||!registration.browserOrigin||
+    !(registration.audience === 'browser-extension'||registration.audience === 'pwa'&&isPublicPwaOrigin(registration.browserOrigin)))return false;
   const raw=await secrets.get('local:client:'+clientId+':workspace-key');
   if(!raw)return false;
   try{return await secrets.get(browserEnrollmentKey(registration.browserOrigin,JSON.parse(raw)))===clientId;}catch{return false;}
@@ -589,13 +590,14 @@ async function revokeClientKeyLocked(secrets: SecretStore, clientId: string, exp
   return (await clientKeyViewLocked(secrets, clientId))!;
 }
 
-/** Snapshot a previously approved Chrome identity. A proof never enrolls an unknown client. */
+/** Snapshot a previously approved browser identity. A proof never enrolls an unknown client. */
 export async function pairedBrowserSessionAuthority(secrets:SecretStore,clientId:string,origin:string,publicKey:string,now=Date.now()):Promise<string> {
  return serialMutation(secrets,'client:'+clientId,()=>pairedBrowserSessionAuthorityLocked(secrets,clientId,origin,publicKey,now));
 }
 async function pairedBrowserSessionAuthorityLocked(secrets:SecretStore,clientId:string,origin:string,publicKey:string,now:number):Promise<string> {
  const registration=await readClientRegistration(secrets,clientId);
- if(registration?.audience!=='browser-extension'||registration.enrolledVia!=='pairing'||registration.browserOrigin!==origin)throw Error('browser_enrollment_rejected');
+ const audience=isPublicPwaOrigin(origin)?'pwa':'browser-extension';
+ if(registration?.audience!==audience||registration.enrolledVia!=='pairing'||registration.browserOrigin!==origin)throw Error('browser_enrollment_rejected');
  const storedKey=await secrets.get('local:client:'+clientId+':workspace-key');
  const token=await secrets.get(tokenKey(clientId));
  if(storedKey!==publicKey||!token||parseClientTokenFormat(token)!==clientId||await secrets.get(browserEnrollmentKey(origin,JSON.parse(publicKey)))!==clientId)throw Error('browser_enrollment_rejected');

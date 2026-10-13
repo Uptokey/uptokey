@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import assert from "node:assert/strict";
 import { findExecutable, openPty } from "./lib/pty-session.mjs";
+import { resolvePortableRuntime } from "../src/tui/portable-runtime.mjs";
 import { connectJourney } from "./lib/journey-connect.mjs";
 import { editJourney } from "./lib/journey-edit.mjs";
 import { commandsJourney } from "./lib/journey-commands.mjs";
@@ -136,11 +137,21 @@ async function run(name, body, extra = [], lang = "pt-BR") {
   const bundle = process.env.UPTOKEY_FRONTEND_BUNDLE;
   const env = childEnv(fixture.info, fixture.work, lang);
   if(name==='linear'){env.UPTOKEY_FIXTURE_LINEAR='1';env.UPTOKEY_LANG='en'}
-  const open = (dir = bundle) => name === "linear"
+  const open = async (dir = bundle) => {
+    if (dir && name !== "linear") {
+      const info = JSON.parse(await readFile(join(dir, "BUILD_INFO.json"), "utf8"));
+      if (info.platform === "portable") {
+        const runtime = resolvePortableRuntime(dir);
+        return openPty({ file: runtime.runtime, args: [join(core, "scripts/lib/tui-packaged-fixture.mjs")], cwd: core,
+          env: { ...env, ...runtime.env, UPTOKEY_FRONTEND_BUNDLE: resolve(dir), OTUI_TREE_SITTER_WORKER_PATH: join(dir, "opentui-tree-sitter-worker.js"), UPTOKEY_JS_DEBUG_ADAPTER: join(core, "vendor", "js-debug", "src", "dapDebugServer.js") } });
+      }
+    }
+    return name === "linear"
     ? openPty({ file: process.execPath, args: dir ? [join(dir, "fixture-linear-entry.js")] : ["--experimental-transform-types", join(frontend, "uptokey/fixture-linear-entry.ts")], cwd: frontend, env })
     : dir
     ? openPty({ file: join(dir, "runtime", process.platform === "win32" ? "bun.exe" : "bun"), args: [join(dir, "fixture-entry.js")], cwd: core, env: { ...env, OTUI_TREE_SITTER_WORKER_PATH: join(dir, "opentui-tree-sitter-worker.js"), UPTOKEY_JS_DEBUG_ADAPTER: join(core, "vendor", "js-debug", "src", "dapDebugServer.js") } })
     : openPty({ file: bun, args: ["run", "uptokey/fixture-entry.tsx"], cwd: frontend, env });
+  };
   let term = await open();
   // A second window on the same profile and core (J03): the previous one is closed first. J22 passes another
   // distributable directory to open the same profile with an updated (or the previous) frontend.

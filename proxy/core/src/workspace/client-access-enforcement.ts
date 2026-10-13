@@ -22,6 +22,7 @@ import {
   type ResourceScope
 } from "./client-access-policy.ts";
 import { ClientRegistrationError, migrateUnregisteredClient, readClientRegistration } from "./client-registration.ts";
+import {isApprovedPwaRegistration} from './browser-enrollment.ts';
 
 const CLIENT_TOKEN = /^utk_local_([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.[A-Za-z0-9_-]{32}$/i;
 
@@ -339,7 +340,7 @@ export function createWorkspaceAccessGuard(secrets: SecretStore, now: () => numb
     // inside the runtime. Pairing/provision audiences keep their narrower scope sets.
     // Only the PWA audience keeps that surface: an identity explicitly transitioned to a
     // narrower audience (e.g. pwa → tui) keeps its enrolledVia provenance but not the grant.
-    const firstParty = stored.enrolledVia === "browser-session" && audience === "pwa";
+    const firstParty = isApprovedPwaRegistration(stored);
 
     const expiresIso = await secrets.get(`local:client:${clientId}:expires`);
     const meta = await readJson(secrets, `local:client-meta:${clientId}`);

@@ -58,7 +58,7 @@ export interface ProtocolCapability {
 export function parseProtocolCapability(input: unknown): ProtocolCapability;
 export declare const PROTOCOL_CAPABILITY_MATRIX: readonly ProtocolCapability[];
 /** Explicit requested/approved surface. Missing field retains legacy minimum scopes. */
-export type PairingAudience = 'legacy' | 'vscode' | 'browser-extension' | 'tauri' | 'tui';
+export type PairingAudience = 'legacy' | 'vscode' | 'browser-extension' | 'tauri' | 'tui' | 'pwa';
 export const PAIRING_AUDIENCES: readonly PairingAudience[];
 export function parsePairingAudience(value: unknown): PairingAudience;
 /** Explicit reversible transition of an existing identity; clientId/data owner never changes. */

@@ -166,7 +166,7 @@ function parseClientMessageId(value) {
 
 function parseTextPayload(value) {
   if (typeof value !== 'string') fail('invalid_part');
-  if (Buffer.byteLength(value, 'utf8') > CONVERSATION_MESSAGE_TEXT_MAX_BYTES) fail('payload_too_large');
+  if (new TextEncoder().encode(value).byteLength > CONVERSATION_MESSAGE_TEXT_MAX_BYTES) fail('payload_too_large');
   return value;
 }
 

@@ -76,5 +76,7 @@ for (const path of files) {
 }
 const license = readFileSync(join(root, "LICENSE"), "utf8");
 const pkg = JSON.parse(readFileSync(join(root, "proxy/core/package.json"), "utf8"));
+const projectedPackage = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+if (typeof projectedPackage.version !== "string" || projectedPackage.version !== pkg.version) throw new Error("public_source_version_mismatch");
 if (!/GNU AFFERO GENERAL PUBLIC LICENSE/.test(license) || pkg.license !== "AGPL-3.0-or-later") throw new Error("public_source_license");
 process.stdout.write(`public_source_valid files=${files.length} version=${pkg.version}\n`);
