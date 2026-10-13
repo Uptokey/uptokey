@@ -12,6 +12,7 @@ export const QUIMERA_DEV_DEPENDENCIES = Object.freeze([
   "@hpke/core", "@napi-rs/keyring", "@simplewebauthn/server", "eventsource-parser", "hono", "@hono/node-server",
   "@modelcontextprotocol/sdk", "zod", "@langchain/core", "@langchain/langgraph", "@langchain/langgraph-checkpoint",
   "@langchain/langgraph-checkpoint-sqlite", "@langchain/langgraph-sdk", "@langchain/protocol", "langsmith", "better-sqlite3", "js-tiktoken",
+  "undici",
 ]);
 export const QUIMERA_DEV_PROFILE = Object.freeze({
   schemaVersion: 1, profile: "win32-x64-node24-abi137", nodeAbi: "137", completeApplication: false,

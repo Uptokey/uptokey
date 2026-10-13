@@ -275,6 +275,9 @@ export class WorkspaceRuntime {
   private executors = new Map<string, WorkflowExecutor>();
   private admission = new RequestAdmission(2);
   private starts = new Map<string,Promise<unknown>>();
+  // Runs never resume effects after process restart; recovery reconciles the
+  // journal. Live runs retain their admitted conversation/client guard until terminal.
+  private effectAdmissions = new Map<string,()=>Promise<void>>();
   private compositionGraphs = new Map<string,ReturnType<typeof createCompositionGraph>>();
   // Observation only: never persisted, authorized as input, or resumed after a restart.
   private gatewayPreviews = new Map<string,GatewayRunPreview>();
@@ -815,7 +818,7 @@ export class WorkspaceRuntime {
       this.store,
       principalId,
       projectId,
-      { signal, execution: { runId: request.runId, stepId: request.stepId } }
+      { signal, execution: { runId: request.runId, stepId: request.stepId }, revalidate:()=>request.dispatchGate?.validate(signal) }
     );
     try {
       this.projectPreview.broadcastReload(rootBindingId, receipt.confirmedPaths);
@@ -1408,6 +1411,7 @@ export class WorkspaceRuntime {
     let executor = this.executors.get(principal);
     if (executor) return executor;
     executor = new WorkflowExecutor({journal:createRunJournal(this.store, principal, async(project,runId,record) => {
+      if(['succeeded','failed','cancelled'].includes(record.run.status))this.effectAdmissions.delete(JSON.stringify([principal,project,record.run.requestId]));
       try{this.services.telemetry?.notify(principal,project);}catch{/* Independent observers cannot block each other. */}
       await this.protocolStreams?.committed(principal,project,runId,record);
       if(record.run.status==='succeeded')setTimeout(()=>{void this.advanceProjectTasks(principal,project).catch(()=>undefined);},0);
@@ -2205,13 +2209,18 @@ export class WorkspaceRuntime {
       await this.store.putApprovalOccupancy(principal,projectId,parsePlanApproval({id:randomUUID(),principalId:principal,projectId,planId:plan.id,planDigest:plan.digest,destinations,expiresAt,consumedByRunId:null}));
     }
     const start=async()=>{
+      const admissionKey=JSON.stringify([principal,projectId,command.requestId]);
+      if(!existing&&admission?.revalidate)this.effectAdmissions.set(admissionKey,admission.revalidate);
       const result=await this.executor(principal).start(principal,projectId,command);
-      if(result.kind==='rejected')throw new WorkspaceError(result.code,result.status);
+      if(result.kind==='rejected'){if(!existing)this.effectAdmissions.delete(admissionKey);throw new WorkspaceError(result.code,result.status);}
       return result;
     };
     try { if(admission)await admission(start);else await start(); }
     catch(error){
-      if(!await this.store.findRunByRequest(principal,projectId,principal,command.requestId))await this.governanceService?.releaseUndispatchedExecution(principal,projectId,command.requestId);
+      if(!await this.store.findRunByRequest(principal,projectId,principal,command.requestId)){
+        this.effectAdmissions.delete(JSON.stringify([principal,projectId,command.requestId]));
+        await this.governanceService?.releaseUndispatchedExecution(principal,projectId,command.requestId);
+      }
       throw error;
     }
     if(existing&&['succeeded','failed','cancelled'].includes(existing.run.status))await this.governanceService?.settleExecutionBudgets(principal,projectId,existing.run,existing.receipts,await this.store.listUsageValues(principal,projectId),this.registry().list());
@@ -2478,6 +2487,12 @@ export class WorkspaceRuntime {
     const {principalId,projectId,signal}=request;
     const admission=await this.checkEffectAccess(principalId,signal);if(admission)return admission;
     const effectRun=await this.store.readRun(principalId,projectId,request.runId);
+    const revalidate=effectRun&&this.effectAdmissions.get(JSON.stringify([principalId,projectId,effectRun.run.requestId]));
+    if(revalidate){
+      const validate=async(guardSignal:AbortSignal)=>{guardSignal.throwIfAborted();await revalidate();guardSignal.throwIfAborted();};
+      try{await validate(signal);}catch(error){return {kind:'not_sent',code:error instanceof WorkspaceError?error.code:'workflow_authority_changed'};}
+      request={...request,dispatchGate:{validate}};
+    }
     if(effectRun?.run.requestId.startsWith('schedule_')){
       try{
         const grants=this.services.scheduleGrants?.(),plan=await this.store.getPlan(principalId,projectId,effectRun.run.planId);
@@ -2801,7 +2816,8 @@ export class WorkspaceRuntime {
     const admitted=await this.admitAccountFunding(request,model,undefined,units);
     if('refused' in admitted)return admitted;
     const reservation=admitted.reservation;let refusal:string|undefined;
-    const effect:EffectRequest=reservation?{...request,dispatchGate:{validate:async()=>{
+    const effect:EffectRequest=reservation?{...request,dispatchGate:{validate:async signal=>{
+      await request.dispatchGate?.validate(signal);
       try{await reservation.validate?.();}
       catch(error){refusal=error instanceof Error&&/^(budget_[a-z_]+|account_funding_[a-z_]+)$/.test(error.message)?error.message:'account_funding_changed';throw error;}
     }}}:request;

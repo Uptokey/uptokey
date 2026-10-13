@@ -13,6 +13,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { generateThirdPartyNotices, NOTICES_FILE } from "./generate-third-party-notices.mjs";
+import { assertPortableBuild } from "./build-npm-package.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const frontend = join(root, "src", "tui", "frontend");
@@ -44,8 +45,14 @@ if (process.argv.includes("--with-fixtures")) {
   run(bun, ["run", "scripts/build.ts", "--linear", "--outdir", outDir, "--entry", "./uptokey/fixture-linear-entry.ts", "--minify"], { cwd: frontend });
 }
 
+// Check every generated entry/chunk/worker, including the accessible Node entry.
+// Do not publish a machine-specific artifact or rewrite its executable bytes.
+for (const file of walk(outDir).filter(file => /\.(?:c|m)?js$/.test(file))) {
+  assertPortableBuild(readFileSync(file, "utf8"));
+}
+
 // Notices: exactly what the bundler inlined, plus what ships beside it (runtime and native library).
-const externals = ["@napi-rs/keyring", "tree-sitter-wasm", "web-tree-sitter", "@repomix/tree-sitter-wasms", "js-tiktoken", "@opentui/core-*"];
+const externals = ["@napi-rs/keyring", "tree-sitter-wasm", "web-tree-sitter", "@repomix/tree-sitter-wasms", "js-tiktoken", "@opentui/core-*", "undici"];
 const generated = generateThirdPartyNotices({ root, bundles: [{ bundle: "dist/tui/main.js", metafile }, { bundle: "dist/tui/linear-entry.js", metafile: linearMetafile }], externals });
 const nativePackage = portable ? "@opentui/core" : `@opentui/core-${process.platform}-${process.arch}`;
 const nativeDir = join(frontend, "node_modules", nativePackage);

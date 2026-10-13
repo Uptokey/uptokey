@@ -29,6 +29,7 @@ export const PUBLISHED_RUNTIME_DEPENDENCIES = Object.freeze([
   "@lydell/node-pty",
   "@hpke/core", "@napi-rs/keyring", "@simplewebauthn/server", "eventsource-parser",
   "js-tiktoken", "hono", "@hono/node-server", "@modelcontextprotocol/sdk", "zod",
+  "undici",
   "better-sqlite3", "@repomix/tree-sitter-wasms", "tree-sitter-wasm",
 ]);
 

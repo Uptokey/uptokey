@@ -71,8 +71,9 @@ export async function dispatchProjectRun(runtime:WorkspaceRuntime,effect:EffectR
   effect.signal.throwIfAborted();await runtime.projectRoot.ensureRootLoaded(rootBindingId,runtime.store,effect.principalId,effect.projectId);
   const observed=await runtime.getProjectManifest(effect.principalId,effect.projectId,rootBindingId);
   if(observed.snapshotDigest!==manifest.snapshotDigest)throw new WorkspaceError('runtime_manifest_conflict',409);
-  effect.signal.throwIfAborted();
+  await effect.dispatchGate?.validate(effect.signal);effect.signal.throwIfAborted();
  };
+ await assertAuthority();
  const result=request.actionId==='preview'
   ?await runtime.projectPreview.startPreview({taskId:request.taskId,rootBindingId,manifestDigest:manifest.snapshotDigest,runtimeProfileId:request.runtimeProfileId,allowedResourceIds:manifest.entries.filter(e=>e.kind==='file'&&e.sensitivity==='public').map(e=>e.relativePath),manifest,request,runId:effect.runId,signal:effect.signal,ttlSeconds:Math.min(300,Math.ceil(request.timeoutMs/1000))})
   :await runtime.projectRunner.runVerification({runId:effect.runId,rootBindingId,request,manifest,signal:effect.signal,artifact,runtimeFingerprint:profile.runtime,assertAuthority,

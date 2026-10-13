@@ -1,5 +1,8 @@
 import {createManagedVoice} from './voice-profile.ts';
+import {isLocalWorkflowPlan,isLocalWorkflowRequest} from './workspace/local-workflow-policy.ts';
+import {WORKFLOW_LIMITS} from '@uptokey/sync-contract/workflow';
 import {isAccountMobilityPath,readAccountControlRequest} from './account-login-protocol.ts';
+import {ACCOUNT_HOSTED_MAX_REQUEST_BYTES,readAccountHostedRequest} from './account-hosted-protocol.ts';
 import {createManagedMedia,type MediaLaunchDependencies} from './managed-media.ts';
 import {LocalDelegatedKeys} from './delegated-access.ts';
 import {delegatedMethod,mountDelegatedRoutes} from './delegated-access-http.ts';
@@ -187,7 +190,7 @@ const LOCAL_JSON_ROUTES = new Set(["/local/efficiency/preview", "/local/efficien
 const LOCAL_EMPTY_POST_ROUTES = new Set([
   "/local/control-pair/revoke", "/local/config/reload", "/local/cache/invalidate/groq", "/local/cache/invalidate/gemini", "/local/cache/invalidate/ollama", "/local/cache/invalidate/vllm", "/local/cache/invalidate/custom", "/local/cache/invalidate/deepseek", "/local/cache/invalidate/mistral", "/local/cache/invalidate/cerebras", "/local/cache/invalidate/together", "/local/cache/invalidate/anthropic", "/local/cache/invalidate/openrouter"
 ]);
-const ACCOUNT_POST_ACTIONS = new Set(['login','logout','request','adopt','unlink','approve','consume','control']);
+const ACCOUNT_POST_ACTIONS = new Set(['login','logout','request','adopt','unlink','approve','consume','control','hosted']);
 for(const action of ['capability','status','usage','available','requests',...ACCOUNT_POST_ACTIONS]){
   const path=`/local/account/${action}`;LOCAL_UI_ORIGIN_PATHS.add(path);
   LOCAL_ROUTE_METHODS.set(path,ACCOUNT_POST_ACTIONS.has(action)?'POST':'GET');
@@ -1195,8 +1198,18 @@ export function createApp(
       }
     }
     if (governedOperation && (temporary || localOnly)) {
-      return c.json({ error: { type: 'conversation_policy_unsupported_for_workflow' } }, 403);
+      let localPlan = false;
+      if (!temporary && workspace) {
+        const authority = await resolveLocalWorkspaceAuthority(c.req.header('authorization'),secrets,identityEpoch?.());
+        const parsed = await readBoundedJson(c.req.raw.clone(), WORKFLOW_LIMITS.commandBytes);
+        if (authority && parsed.ok) localPlan = await isLocalWorkflowRequest(c.req.path, parsed.value,
+          (project,id)=>isProjectGranted(authority.projects,project)?workspace.store.getPlan(authority.principal,project,id):Promise.resolve(undefined),workspace.registry().list());
+      }
+      if (!localPlan) return c.json({ error: { type: 'conversation_policy_unsupported_for_workflow' } }, 403);
     }
+    // W5 executes its own approved capabilities and budgets. A local writer or
+    // closed-network runner does not require a configured local LLM.
+    if (governedOperation) return {retentionMode:retentionModeScope};
     // A tenant is not an owner. Bind every cache entry to authenticated authority,
     // project/conversation and policy; re-read after awaits and before publication.
     // Old tenant-only entries are intentionally never promoted into this namespace.
@@ -1602,8 +1615,8 @@ export function createApp(
     } finally { release(); }
   });
 
-  // W5 does not yet carry a conversation policy in its canonical commands.
-  // A linked restricted chat must fail closed before plans, journals or effects.
+  // Restricted workflows require a positively local canonical adapter/plan;
+  // temporary conversations remain incompatible with durable W5 journals.
   app.use('/v1/workspace/*', async (c, next) => {
     if (c.req.method !== 'GET' && !c.req.path.startsWith('/v1/workspace/conversations')
       && (requestClient(c).policy?.retentionMode === 'ephemeral' || c.req.header('x-uptokey-conversation-id') !== undefined || c.req.header('x-uptokey-processing-policy') !== undefined)) {
@@ -1704,18 +1717,19 @@ export function createApp(
     };
     return {...admitted,admit};
   };
-  for(const action of ['capability','status','usage','available','requests','login','logout','request','adopt','unlink','approve','consume','control'] as const){
+  for(const action of ['capability','status','usage','available','requests','login','logout','request','adopt','unlink','approve','consume','control','hosted'] as const){
     const handler=async(c:Context)=>{
       await combinedReady;
       const admitted=await accountAdmission(c.req.header('authorization'),c.req.raw.signal),admit=admitted.admit;
       if(!pairingRateLimiter.take(`account-${action}:${admitted.principal}`,20,60_000).ok)return c.json({error:{type:'local_auth_rate_limited'}},429);
       let input:Record<string,unknown>={};
       if(ACCOUNT_POST_ACTIONS.has(action)){
-        const parsed=await readBoundedJson(c.req.raw,MAX_LOCAL_CONTROL_REQUEST_BYTES);
+        const parsed=await readBoundedJson(c.req.raw,action==='hosted'?ACCOUNT_HOSTED_MAX_REQUEST_BYTES:MAX_LOCAL_CONTROL_REQUEST_BYTES);
         const keys=action==='adopt'?['accountRef','expectedRevision']:action==='unlink'?['expectedRevision']:action==='approve'?['id','userCode','accountRef']:action==='consume'?['id']:[];
-        if(!parsed.ok||action!=='control'&&!hasExactKeys(parsed.value,keys))return c.json({error:{type:'account_request_invalid'}},400);
+        if(!parsed.ok||!['control','hosted'].includes(action)&&!hasExactKeys(parsed.value,keys))return c.json({error:{type:'account_request_invalid'}},400);
         input=parsed.value as Record<string,unknown>;
         if(action==='control')try{const request=readAccountControlRequest(input);input={operation:request.operation,payload:request.payload};}catch{return c.json({error:{type:'account_request_invalid'}},400);}
+        if(action==='hosted')try{input=readAccountHostedRequest(input);}catch{return c.json({error:{type:'account_request_invalid'}},400);}
         if(('expectedRevision' in input&&(!Number.isSafeInteger(input.expectedRevision)||(input.expectedRevision as number)<0))||
           ('accountRef' in input&&(typeof input.accountRef!=='string'||!/^acc_[a-f0-9]{64}$/.test(input.accountRef)))||
           ('id' in input&&(typeof input.id!=='string'||!/^[a-f0-9-]{36}$/i.test(input.id)))||
@@ -1725,6 +1739,7 @@ export function createApp(
         await admit();const service=accountService();
         const value=action==='capability'?service.capability():
           action==='control'?await service.control(admitted.principal,input as never,c.req.raw.signal,admit):
+          action==='hosted'?await service.hosted(admitted.principal,input as never,c.req.raw.signal,admit):
           action==='adopt'?await service.adopt(admitted.principal,input as {accountRef:string;expectedRevision:number},c.req.raw.signal,admit):
           action==='unlink'?await service.unlink(admitted.principal,input as {expectedRevision:number},admit):
           action==='request'?await accountSharing().request(c.req.header('authorization')):
@@ -1732,7 +1747,7 @@ export function createApp(
           action==='approve'?await accountSharing().approve(c.req.header('authorization'),input as {id:string;userCode:string;accountRef:string},c.req.raw.signal,admit):
           action==='consume'?await accountSharing().consume(c.req.header('authorization'),input.id as string,c.req.raw.signal,admit):
           await service[action](admitted.principal,c.req.raw.signal,admit);
-        await admit();if(action==='control'){const result=value as {status:number;body:unknown};return c.json(result.body,result.status as never);}return c.json(value);
+        await admit();if(action==='control'||action==='hosted'){const result=value as {status:number;body:unknown};return c.json(result.body,result.status as never);}return c.json(value);
       }catch(error){
         if(error instanceof ContextLinkError||error instanceof ClientRegistrationError)throw error;
         if(error instanceof AccountShareError)return c.json({error:{type:error.code}},error.status);
@@ -1924,26 +1939,36 @@ export function createApp(
       if(conversationId===undefined&&requestId===undefined&&contextRevision===undefined)return undefined;
       if((conversationId!==undefined||requestId!==undefined)&&(!conversationId||!requestId))throw new WorkspaceError('conversation_admission_required',400);
       const assertContext = async () => {
-        if (contextRevision === undefined) return;
-        const client = await authenticateContextCredential(authorization,secrets);
-        const link = await resolveClientContextLink(secrets,client,identityEpoch?.());
-        if (!link || link.revision !== contextRevision || link.ownerPrincipalId !== principalId || link.projectId !== projectId) throw new ContextLinkError('context_link_invalid');
+        if (await resolveLocalRetentionMode(authorization,secrets) === 'ephemeral') throw new WorkspaceError('conversation_policy_unsupported_for_workflow',403);
+        const authority = await resolveLocalWorkspaceAuthority(authorization,secrets,identityEpoch?.());
+        if (!authority || authority.principal !== principalId || !isProjectGranted(authority.projects,projectId)) throw new ContextLinkError('context_link_invalid');
+        if (contextRevision !== undefined) {
+          const client = await authenticateContextCredential(authorization,secrets);
+          const link = await resolveClientContextLink(secrets,client,identityEpoch?.());
+          if (!link || link.revision !== contextRevision || link.ownerPrincipalId !== principalId || link.projectId !== projectId) throw new ContextLinkError('context_link_invalid');
+        }
+        if (conversationId) {
+          const current = await conversations.store.getConversation(principalId,conversationId);
+          const plan = await workspace!.store.getPlan(principalId,projectId,command.planId);
+          if (!plan || plan.digest !== command.planDigest) throw new WorkspaceError('plan_digest_mismatch',409);
+          if (current.storagePolicy === 'temporary' || current.processingPolicy === 'local_only' && !isLocalWorkflowPlan(plan,workspace!.registry().list())) throw new WorkspaceError('conversation_policy_unsupported_for_workflow',403);
+        }
       };
       const admission = async <T>(start:()=>Promise<T>):Promise<T> => {
         await assertContext();
         if (!conversationId || !requestId) return start();
         return conversations.store.withRunAdmission(principalId,conversationId,requestId,projectId,command,async()=>{
         const conversation = await conversations.store.getConversation(principalId,conversationId);
-        if (conversation.storagePolicy === 'temporary' || conversation.processingPolicy === 'local_only') throw new WorkspaceError('conversation_policy_unsupported_for_workflow',403);
         const plan = await workspace!.store.getPlan(principalId,projectId,command.planId);
         if (!plan) throw new WorkspaceError('plan_missing',404);
+        if (conversation.storagePolicy === 'temporary' || conversation.processingPolicy === 'local_only' && !isLocalWorkflowPlan(plan,workspace!.registry().list())) throw new WorkspaceError('conversation_policy_unsupported_for_workflow',403);
         await governanceService?.reserveExecutionBudgets(principalId,projectId,command.requestId,plan,workspace!.registry().list(),
           {id:conversationId,temporary:false});
         // HTTP policy middleware ran before W5 verification and the runtime's
         // asynchronous preparation. Authority is re-read after those awaits
         // and budget reservation, immediately before admitting this run.
         const current = await conversations.store.getConversation(principalId,conversationId);
-        if (current.storagePolicy === 'temporary' || current.processingPolicy === 'local_only') throw new WorkspaceError('conversation_policy_unsupported_for_workflow',403);
+        if (current.storagePolicy === 'temporary' || current.processingPolicy === 'local_only' && !isLocalWorkflowPlan(plan,workspace!.registry().list())) throw new WorkspaceError('conversation_policy_unsupported_for_workflow',403);
         if (current.activeBranchId !== conversation.activeBranchId || current.revision !== conversation.revision) throw new WorkspaceError('conversation_conflict',409);
         await assertContext();
         return start();
