@@ -1,6 +1,6 @@
 {
   "name": "uptokey-public-source",
-  "version": "0.1.0-beta.13",
+  "version": "0.1.0-beta.14",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "engines": {
@@ -9,7 +9,7 @@
   "scripts": {
     "build": "npm --prefix proxy/core run build",
     "build:tui": "npm --prefix proxy/core run build:tui -- --portable",
-    "test": "node --test test/public-source.test.mjs",
+    "test": "node --experimental-strip-types --test test/public-source.test.mjs proxy/core/test/tui-revert-diff-security.test.ts proxy/core/test/tui-frontend-echo-benchmark.test.ts",
     "typecheck": "npm --prefix proxy/core run typecheck:core",
     "verify": "node scripts/verify-public-source.mjs"
   },
