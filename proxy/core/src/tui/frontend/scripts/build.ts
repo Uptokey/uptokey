@@ -26,9 +26,9 @@ const compile = process.argv.includes("--compile")
 const metafilePath = flag("--metafile") ? path.resolve(flag("--metafile")!) : undefined
 const version = (await Bun.file(path.join(root, "../../../package.json")).json()).version as string
 const distributionDefine = { UPTOKEY_DISTRIBUTION_CHANNEL: JSON.stringify(process.argv.includes("--portable") ? "npm" : "native") }
-// Packages that carry native code or data files stay external; they resolve from the installed package node_modules,
+// Packages with native code, data files or module-relative runtime behavior stay external; they resolve from installed node_modules,
 // exactly as they do for the Node core (see scripts/build-npm-package.mjs).
-const RUNTIME_PACKAGES = ["@napi-rs/keyring", "tree-sitter-wasm", "web-tree-sitter", "@repomix/tree-sitter-wasms", "js-tiktoken", "js-tiktoken/*"]
+const RUNTIME_PACKAGES = ["@napi-rs/keyring", "tree-sitter-wasm", "web-tree-sitter", "@repomix/tree-sitter-wasms", "js-tiktoken", "js-tiktoken/*", "undici"]
 // OpenTUI's worker embeds web-tree-sitter 0.25; its matching WASM must travel with that worker.
 // The canonical core independently uses the published JavaScript API, so keep that module external.
 const parserWasm = path.join(root, "node_modules", "web-tree-sitter", "tree-sitter.wasm")

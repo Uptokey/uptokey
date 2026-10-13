@@ -163,6 +163,7 @@ export class ProjectRunnerService {
     const {request}=params;
     const checks:ProjectCheckResult[]=[];
     if(request.runtimeProfileId==='static-web') {
+      await params.assertAuthority?.();params.signal?.throwIfAborted();
       for(const [id,relativePath] of [['readme','docs/README.md'],['index','web/index.html']]) {
         const filename=this.rootService.resolveVerifiedPath(params.rootBindingId,relativePath!);
         const stat=fs.existsSync(filename)?fs.lstatSync(filename):undefined;
@@ -176,6 +177,7 @@ export class ProjectRunnerService {
       try{const prepared=await this.prepare(params);fingerprint=prepared.fingerprint;if(request.actionId==='preview')throw new ProjectRuntimeError('runtime_preview_requires_session');
         params.signal?.throwIfAborted();this.rootService.getVerifiedRoot(params.rootBindingId);
         const start=Date.now(),name=await this.backend.create({image:prepared.image,executable:prepared.executable,args:prepared.action,directory:request.relativeWorkingDirectory,archive:prepared.archive,timeoutMs:request.timeoutMs,writable:request.execution?.writable,resources:request.execution?.resources,signal:params.signal});
+        try{await params.assertAuthority?.();params.signal?.throwIfAborted();}catch(error){await this.backend.stop(name);throw error;}
         const outputRefs:string[]=[];
         const result=await this.backend.run(name,Math.max(1,request.timeoutMs-(Date.now()-start)),request.outputLimitBytes,params.signal,request.execution?async()=>{
           await params.assertAuthority?.();params.signal?.throwIfAborted();

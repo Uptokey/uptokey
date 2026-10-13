@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, relative, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -8,6 +8,17 @@ import { NOTICES_FILE, generateThirdPartyNotices } from "./generate-third-party-
 import { extractRuntimeSpecifiers } from "./beta-runtime-contract.mjs";
 
 export const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** Refuse builder paths in generated code; never rewrite executable output. */
+export function assertPortableBuild(code, roots = [DEFAULT_ROOT, homedir()]) {
+  const normalized = code.replaceAll("\\\\", "\\").replaceAll("\\", "/").toLowerCase();
+  for (const root of roots) {
+    const prefix = root.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+    if (prefix.length > 3 && [prefix, encodeURI(prefix).toLowerCase()].some(value => normalized.includes(`${value}/`))) {
+      throw new Error("build_machine_path_embedded");
+    }
+  }
+}
 
 /**
  * Timestamp for BUILD_INFO.json. Honors SOURCE_DATE_EPOCH (reproducible builds):
@@ -58,6 +69,9 @@ export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROO
       "--external=@hpke/core",
       "--external=@simplewebauthn/server",
       "--external=eventsource-parser",
+      // Preserve Undici's own runtime module filename. Bundling its CommonJS
+      // entry embeds the build machine path used for fetch stack augmentation.
+      "--external=undici",
       "--external=hono",
       "--external=@hono/node-server",
       "--external=zod",
@@ -108,6 +122,12 @@ export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROO
 
   if (result.status !== 0 || !existsSync(metafile)) {
     failBuild(result.stderr || result.stdout || `bun_build_failed${result.error?.code ? `:${result.error.code}` : ""}\n`);
+    return;
+  }
+  try {
+    assertPortableBuild(readFileSync(output, "utf8"), [root, homedir()]);
+  } catch (error) {
+    failBuild(`${error instanceof Error ? error.message : "build_portability_failed"}\n`);
     return;
   }
   }

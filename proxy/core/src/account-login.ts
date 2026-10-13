@@ -1,5 +1,7 @@
 import {createHash,createPrivateKey,createPublicKey,generateKeyPairSync,randomBytes,sign} from 'node:crypto';
 import type {SecretStore} from './secret-store.ts';
+import {readHostedJson} from '../../contratos/hosted-json.js';
+import {ACCOUNT_HOSTED_CHAT_TIMEOUT_MS,ACCOUNT_HOSTED_MAX_RESPONSE_BYTES,accountHostedProofPayload,readAccountHostedRequest,type AccountHostedRequest} from './account-hosted-protocol.ts';
 import {serialClientAuthority} from './client-authority-lock.ts';
 import {accountControlProofPayload,accountMobilityProofPayload,isAccountAccessToken,readAccountControlRequest,readAccountMobilityRequest,type AccountControlProof,type AccountControlRequest,type AccountMobilityRequest,type AccountMobilityProof} from './account-login-protocol.ts';
 import {readBoundedJson} from '@uptokey/sync-contract/limits';
@@ -85,6 +87,45 @@ export class AccountLoginService {
   },admit);
   try{await snapshot.guard();const data={id:snapshot.row.id,action:'control' as const,nonce:randomBytes(24).toString('base64url'),issuedAt:this.now(),request};const proof:AccountControlProof={...data,signature:sign('sha256',Buffer.from(accountControlProofPayload(data)),{key:snapshot.row.privateKey,dsaEncoding:'ieee-p1363'}).toString('base64url')};const answer=await this.request('/api/account/native/control',proof,combined,snapshot.guard,ACCOUNT_MAX_CLIENT_RESPONSE_BYTES);if(Object.keys(answer).sort().join(',')!=='body,status'||typeof answer.status!=='number'||!Number.isSafeInteger(answer.status)||answer.status<100||answer.status>599)throw Error('account_response_invalid');await snapshot.guard();return {status:answer.status,body:answer.body};}
   catch(error){if(combined.aborted)throw Error('account_cancelled');if(expired(error))throw Error('account_reauthentication_required');throw error;}
+  finally{controller.abort();const registry=mobilityOperations.get(this.secrets);for(const identity of new Set([principal,snapshot.owner])){const entries=registry?.get(identity);entries?.delete(controller);if(entries?.size===0)registry?.delete(identity);}}
+ }
+ async hosted(principal:string,input:AccountHostedRequest,signal:AbortSignal,admit?:AccountAdmission):Promise<{status:number;body:unknown}>{
+  const request=readAccountHostedRequest(input),controller=new AbortController();
+  const combined=AbortSignal.any([signal,controller.signal,AbortSignal.timeout(request.operation==='chat'?ACCOUNT_HOSTED_CHAT_TIMEOUT_MS:30_000)]);
+  const snapshot=await this.exclusive(principal,async link=>{
+   await admit?.();combined.throwIfAborted();
+   if(!this.origin)throw Error('account_service_not_configured');
+   if(link.signedOut)throw Error('account_reauthentication_required');
+   const owner=link.association?.ownerPrincipal??principal;
+   const row=link.association?(await this.readSource(principal,link,link.association,admit)).row:await this.read(principal,admit);
+   if(!row||row.pending)throw Error('account_reauthentication_required');
+   const accountRef=this.accountRef(owner,row);
+   if(link.revision!==request.revision||accountRef!==request.accountRef)throw Error('account_share_conflict');
+   const guard:AccountAdmission=async()=>{
+    combined.throwIfAborted();await admit?.();await this.checkLink(principal,link,admit);
+    if(link.association)await this.authorize(principal,link.association,admit);
+    const current=await this.read(owner,admit);combined.throwIfAborted();
+    if(!current||current.pending||this.accountRef(owner,current)!==accountRef)throw Error('account_session_revoked');
+    if(current.expiresAt<=this.now())throw Error('account_session_expired');
+   };
+   let registry=mobilityOperations.get(this.secrets);if(!registry){registry=new Map();mobilityOperations.set(this.secrets,registry);}
+   for(const identity of new Set([principal,owner])){let entries=registry.get(identity);if(!entries){entries=new Set();registry.set(identity,entries);}entries.add(controller);}
+   return {row,owner,guard};
+  },admit);
+  try{
+   await snapshot.guard();
+   const data={id:snapshot.row.id,action:'hosted' as const,nonce:randomBytes(24).toString('base64url'),issuedAt:this.now(),request};
+   const proof={...data,signature:sign('sha256',Buffer.from(accountHostedProofPayload(data)),{key:snapshot.row.privateKey,dsaEncoding:'ieee-p1363'}).toString('base64url')};
+   const response=await this.fetcher(this.origin+'/api/account/native/hosted',{method:'POST',headers:{'content-type':'application/json',accept:'application/json'},body:JSON.stringify(proof),redirect:'error',cache:'no-store',signal:combined});
+   await snapshot.guard();
+   if(!/^application\/json(?:\s*;.*)?$/i.test(response.headers.get('content-type')??'')){await response.body?.cancel();throw Error('account_response_invalid');}
+   const answer=await readHostedJson(response.body,request.operation==='chat'?ACCOUNT_HOSTED_MAX_RESPONSE_BYTES:ACCOUNT_MAX_CLIENT_RESPONSE_BYTES,combined);
+   await snapshot.guard();
+   if(!answer||typeof answer!=='object'||Array.isArray(answer))throw Error('account_response_invalid');
+   if(!response.ok)throw Error(typeof answer.error==='string'&&/^account_[a-z_]{1,80}$/.test(answer.error)?answer.error:'account_service_unavailable');
+   if(Object.keys(answer).sort().join(',')!=='body,status'||!Number.isSafeInteger(answer.status)||answer.status<200||answer.status>599||!answer.body||typeof answer.body!=='object'||Array.isArray(answer.body))throw Error('account_response_invalid');
+   return {status:answer.status,body:{...answer.body,accountRef:request.accountRef,revision:request.revision}};
+  }catch(error){if(combined.aborted)throw Error('account_cancelled');if(expired(error))throw Error('account_reauthentication_required');throw error;}
   finally{controller.abort();const registry=mobilityOperations.get(this.secrets);for(const identity of new Set([principal,snapshot.owner])){const entries=registry?.get(identity);entries?.delete(controller);if(entries?.size===0)registry?.delete(identity);}}
  }
  private principalDigest(principal:string){if(!principal||principal.length>250||/[\u0000-\u0020\u007f]/.test(principal))throw Error('account_client_invalid');return digest(principal);}

@@ -725,11 +725,13 @@ export class ProjectWriteService {
     store: WorkspaceStore,
     principalId: string,
     projectId: string,
-    options: { signal?: AbortSignal; execution?: { runId: string; stepId: string } } = {}
+    options: { signal?: AbortSignal; execution?: { runId: string; stepId: string }; revalidate?:()=>void|Promise<void> } = {}
   ): Promise<AppliedWriteReceipt> {
     const checkCancellation = () => {
       if (options.signal?.aborted) throw new ProjectWriteError('project_write_cancelled', 409);
     };
+    checkCancellation();
+    await options.revalidate?.();
     checkCancellation();
     const changeSet = parseProjectChangeSet(changeSetInput);
     const root = this.rootService.getVerifiedRoot(rootBindingId);
@@ -757,6 +759,7 @@ export class ProjectWriteService {
         throw new ProjectWriteError('project_write_already_recorded', 409);
       }
     }
+    await options.revalidate?.();
     checkCancellation();
     const preimagesDir = path.join(this.stagingBaseDir, 'preimages', rootBindingId, operationId);
     fs.mkdirSync(path.dirname(preimagesDir), { recursive: true });
@@ -830,6 +833,7 @@ export class ProjectWriteService {
       const stagedHash = createHash('sha256').update(content).digest('hex');
       const delays = [10, 25, 50, 100, 200];
       for (let attempt = 0; ; attempt++) {
+        await options.revalidate?.();
         checkCancellation();
         const liveRoot = this.rootService.getVerifiedRoot(rootBindingId);
         if (liveRoot.binding.accessMode !== 'read_write') throw new ProjectWriteError('project_root_read_only', 403);
@@ -854,6 +858,7 @@ export class ProjectWriteService {
 
     try {
       for (const op of changeSet.operations) {
+        await options.revalidate?.();
         checkCancellation();
         const liveRoot = this.rootService.getVerifiedRoot(rootBindingId);
         if (liveRoot.binding.accessMode !== 'read_write') throw new ProjectWriteError('project_root_read_only', 403);

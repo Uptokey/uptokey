@@ -8,6 +8,16 @@
     "test": "node --test test/*.test.mjs"
   },
   "exports": {
+    "./hosted-request": {
+      "types": "./hosted-request.d.ts",
+      "import": "./hosted-request.js",
+      "default": "./hosted-request.js"
+    },
+    "./hosted-json": {
+      "types": "./hosted-json.d.ts",
+      "import": "./hosted-json.js",
+      "default": "./hosted-json.js"
+    },
     "./interactive-terminal": {
       "types": "./interactive-terminal.d.ts",
       "import": "./interactive-terminal.js",
