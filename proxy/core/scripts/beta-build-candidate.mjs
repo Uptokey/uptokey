@@ -56,6 +56,25 @@ function directoryDigest(directory) {
   return createHash("sha256").update(files.join("\n")).digest("hex");
 }
 
+/** Reject differing build bytes before staging or writing a releasable tarball. */
+export function verifyCandidateReproducibility({ buildA, buildB, frontendA, frontendB }) {
+  const pairs = {
+    cliJs: [join(buildA, "cli.js"), join(buildB, "cli.js")],
+    compositionWorkerJs: [join(buildA, "composition-worker.js"), join(buildB, "composition-worker.js")],
+    serviceSchemaWorkerJs: [join(buildA, "service-schema-worker.js"), join(buildB, "service-schema-worker.js")],
+    workspaceContextHelperJs: [join(buildA, "workspace-context-helper.js"), join(buildB, "workspace-context-helper.js")],
+  };
+  const result = Object.fromEntries(Object.entries(pairs).map(([name, paths]) => {
+    const [a, b] = paths.map(sha256File);
+    return [name, { a, b, identical: a === b }];
+  }));
+  const a = directoryDigest(frontendA), b = directoryDigest(frontendB);
+  result.tuiFrontend = { a, b, identical: a === b };
+  const differences = Object.keys(result).filter(name => !result[name].identical);
+  if (differences.length) throw new Error(`candidate_build_not_reproducible:${differences.join(",")}`);
+  return result;
+}
+
 function assemblePackageRoot(distDir, frontendDir, packageRoot) {
   mkdirSync(packageRoot, { recursive: true });
   for (const file of ["package.json", "package-lock.json", "LICENSE", "README.md"]) cpSync(join(scriptsRoot, file), join(packageRoot, file));
@@ -98,17 +117,8 @@ function main() {
     const frontendOutA = reuseDist ? `reused:${frontendA}` : buildFrontendInto(frontendA);
     const frontendOutB = reuseDist ? `reused:${frontendB}` : buildFrontendInto(frontendB);
 
-    const cliA = sha256File(join(buildA, "cli.js"));
-    const cliB = sha256File(join(buildB, "cli.js"));
-    const workerA = sha256File(join(buildA, "composition-worker.js"));
-    const workerB = sha256File(join(buildB, "composition-worker.js"));
-    const helperA = sha256File(join(buildA, "workspace-context-helper.js"));
-    const helperB = sha256File(join(buildB, "workspace-context-helper.js"));
-    const schemaA = sha256File(join(buildA, "service-schema-worker.js"));
-    const schemaB = sha256File(join(buildB, "service-schema-worker.js"));
-    const frontendAHash = directoryDigest(frontendA);
-    const frontendBHash = directoryDigest(frontendB);
-    const buildReproducible = cliA === cliB && workerA === workerB && helperA === helperB && schemaA === schemaB && frontendAHash === frontendBHash;
+    const reproducibility = verifyCandidateReproducibility({ buildA, buildB, frontendA, frontendB });
+    const buildReproducible = true;
 
     const packageRoot = join(stage, "package-root");
     assemblePackageRoot(buildA, frontendA, packageRoot);
@@ -134,11 +144,7 @@ function main() {
       buildInfo: buildInfo,
       reproducibility: {
         approach: "SOURCE_DATE_EPOCH fixed, same toolchain, two independent builds",
-        cliJs: { a: cliA, b: cliB, identical: cliA === cliB },
-        compositionWorkerJs: { a: workerA, b: workerB, identical: workerA === workerB },
-        serviceSchemaWorkerJs: { a: schemaA, b: schemaB, identical: schemaA === schemaB },
-        workspaceContextHelperJs: { a: helperA, b: helperB, identical: helperA === helperB },
-        tuiFrontend: { a: frontendAHash, b: frontendBHash, identical: frontendAHash === frontendBHash },
+        ...reproducibility,
         byteIdentical: buildReproducible,
         caveat: "Byte identity is scoped to the same Node/zlib/Bun versions on this host.",
       },

@@ -37,6 +37,16 @@ Normal conversations are stored locally. **`/temporary`** starts a conversation 
 
 See [FIRST-RUN-BETA.md](./FIRST-RUN-BETA.md) for the complete first-use checklist and recovery steps.
 
+## Use the web app with your computer
+
+Open [app.uptokey.com](https://app.uptokey.com) for hosted chat. To use your computer's provider connections, files and tools from the web app, start the local service:
+
+```sh
+npx --yes uptokey@latest start
+```
+
+Choose **Connect** in the requested feature and run the approval command it provides in a terminal on this computer. Approval belongs to this browser identity and the Uptokey web origin; project actions retain their own permissions. Your provider keys remain in the operating system's secret store. Hosted chat continues to work without the local service.
+
 ## Language and accessibility
 
 English is the default independently of the operating system language. Choose an interface language explicitly:

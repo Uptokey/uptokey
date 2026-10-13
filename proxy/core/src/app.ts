@@ -72,6 +72,7 @@ import { GovernanceStore } from './workspace/governance-store.ts';
 import { WorkspacePolicyService } from './workspace/governance-service.ts';
 import { governanceMethod, governanceQueryAllowed, mountGovernanceRoutes } from './workspace/governance-http.ts';
 import { BrowserSessionService } from './workspace/browser-session.ts';
+import {isApprovedPwaRegistration,isPublicPwaOrigin,PUBLIC_PWA_ORIGIN} from './workspace/browser-enrollment.ts';
 import { ClientContextLinkService, ContextLinkError, authenticateContextCredential, credentialProjectGrant, rawCredentialPrincipal, resolveClientContextLink, guardContextResponse } from './workspace/client-context-link.ts';
 import { readClientRegistration, ClientRegistrationError } from './workspace/client-registration.ts';
 import { CLIENT_KEY_SCOPES } from '@uptokey/sync-contract/client-keys';
@@ -571,7 +572,12 @@ export function createApp(
         c.req.header('x-uptokey-account-token')!==undefined||effectiveMethod!=='POST'||!isAccountMobilityPath(url.pathname)))
       return c.json({error:{type:'account_credential_boundary'}},400);
     const extensionOrigin = isExtensionOrigin(origin) && extensionPathAllowed(url.pathname);
-    const acceptedOrigin = origin !== undefined && (LOCAL_UI_ORIGINS.has(origin) && originPathAllowed || extensionOrigin);
+    // The public PWA has CORS access to explicit pairing/key proof, never local
+    // automatic enrollment. Every private request below needs its approved,
+    // origin-bound PWA credential and retains the handler's existing authority.
+    const browserProofPaths = ['/health', '/local/pair/challenge', '/local/pair/consume', '/local/workspace/session/challenge', '/local/workspace/session/complete'];
+    const publicPwaOrigin = isPublicPwaOrigin(origin) && (originPathAllowedFor(url.pathname) || combinedWorkspaceMethod !== undefined || browserProofPaths.includes(url.pathname));
+    const acceptedOrigin = origin !== undefined && (LOCAL_UI_ORIGINS.has(origin) && originPathAllowed || extensionOrigin || publicPwaOrigin);
     if (isPreflight) {
       if (!origin || !acceptedOrigin) return c.json({ error: { type: "origin_rejected" } }, 403);
       if (!expectedMethod) return c.json({ error: { type: 'route_not_found' } }, 404);
@@ -594,12 +600,24 @@ export function createApp(
     if (origin !== undefined && !acceptedOrigin) return c.json({ error: { type: "origin_rejected" } }, 403);
     // A syntactically valid extension origin grants only pairing and key-proof renewal.
     // All private requests require a live credential whose approved origin matches.
-    if (extensionOrigin && !['/health', '/local/pair/challenge', '/local/pair/consume', '/local/workspace/session/challenge', '/local/workspace/session/complete'].includes(url.pathname)) {
+    let publicPwaAuthority:string|undefined;
+    if ((extensionOrigin || publicPwaOrigin) && !browserProofPaths.includes(url.pathname)) {
       const supplied = parseLocalBearer(c.req.header('authorization'));
       const resolved = supplied ? await resolveBearer(secrets, supplied) : undefined;
       if (!resolved?.ok || resolved.resolved.kind !== 'client') return c.json({ error: { type: 'unauthorized' } }, 401);
       const registration = resolved.resolved.registration;
-      if (registration?.audience !== 'browser-extension' || registration.enrolledVia !== 'pairing' || registration.browserOrigin !== origin) return c.json({ error: { type: 'origin_rejected' } }, 403);
+      if (registration?.audience !== (publicPwaOrigin?'pwa':'browser-extension') || registration.enrolledVia !== 'pairing' || registration.browserOrigin !== origin) return c.json({ error: { type: 'origin_rejected' } }, 403);
+      if(publicPwaOrigin)publicPwaAuthority=JSON.stringify([resolved.resolved.clientId,registration,resolved.resolved.policy]);
+    }
+    // A public-PWA bearer cannot be transplanted into an originless native or
+    // local-UI request. The approved Origin is part of that credential's grant.
+    if(!publicPwaOrigin) {
+      const supplied=parseLocalBearer(c.req.header('authorization'));
+      const clientId=supplied?parseClientTokenFormat(supplied):undefined;
+      let registration;
+      try {registration=clientId?await readClientRegistration(secrets,clientId):undefined;}
+      catch { /* Existing token/lease and workspace guards retain damaged-record rejection. */ }
+      if(registration?.audience==='pwa'&&registration.enrolledVia==='pairing'&&registration.browserOrigin===PUBLIC_PWA_ORIGIN)return c.json({error:{type:'origin_rejected'}},403);
     }
     if (origin !== undefined && acceptedOrigin) {
       c.header("Access-Control-Allow-Origin", origin);
@@ -623,6 +641,11 @@ export function createApp(
       }
     }
     await egressReady;
+    if(publicPwaAuthority!==undefined) {
+      const supplied=parseLocalBearer(c.req.header('authorization'));
+      const current=supplied?await resolveBearer(secrets,supplied):undefined;
+      if(!current?.ok||current.resolved.kind!=='client'||JSON.stringify([current.resolved.clientId,current.resolved.registration,current.resolved.policy])!==publicPwaAuthority)return c.json({error:{type:'browser_authority_changed'}},403);
+    }
     await next();
     // Match Hono streamSSE: explicit chunking prevents the Node transport from
     // speculatively reading later events before flushing the first SSE frame.
@@ -643,7 +666,7 @@ export function createApp(
   app.get("/health", (c) => c.json({ status: "ok", data_plane: "local", version: RELEASE_VERSION, started_at: startedAt }));
   for(const action of ['challenge','complete'] as const) app.post(`/local/workspace/session/${action}`,async c=>{
     const origin=c.req.header('origin');
-    if(!origin||!LOCAL_UI_ORIGINS.has(origin)&&!isExtensionOrigin(origin))return c.json({error:{type:'origin_rejected'}},403);
+    if(!origin||!LOCAL_UI_ORIGINS.has(origin)&&!isExtensionOrigin(origin)&&!isPublicPwaOrigin(origin))return c.json({error:{type:'origin_rejected'}},403);
     const rate=pairingRateLimiter.take('workspace-browser-session',20,60_000);
     if(!rate.ok)return c.json({error:{type:'local_auth_rate_limited'}},429);
     const parsed=await readBoundedJson(c.req.raw,MAX_LOCAL_CONTROL_REQUEST_BYTES);
@@ -651,7 +674,7 @@ export function createApp(
     try {
       if(action==='challenge') {
         if(!hasExactKeys(parsed.value,['publicJwk']))return c.json({error:{type:'invalid_request'}},400);
-        return c.json(isExtensionOrigin(origin)?await browserSessions.challengeExtension(parsed.value.publicJwk,origin):browserSessions.challenge(parsed.value.publicJwk));
+        return c.json(isPublicPwaOrigin(origin)?await browserSessions.challengePublicPwa(parsed.value.publicJwk,origin):isExtensionOrigin(origin)?await browserSessions.challengeExtension(parsed.value.publicJwk,origin):browserSessions.challenge(parsed.value.publicJwk));
       }
       if(!hasExactKeys(parsed.value,['challengeId','signature']))return c.json({error:{type:'invalid_request'}},400);
       return c.json(await browserSessions.complete(parsed.value.challengeId,parsed.value.signature,origin));
@@ -764,20 +787,24 @@ export function createApp(
     const parsed = await readBoundedJson(c.req.raw, MAX_LOCAL_CONTROL_REQUEST_BYTES);
     if (!parsed.ok) return c.json({ error: { type: parsed.reason === "too_large" ? "request_too_large" : "invalid_request" } }, parsed.reason === "too_large" ? 413 : 400);
     const body = parsed.value;
-    if ((!hasExactKeys(body, ["clientName"]) && !hasExactKeys(body, ["clientName", "audience"])) || ("audience" in body && !PAIRING_AUDIENCES.includes(body.audience as PairingAudience))) return c.json({ error: { type: "invalid_request" } }, 400);
+    const pairingOrigin = c.req.header('origin');
+    const publicPwaPairing=isPublicPwaOrigin(pairingOrigin);
+    if(!isJsonObject(body))return c.json({error:{type:'invalid_request'}},400);
+    if (publicPwaPairing?(!hasExactKeys(body,['clientName','audience','publicJwk'])||body.audience!=='pwa'):
+      ((!hasExactKeys(body, ["clientName"]) && !hasExactKeys(body, ["clientName", "audience"])) || ("audience" in body && (!PAIRING_AUDIENCES.includes(body.audience as PairingAudience)||body.audience==='pwa')))) return c.json({ error: { type: "invalid_request" } }, 400);
     const clientName = normalizeClientName(body.clientName);
     if (!clientName) return c.json({ error: { type: "invalid_request" } }, 400);
-    const pairingOrigin = c.req.header('origin');
     if (isExtensionOrigin(pairingOrigin) && (!('audience' in body) || body.audience !== 'browser-extension')) return c.json({ error: { type: 'pairing_audience_invalid' } }, 400);
     const creationRate = pairingRateLimiter.take("localhost-pairing-creation", LOCAL_PAIRING_CHALLENGE_LIMIT, LOCAL_PAIRING_CHALLENGE_WINDOW_MS);
     if (!creationRate.ok) { c.header("Retry-After", String(creationRate.retryAfter)); return c.json({ error: { type: "local_pairing_rate_limited" } }, 429); }
     try {
-      return c.json(pairing.create(clientName, parsePairingAudience("audience" in body ? body.audience : undefined), isExtensionOrigin(pairingOrigin) ? pairingOrigin : undefined), 201);
+      return c.json(pairing.create(clientName, parsePairingAudience("audience" in body ? body.audience : undefined), isExtensionOrigin(pairingOrigin)||publicPwaPairing ? pairingOrigin : undefined,publicPwaPairing?body.publicJwk:undefined), 201);
     } catch (error) {
       if (error instanceof Error && error.message === "pairing_capacity_exceeded") {
         c.header("Retry-After", "300");
         return c.json({ error: { type: "pairing_capacity_exceeded" } }, 429);
       }
+      if(error instanceof Error&&['browser_key_invalid','pairing_key_required','pairing_origin_invalid'].includes(error.message))return c.json({error:{type:'invalid_request'}},400);
       throw error;
     }
   });
@@ -796,21 +823,25 @@ export function createApp(
   });
 
   app.post("/local/pair/consume", async (c) => {
+    const origin=c.req.header('origin'),publicPwaPairing=isPublicPwaOrigin(origin);
+    if(publicPwaPairing){const rate=pairingRateLimiter.take('public-pwa-pairing-consume',LOCAL_PAIRING_CONSUME_LIMIT,LOCAL_PAIRING_CONSUME_WINDOW_MS);if(!rate.ok){c.header('Retry-After',String(rate.retryAfter));return c.json({error:{type:'local_pairing_rate_limited'}},429);}}
     const parsed = await readBoundedJson(c.req.raw, MAX_LOCAL_CONTROL_REQUEST_BYTES);
     if (!parsed.ok) return c.json({ error: { type: parsed.reason === "too_large" ? "request_too_large" : "invalid_request" } }, parsed.reason === "too_large" ? 413 : 400);
     const body = parsed.value as Record<string, unknown>;
     if (!isUuidV4(body.id)) return c.json({ error: { type: "invalid_request" } }, 400);
-    const extraKeys = Object.keys(body).filter((key) => key !== "id" && key !== "publicJwk");
+    if(publicPwaPairing&&!hasExactKeys(body,['id','publicJwk','signature']))return c.json({error:{type:'invalid_request'}},400);
+    const extraKeys = Object.keys(body).filter((key) => key !== "id" && key !== "publicJwk" && !(publicPwaPairing&&key==='signature'));
     if (extraKeys.length > 0) return c.json({ error: { type: "invalid_request" } }, 400);
     // Optional native-client consent key enrollment, bound to the approved pairing.
     let client;
     try {
-      const origin = c.req.header('origin');
-      client = await pairing.consume(body.id, body.publicJwk, isExtensionOrigin(origin) ? origin : undefined);
+      client = await pairing.consume(body.id, body.publicJwk, isExtensionOrigin(origin)||publicPwaPairing ? origin : undefined,publicPwaPairing?body.signature:undefined);
     } catch (enrollmentError) {
       if (enrollmentError instanceof Error && enrollmentError.message === "browser_key_invalid") return c.json({ error: { type: "invalid_request" } }, 400);
       // The approved challenge is kept: the client may retry consume with its public key.
       if (enrollmentError instanceof Error && enrollmentError.message === "pairing_key_required") return c.json({ error: { type: "pairing_key_required" } }, 400);
+      if(enrollmentError instanceof Error&&enrollmentError.message==='pairing_proof_invalid')return c.json({error:{type:'pairing_proof_invalid'}},403);
+      if(enrollmentError instanceof Error&&enrollmentError.message==='pairing_invalid_or_expired')return c.json({error:{type:'pairing_pending_or_expired'}},409);
       throw enrollmentError;
     }
     if (client) return c.json(client);
@@ -1451,7 +1482,7 @@ export function createApp(
         admission: blocked ? { eligible: false, reason: deviceAccess.reason } : p.admission
       };
     }) ?? [];
-    let exposedConnections: Array<{ id: string; providerId: string; label: string; models: string[]; enabled: boolean; eligible: boolean }> = [];
+    let exposedConnections: Array<{ id: string; providerId: string; accessMode: string; label: string; models: string[]; enabled: boolean; eligible: boolean }> = [];
     if (connectionProfiles) {
       try {
         // Providers configured through the CLI/TUI become connections (voice, transcription and media use those),
@@ -1468,6 +1499,7 @@ export function createApp(
           return {
             id: p.id,
             providerId: p.providerId,
+            accessMode: p.accessMode,
             label: p.label || p.providerId,
             models: [...p.modelIds],
             enabled: p.enabled,
@@ -1887,7 +1919,7 @@ export function createApp(
   // (e.g. VS Code) present no Origin and resolve the key enrolled at pairing time.
   // In both cases consent additionally requires the per-plan signature; a stolen
   // bearer without the enrolled private key cannot consent.
-  mountWorkspaceRoutes(app, workspace, combinedReady, header=>resolveLocalPrincipal(header,secrets,identityEpoch?.()),(header,origin)=>origin!==undefined?(LOCAL_UI_ORIGINS.has(origin)||isExtensionOrigin(origin)?browserSessions.enrolledKey(header):Promise.resolve(undefined)):browserSessions.enrolledKey(header),automationService,secrets,
+  mountWorkspaceRoutes(app, workspace, combinedReady, header=>resolveLocalPrincipal(header,secrets,identityEpoch?.()),(header,origin)=>origin!==undefined?(LOCAL_UI_ORIGINS.has(origin)||isExtensionOrigin(origin)||isPublicPwaOrigin(origin)?browserSessions.enrolledKey(header):Promise.resolve(undefined)):browserSessions.enrolledKey(header),automationService,secrets,
     (principalId,projectId,command,conversationId,requestId,authorization,contextRevision)=>{
       if(conversationId===undefined&&requestId===undefined&&contextRevision===undefined)return undefined;
       if((conversationId!==undefined||requestId!==undefined)&&(!conversationId||!requestId))throw new WorkspaceError('conversation_admission_required',400);
@@ -2427,7 +2459,7 @@ async function hasValidLocalToken(supplied: string, secrets: SecretStore): Promi
  */
 async function authorizeClientKeyManagement(origin: string | undefined, authorization: string | undefined, secrets: SecretStore, limiter: LocalAuthRateLimiter): Promise<{ allowed: true } | { allowed: false; rateLimited: boolean; retryAfterSeconds: number }> {
   if (await hasAdministrativeToken(authorization, secrets)) return {allowed:true};
-  if (origin !== undefined && LOCAL_UI_ORIGINS.has(origin)) {
+  if (origin !== undefined && (LOCAL_UI_ORIGINS.has(origin)||isPublicPwaOrigin(origin))) {
     const token=parseLocalBearer(authorization);
     const clientId=token ? /^utk_local_([0-9a-f-]{36})\./i.exec(token)?.[1] : undefined;
     if (clientId) {
@@ -2436,7 +2468,7 @@ async function authorizeClientKeyManagement(origin: string | undefined, authoriz
         const authenticated=await resolveBearer(secrets,token);
         if (authenticated.ok && authenticated.resolved.kind==='client' && !authenticated.resolved.delegation) {
           const policy=authenticated.resolved.policy;
-          if (registration?.audience==='pwa' && registration.enrolledVia==='browser-session' && registration.projects==='*'
+          if (isApprovedPwaRegistration(registration,origin) && registration?.projects==='*'
             && policy && policy.retentionMode!=='ephemeral' && policy.expiresAt===null
             && policy.projectIds.length===0 && policy.providerIds.length===0 && policy.modelIds.length===0
             && (!policy.limits || Object.keys(policy.limits).length===0)

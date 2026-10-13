@@ -20,8 +20,22 @@ export async function openPty({ file, args = [], cwd, env, cols = 120, rows = 36
   let exitCode = null;
   let exited = false;
   let firstDataAt = null;
+  const screenObservers = new Set();
   const child = pty.spawn(file, args, { name: "xterm-256color", cols, rows, cwd, env, useConpty: true });
-  child.onData((data) => { if (firstDataAt === null) firstDataAt = performance.now(); raw += data; parsed = parsed.then(() => new Promise((done) => term.write(data, done))); });
+  child.onData((data) => {
+    const receivedAt = performance.now();
+    if (firstDataAt === null) firstDataAt = receivedAt;
+    raw += data;
+    parsed = parsed.then(() => new Promise((done) => {
+      const parseStartedAt = performance.now();
+      term.write(data, () => {
+        const parsedAt = performance.now();
+        const timing = { receivedAt, parseStartedAt, parsedAt, bytes: Buffer.byteLength(data) };
+        for (const observer of screenObservers) observer(timing);
+        done();
+      });
+    }));
+  });
   child.onExit((event) => { exitCode = event.exitCode; exited = true; });
   const screen = () => Array.from({ length: term.rows }, (_, row) => term.buffer.active.getLine(term.buffer.active.viewportY + row)?.translateToString(true) ?? "").join("\n");
   const full = () => { const lines = []; for (let i = 0; i < term.buffer.active.length; i++) lines.push(term.buffer.active.getLine(i)?.translateToString(true) ?? ""); return lines.join("\n"); };
@@ -37,6 +51,7 @@ export async function openPty({ file, args = [], cwd, env, cols = 120, rows = 36
   async function send(bytes, settle = 90) { child.write(bytes); await delay(settle); await parsed; }
   return {
     term, child, screen, full, until, send,
+    observeScreen(observer) { screenObservers.add(observer); return () => screenObservers.delete(observer); },
     raw: () => raw,
     firstDataAt: () => firstDataAt,
     exited: () => ({ exited, exitCode }),

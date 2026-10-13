@@ -3,10 +3,11 @@ import { isDataRecord } from './plain-data.js';
 import { canonicalJson } from './canonical.js';
 
 /** New enrollment never derives authority from a client-supplied display label.
- * PWA enrollment uses its separate browser-session protocol, not this grant.
+ * Public PWA pairing is separately approved and bound to its exact origin and key.
+ * Local PWA enrollment retains its separate browser-session protocol.
  * 'tui' (additive, B9): requested explicitly and approved with the same audience; the
  * server binds it to an enrolled P-256 key at consume. Older values keep their meaning. */
-export const PAIRING_AUDIENCES = Object.freeze(['legacy', 'vscode', 'browser-extension', 'tauri', 'tui']);
+export const PAIRING_AUDIENCES = Object.freeze(['legacy', 'vscode', 'browser-extension', 'tauri', 'tui', 'pwa']);
 export function parsePairingAudience(value) {
   if (value === undefined) return 'legacy';
   if (typeof value !== 'string' || !PAIRING_AUDIENCES.includes(value)) throw new Error('pairing_audience_invalid');

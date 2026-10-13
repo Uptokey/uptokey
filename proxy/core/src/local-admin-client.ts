@@ -5,7 +5,7 @@ import { parsePairingAudience, type PairingAudience } from "@uptokey/sync-contra
 export type PairingApproval = { id: string; userCode: string; audience?: PairingAudience };
 
 export function parsePairingApprovalArgs(args: readonly string[]): PairingApproval {
-  if ((args.length !== 2 && args.length !== 4) || (args.length === 4 && args[2] !== "--audience")) throw new Error("Use: uptokey proxy pair approve <challenge-id> <codigo> [--audience legacy|vscode|browser-extension|tauri|tui]");
+  if ((args.length !== 2 && args.length !== 4) || (args.length === 4 && args[2] !== "--audience")) throw new Error("Use: uptokey proxy pair approve <challenge-id> <codigo> [--audience legacy|vscode|browser-extension|tauri|tui|pwa]");
   return { id: args[0]!, userCode: args[1]!, audience: parsePairingAudience(args[3]) };
 }
 

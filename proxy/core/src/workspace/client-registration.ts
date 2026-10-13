@@ -12,6 +12,7 @@ import { isDataRecord } from "@uptokey/sync-contract/plain-data";
 import type { SecretStore } from "../secret-store.ts";
 import { serialClientAuthority } from '../client-authority-lock.ts';
 import { VALID_AUDIENCES, type ClientAudience } from "./client-access-policy.ts";
+import {isPublicPwaOrigin} from './browser-enrollment.ts';
 
 export const CLIENT_REGISTRATION_SCHEMA_VERSION = 1;
 export type ClientEnrollmentPath = "browser-session" | "pairing" | "provision" | "legacy-migration";
@@ -28,7 +29,7 @@ export interface StoredClientRegistration {
   /** Projects this client may touch; "*" = every project of its principal. */
   readonly projects: "*" | readonly string[];
   readonly createdAt: string;
-  /** Exact extension origin admitted in the administrator-approved pairing. */
+  /** Exact browser origin admitted in the administrator-approved pairing. */
   readonly browserOrigin?: string;
 }
 
@@ -42,7 +43,10 @@ export function parseClientRegistration(value: unknown): StoredClientRegistratio
   if (!isDataRecord(value)) throw new Error("client_registration_invalid");
   const allowed = ["schemaVersion", "clientId", "audience", "enrolledVia", "policyRevision", "projects", "createdAt"];
   if (Object.keys(value).some((key) => !allowed.includes(key) && key !== "browserOrigin") || allowed.some((key) => !Object.hasOwn(value, key))) throw new Error("client_registration_invalid");
-  if (value.browserOrigin !== undefined && (value.audience !== 'browser-extension' || typeof value.browserOrigin !== 'string' || !/^chrome-extension:\/\/[a-p]{32}$/.test(value.browserOrigin))) throw new Error("client_registration_invalid");
+  if (value.browserOrigin !== undefined && !(
+    value.audience === 'browser-extension' && typeof value.browserOrigin === 'string' && /^chrome-extension:\/\/[a-p]{32}$/.test(value.browserOrigin) ||
+    value.audience === 'pwa' && value.enrolledVia === 'pairing' && isPublicPwaOrigin(value.browserOrigin)
+  )) throw new Error("client_registration_invalid");
   if (value.schemaVersion !== CLIENT_REGISTRATION_SCHEMA_VERSION) throw new Error("client_registration_version_unsupported");
   if (typeof value.clientId !== "string" || !CLIENT_ID.test(value.clientId)) throw new Error("client_registration_invalid");
   if (typeof value.audience !== "string" || !(VALID_AUDIENCES as readonly string[]).includes(value.audience)) throw new Error("client_registration_invalid");

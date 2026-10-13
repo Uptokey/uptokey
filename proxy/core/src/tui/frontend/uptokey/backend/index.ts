@@ -12,6 +12,8 @@ import { COMMANDS, resolveSlash, runCommand, type PanelName, type UiActions } fr
 import type { TuiController } from "../../../controller.ts"
 import type { ModelView, ProviderView } from "../../../connections.ts"
 import { SessionMirror } from "./mirror.ts"
+import { CoalescedSync } from "./coalesced-sync.ts"
+import type { TranscriptItem } from "../../../transcript.ts"
 import { createTimeAssigner, projectTranscript, type ProjectedMessage } from "./projection.ts"
 import { createApprovalActions, type BoundRunRequest } from "../../../approvals.ts"
 import { mentionedFolders } from "./folder-mentions.ts"
@@ -111,7 +113,8 @@ export class UptokeyBackend {
   private shownSession = ""
   /** > 0 while the frontend itself is creating a conversation: it navigates by the returned id, not by event. */
   private creating = 0
-  private readonly handleControllerChange = () => this.sync()
+  private readonly changeSync = new CoalescedSync(() => this.sync())
+  private readonly handleControllerChange = () => this.changeSync.request()
   /** A debug session the person confirmed opens its panel (state, stack, variables, breakpoints, output). */
   private readonly handleDebugger = () => {
     trace("debugger.open")
@@ -144,6 +147,7 @@ export class UptokeyBackend {
 
   dispose() {
     this.disposed = true
+    this.changeSync.dispose()
     this.options.controller.off("change", this.handleControllerChange)
     this.options.controller.off("draft", this.handleDraft)
     this.options.controller.off("debugger", this.handleDebugger)
@@ -387,11 +391,11 @@ export class UptokeyBackend {
     )
   }
 
-  private projection(): ProjectedMessage[] {
+  private projection(items = this.options.controller.items()): ProjectedMessage[] {
     const controller = this.options.controller
     const destination = this.destination()
     const hints = new Map(controller.state.messages.map((message) => [message.id, Date.parse(message.timestamp) || undefined] as const))
-    return projectTranscript(this.stableIds.apply(controller.items()), {
+    return projectTranscript(this.stableIds.apply(items), {
       sessionID: this.activeId ?? "",
       providerID: destination.providerID,
       modelID: destination.modelID,
@@ -408,7 +412,9 @@ export class UptokeyBackend {
   /** Called on every coalesced controller change. */
   private sync() {
     if (this.disposed) return
+    this.changeSync.cancel()
     const controller = this.options.controller
+    const items = controller.items()
     // Moving to another project folder changes what the window shows (folder in the footer, its conversations):
     // the frontend reloads paths, project and sessions from this backend.
     const root = controller.view.binding?.rootPath ?? null
@@ -457,7 +463,7 @@ export class UptokeyBackend {
       this.stableIds.reset()
       this.times.reset()
       // Compactions that existed before this session was shown were judged (or not) when they happened.
-      for (const item of controller.items()) if (item.kind === "compaction") this.checkedCompactions.add(item.id)
+      for (const item of items) if (item.kind === "compaction") this.checkedCompactions.add(item.id)
       this.permissions.reset()
     }
     if (this.creating === 0 && (active ?? "") !== this.shownSession) {
@@ -478,14 +484,14 @@ export class UptokeyBackend {
             this.sync()
           })
       }
-      this.toastHomeNotices()
+      this.toastHomeNotices(items)
       return
     }
     // Notices raised while a conversation is shown are part of its transcript; never toast them again later.
-    for (const item of controller.items()) if (item.kind === "notice") this.toasted.add(item.id)
+    for (const item of items) if (item.kind === "notice") this.toasted.add(item.id)
 
-    const projected = this.projection()
-    this.checkCompactions()
+    const projected = this.projection(items)
+    this.checkCompactions(items)
     if (process.env.UPTOKEY_TUI_DEBUG_LOG) {
       trace("sync.projection", {
         turn: controller.state.turn,
@@ -496,7 +502,7 @@ export class UptokeyBackend {
     if (result.resync) {
       for (const event of this.mirror.clear()) this.emit(event as any)
       this.times.reset()
-      result = this.mirror.diff(this.projection())
+      result = this.mirror.diff(this.projection(items))
     }
     for (const event of result.events) this.emit(event as any)
     for (const event of this.permissions.diff(active, controller.view.proposal, controller.view.approvals, controller.features.review ?? this.lspConfirmation())) this.emit(event)
@@ -568,8 +574,8 @@ export class UptokeyBackend {
    * On the home screen there is no transcript to carry the controller's notices (an error from a command typed
    * there, a missing adapter, a refused operation): show each new one once as a toast, so feedback is never silent.
    */
-  private toastHomeNotices() {
-    for (const item of this.options.controller.items()) {
+  private toastHomeNotices(items: readonly TranscriptItem[]) {
+    for (const item of items) {
       if (item.kind !== "notice" || this.toasted.has(item.id)) continue
       this.toasted.add(item.id)
       const message = item.hint ? `${item.text}\n${item.hint}` : item.text
@@ -581,9 +587,9 @@ export class UptokeyBackend {
    * After a compaction, Jev checks whether the summary kept the goal, decisions, pending changes, approvals, open
    * errors and next steps; a weak summary is reported so the person can keep the full history instead.
    */
-  private checkCompactions() {
+  private checkCompactions(items: readonly TranscriptItem[]) {
     const controller = this.options.controller
-    for (const item of controller.items()) {
+    for (const item of items) {
       if (item.kind !== "compaction" || this.checkedCompactions.has(item.id)) continue
       this.checkedCompactions.add(item.id)
       void verifyCompactionQuality(item.summary, controller.state.messages, { externalAllowed: this.externalAllowed, timeoutMs: 3000 }).then((result) => {

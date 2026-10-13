@@ -13,6 +13,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { findExecutable, openPty } from "./lib/pty-session.mjs";
+import { echoLatency } from "./lib/tui-echo-latency.mjs";
+import { resolvePortableRuntime } from "../src/tui/portable-runtime.mjs";
 
 const core = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = tuiEvidenceDirectory(core);
@@ -20,11 +22,17 @@ const frontend = join(core, "src/tui/frontend");
 const arg = (name, fallback) => { const index = process.argv.indexOf(name); return index >= 0 ? Number(process.argv[index + 1]) : fallback; };
 const runs = arg("--runs", 3);
 const bigLines = arg("--lines", 20000); // logical lines of history, in 1000-line turns (the core caps one answer)
+const echoSamples = arg("--echo-samples", 32);
+const echoGap = arg("--echo-gap", 20);
+if (!Number.isInteger(echoSamples) || echoSamples < 1 || echoSamples > 64) throw new Error("echo_samples_invalid");
+const echoText = "abcdefghijklmnopqrstuvwxyz".repeat(3).slice(0, echoSamples);
 const bundle = process.env.UPTOKEY_FRONTEND_BUNDLE;
+const traceEnabled = process.argv.includes("--trace");
+const statsEnabled = process.argv.includes("--stats");
 const CLEAR_LINE = "\x15";
 
 const percentile = (values, p) => { const sorted = [...values].sort((a, b) => a - b); return sorted.length ? sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)] : null; };
-const stats = (values) => ({ n: values.length, p50: percentile(values, 50), p95: percentile(values, 95), max: Math.max(...values, 0) });
+const stats = (input) => { const values = input.filter(Number.isFinite); return { n: values.length, p50: percentile(values, 50), p95: percentile(values, 95), max: values.length ? Math.max(...values) : null }; };
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 
 async function startFixture() {
@@ -38,47 +46,44 @@ async function startFixture() {
     createInterface({ input: child.stdout }).once("line", (line) => resolveInfo(JSON.parse(line)));
     child.once("exit", (code) => reject(new Error(`fixture exited ${code}`)));
   });
-  return { info, work, stop: () => { child.stdin.end(); setTimeout(() => void rm(work, { recursive: true, force: true }).catch(() => undefined), 1500); } };
+  return { info, work, stop: async () => {
+    const exited = new Promise((done) => child.once("exit", done));
+    child.stdin.end();
+    let timeout;
+    await Promise.race([exited, new Promise((done) => { timeout = setTimeout(done, 5000); })]);
+    clearTimeout(timeout);
+    if (child.exitCode === null && child.signalCode === null) { child.kill(); await exited; }
+    // work was created by mkdtemp directly under this execution's private workRoot.
+    if (dirname(work) !== workRoot) throw new Error("benchmark_cleanup_path_invalid");
+    await rm(work, { recursive: true, force: true });
+  } };
 }
 
 function envFor(info, work, statsFile) {
   const allowed = /^(path|pathext|systemroot|windir|comspec|temp|tmp|userprofile|localappdata|appdata|programfiles|programfiles\(x86\)|processor_architecture)$/i;
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.test(key)));
-  return Object.assign(env, { UPTOKEY_FIXTURE: JSON.stringify(info), UPTOKEY_QUIMERA_DATA_DIR: info.dirs.data, UPTOKEY_SETTINGS_DIR: info.dirs.settings, UPTOKEY_AUTOMATIONS_DIR: info.dirs.automations, UPTOKEY_TUI_HOME: join(work, "tui-home"), UPTOKEY_TUI_STATS: statsFile, UPTOKEY_TUI_DEBUG_LOG: join(work, "trace.jsonl"), UPTOKEY_LANG: "pt-BR", TERM: "xterm-256color", COLORTERM: "truecolor" });
-}
-
-/** Time from writing a key to seeing it on the terminal screen model (parse time of the harness included). */
-async function echoLatency(term, text, gapMs = 60) {
-  const samples = [];
-  for (const ch of text) {
-    const before = term.screen();
-    const started = performance.now();
-    term.child.write(ch);
-    for (;;) {
-      await term.until(() => true, "parsed", 1000);
-      const now = term.screen();
-      if (now !== before && now.includes(ch)) break;
-      if (performance.now() - started > 3000) break;
-      await wait(2);
-    }
-    samples.push(performance.now() - started);
-    await wait(gapMs);
-  }
-  return samples;
+  return Object.assign(env, { UPTOKEY_FIXTURE: JSON.stringify(info), UPTOKEY_QUIMERA_DATA_DIR: info.dirs.data, UPTOKEY_SETTINGS_DIR: info.dirs.settings, UPTOKEY_AUTOMATIONS_DIR: info.dirs.automations, UPTOKEY_TUI_HOME: join(work, "tui-home"), ...(statsEnabled ? { UPTOKEY_TUI_STATS: statsFile } : {}), ...(traceEnabled ? { UPTOKEY_TUI_DEBUG_LOG: join(work, "trace.jsonl") } : {}), UPTOKEY_LANG: "pt-BR", TERM: "xterm-256color", COLORTERM: "truecolor" });
 }
 
 async function readStats(file) { try { return JSON.parse(await readFile(file, "utf8")); } catch { return null; } }
+async function bundleRuntime() {
+  const info = JSON.parse(await readFile(join(bundle, "BUILD_INFO.json"), "utf8"));
+  return info.platform === "portable" ? resolvePortableRuntime(bundle) : { runtime: join(bundle, info.runtime), env: {} };
+}
 
 async function oneRun() {
   const fixture = await startFixture();
   const statsFile = join(fixture.work, "stats.json");
   const env = envFor(fixture.info, fixture.work, statsFile);
   const spawnedAt = performance.now();
-  const term = bundle
-    ? await openPty({ file: join(bundle, "runtime", process.platform === "win32" ? "bun.exe" : "bun"), args: [join(bundle, "fixture-entry.js")], cwd: core, env: { ...env, OTUI_TREE_SITTER_WORKER_PATH: join(bundle, "opentui-tree-sitter-worker.js") } })
-    : await openPty({ file: findExecutable("bun"), args: ["run", "uptokey/fixture-entry.tsx"], cwd: frontend, env });
+  let term;
   const result = {};
+  result.echoBreakdown = { idle: [], streaming: [], afterHistory: [] };
   try {
+    const runtime = bundle ? await bundleRuntime() : null;
+    term = bundle
+      ? await openPty({ file: runtime.runtime, args: [join(core, "scripts/lib/tui-packaged-fixture.mjs")], cwd: core, env: { ...env, ...runtime.env, UPTOKEY_FRONTEND_BUNDLE: resolve(bundle), OTUI_TREE_SITTER_WORKER_PATH: join(bundle, "opentui-tree-sitter-worker.js") } })
+      : await openPty({ file: findExecutable("bun"), args: ["run", "uptokey/fixture-entry.tsx"], cwd: frontend, env });
     await term.until(() => /█▀▀▀▄|▀▀▀▀▀▀/.test(term.screen()), "no first frame", 60000);
     result.firstFrameMs = performance.now() - spawnedAt;
     result.firstByteMs = (term.firstDataAt() ?? performance.now()) - spawnedAt;
@@ -92,13 +97,16 @@ async function oneRun() {
     } catch { /* trace unavailable */ }
     await wait(1200);
     result.idleRssMiB = (await readStats(statsFile))?.rss / 1048576;
-    result.idleEchoMs = await echoLatency(term, "abcdefghij");
+    result.idleEchoMs = await echoLatency(term, echoText, echoGap, { onSample: (sample) => result.echoBreakdown.idle.push(sample) });
     term.child.write(CLEAR_LINE);
     await wait(300);
     // Echo latency while an answer streams.
     term.child.write("LONGA resposta\r");
     await term.until(() => /LINHA_?010/.test(term.screen()), "stream did not start", 30000);
-    result.streamEchoMs = await echoLatency(term, "klmnopqrstuv");
+    result.streamEchoMs = await echoLatency(term, echoText, echoGap, {
+      beforeSample: () => { if (!/esc\s+(interromper|interrupt)/.test(term.screen())) throw new Error("stream_finished_before_echo_samples"); },
+      onSample: (sample) => result.echoBreakdown.streaming.push(sample),
+    });
     await term.until(() => /LINHA_?160/.test(term.screen()), "stream did not finish", 60000);
     // A long history: many turns of 1000 lines each, then memory and responsiveness.
     const turns = Math.max(1, Math.round(bigLines / 1000));
@@ -116,10 +124,10 @@ async function oneRun() {
     const after = await readStats(statsFile);
     result.hugeRssMiB = after?.rss / 1048576;
     result.hugePeakRssMiB = after?.peakRss / 1048576;
-    result.afterHugeEchoMs = await echoLatency(term, "uvwxyz");
+    result.afterHugeEchoMs = await echoLatency(term, echoText, echoGap, { onSample: (sample) => result.echoBreakdown.afterHistory.push(sample) });
   } finally {
-    await term.close();
-    fixture.stop();
+    await term?.close();
+    await fixture.stop();
   }
   return result;
 }
@@ -129,10 +137,11 @@ async function oneRun() {
  * once and echoes raw input. Its first byte is the process-spawn cost of this host; its echo is the terminal path.
  */
 async function baseline() {
-  const runtime = bundle ? join(bundle, "runtime", process.platform === "win32" ? "bun.exe" : "bun") : findExecutable("bun");
+  const resolvedRuntime = bundle ? await bundleRuntime() : null;
+  const runtime = resolvedRuntime?.runtime ?? findExecutable("bun");
   const script = "process.stdout.write('ready');process.stdin.setRawMode?.(true);process.stdin.on('data',(d)=>process.stdout.write(d));";
   const spawnedAt = performance.now();
-  const term = await openPty({ file: runtime, args: ["-e", script], cwd: core, env: { ...process.env } });
+  const term = await openPty({ file: runtime, args: ["-e", script], cwd: core, env: { ...process.env, ...resolvedRuntime?.env } });
   try {
     await term.until(() => term.screen().includes("ready"), "baseline did not start", 30000);
     const firstByteMs = (term.firstDataAt() ?? performance.now()) - spawnedAt;
@@ -150,7 +159,7 @@ const samples = [];
 for (let index = 0; index < runs; index++) {
   const sample = await oneRun();
   samples.push(sample);
-  process.stdout.write(`run ${index + 1}: first byte ${Math.round(sample.firstByteMs)} ms, first frame ${Math.round(sample.firstFrameMs)} ms, ready ${Math.round(sample.readyMs)} ms, idle ${sample.idleRssMiB?.toFixed(0)} MiB, history ${sample.historyLines} lines ${sample.hugeRssMiB?.toFixed(0)} MiB\n`);
+    process.stdout.write(`run ${index + 1}: first byte ${Math.round(sample.firstByteMs)} ms, first frame ${Math.round(sample.firstFrameMs)} ms, ready ${Math.round(sample.readyMs)} ms, history ${sample.historyLines} lines${statsEnabled ? `, idle ${sample.idleRssMiB?.toFixed(0)} MiB, after history ${sample.hugeRssMiB?.toFixed(0)} MiB` : ", RSS not sampled"}\n`);
 }
 
 const summary = {
@@ -168,11 +177,17 @@ const summary = {
   hugeRssMiB: stats(samples.map((entry) => entry.hugeRssMiB)),
   hugePeakRssMiB: stats(samples.map((entry) => entry.hugePeakRssMiB)),
   afterHugeEchoMs: stats(samples.flatMap((entry) => entry.afterHugeEchoMs)),
+  echoBreakdown: Object.fromEntries(["idle", "streaming", "afterHistory"].map((phase) => [phase, Object.fromEntries(
+    ["inputToOutputMs", "harnessQueueMs", "harnessParseMs", "inputToParsedMs", "observedMs"].map((metric) => [metric, stats(samples.flatMap((entry) => entry.echoBreakdown[phase].map((sample) => sample[metric])))])
+  )])),
 };
 await mkdir(output, { recursive: true });
 await writeFile(join(output, bundle ? "bench-bundle.json" : "bench.json"), JSON.stringify({
   date: new Date().toISOString(), runtime: bundle ? "bundle (bun runtime)" : "sources (bun run)", node: process.version,
   hardware: { cpu: os.cpus()[0]?.model, cores: os.cpus().length, memoryGiB: Math.round(os.totalmem() / 1073741824), platform: `${os.platform()} ${os.release()}` },
   terminal: "ConPTY + xterm/headless 120x36 (harness parse time is part of every echo sample)", core: "isolated real app with scripted upstream", historyLines: bigLines, runs, summary, samples,
+  echoMethod: "unique cumulative input marker on its seeded row; timeout fails the benchmark instead of becoming a sample",
+  timingMethod: "First matching parsed screen, linked to that chunk's ConPTY receipt and parser queue/start/end. inputToOutput includes product+OS+PTY; it does not isolate renderer time. Only ongoing streams sampled.",
+  instrumentation: { traceEnabled, statsEnabled, echoSamples, echoGap, scope: bundle ? "Exact product main.js/chunks; external fixture supplies isolated source controller and scripted upstream" : "Development sources" },
 }, null, 2));
 console.log(JSON.stringify(summary, null, 1));
