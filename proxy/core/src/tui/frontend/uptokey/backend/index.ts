@@ -34,6 +34,7 @@ import { preparePromptParts, type PromptPart } from '../prompt-parts.ts'
 import type { PromptInfo } from '../prompt-info.ts'
 import { connectionText } from '../integration-connections.ts'
 import { terminalText } from '../integration-terminal.ts'
+import { HOSTED_PROVIDER } from '../../../hosted.ts'
 
 /** Title the core gives a conversation created without one (workspace/conversations.ts::createConversation). */
 const DEFAULT_CORE_TITLE = "Nova conversa"
@@ -115,6 +116,7 @@ export class UptokeyBackend {
   private creating = 0
   private readonly changeSync = new CoalescedSync(() => this.sync())
   private readonly handleControllerChange = () => this.changeSync.request()
+  private readonly handleModelsChanged = () => this.refreshAll()
   /** A debug session the person confirmed opens its panel (state, stack, variables, breakpoints, output). */
   private readonly handleDebugger = () => {
     trace("debugger.open")
@@ -141,6 +143,7 @@ export class UptokeyBackend {
     this.ready = options.controller.start().then(() => this.refreshModelInputs()).catch(() => undefined)
     this.client = this.createClient()
     options.controller.on("change", this.handleControllerChange)
+    options.controller.on("modelsChanged", this.handleModelsChanged)
     options.controller.on("draft", this.handleDraft)
     options.controller.on("debugger", this.handleDebugger)
   }
@@ -149,6 +152,7 @@ export class UptokeyBackend {
     this.disposed = true
     this.changeSync.dispose()
     this.options.controller.off("change", this.handleControllerChange)
+    this.options.controller.off("modelsChanged", this.handleModelsChanged)
     this.options.controller.off("draft", this.handleDraft)
     this.options.controller.off("debugger", this.handleDebugger)
     this.handlers.clear()
@@ -376,8 +380,22 @@ export class UptokeyBackend {
 
   private connectedProviders(): Provider[] {
     const snapshot = this.options.controller.view.connections
-    if (!snapshot) return []
-    return snapshot.providers.filter((provider) => provider.eligible && provider.models.length > 0).map((provider) => this.toProvider(provider, snapshot.models))
+    const own = (snapshot?.providers ?? []).filter((provider) => provider.eligible && provider.models.length > 0).map((provider) => this.toProvider(provider, snapshot?.models ?? []))
+    const hosted = this.hostedProvider()
+    return hosted ? [...own, hosted] : own
+  }
+
+  private hostedProvider(): Provider | undefined {
+    const models = this.controller.hostedModels ?? []
+    if (!models.length) return undefined
+    return { id: HOSTED_PROVIDER, name: "Uptokey", source: "api", env: [], options: {}, models: Object.fromEntries(models.map(item => {
+      const model: Model = { id: item.modelId, providerID: HOSTED_PROVIDER, api: { id: item.modelId, url: "", npm: "uptokey" }, name: item.label,
+        capabilities: { temperature: false, reasoning: false, attachment: false, toolcall: false,
+          input: { text: true, audio: false, image: false, video: false, pdf: false }, output: { text: true, audio: false, image: false, video: false, pdf: false }, interleaved: false },
+        cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: item.contextTokens, output: item.maxOutputTokens },
+        status: "active", options: { uptokeyFunding: "hosted-free" }, headers: {}, release_date: "" }
+      return [model.id, model]
+    })) }
   }
 
   private defaults(providers: Provider[]) {
@@ -847,9 +865,9 @@ export class UptokeyBackend {
   private async selectDestination(providerID: string, modelID: string) {
     const controller = this.options.controller
     const current = controller.client.getSelectedDestination()
-    this.frontendModel = modelID
     if (current.providerId === providerID && controller.state.selectedModel === modelID) return
     await controller.selectProviderModel(modelID, providerID)
+    this.frontendModel = modelID
   }
 
   // ─── the SDK client ──────────────────────────────────────────────────
@@ -885,7 +903,8 @@ export class UptokeyBackend {
             await self.refreshModelInputs()
             const snapshot = controller.view.connections
             const connected = self.connectedProviders()
-            const all = (snapshot?.providers ?? []).map((provider) => self.toProvider(provider, snapshot?.models ?? []))
+            const hosted = self.hostedProvider()
+            const all = [...(snapshot?.providers ?? []).map((provider) => self.toProvider(provider, snapshot?.models ?? [])), ...(hosted ? [hosted] : [])]
             return { data: { all, default: self.defaults(connected), connected: connected.map((provider) => provider.id) }, error: undefined }
           }),
         auth: () => ok({}),
@@ -1003,13 +1022,23 @@ export class UptokeyBackend {
           const binding = controller.view.binding
           const revision = controller.store.conversationRevision
           const storage = controller.state.storagePolicy
-          const processing = controller.state.processingPolicy
-          const assertCurrent = () => {
+          let processing = controller.state.processingPolicy
+          let destination = controller.client.getSelectedDestination()
+          const assertCurrent = (checkSelection = true) => {
             if (controller.state.activeConversation?.id !== conversationId || controller.view.binding !== binding
               || controller.store.conversationRevision !== revision || controller.state.storagePolicy !== storage
-              || controller.state.processingPolicy !== processing) throw new Error(connectionText("attachment_changed"))
+              || checkSelection && (controller.state.processingPolicy !== processing || controller.client.getSelectedDestination() !== destination)) throw new Error(connectionText("attachment_changed"))
           }
           if (params.model) await self.selectDestination(params.model.providerID, params.model.modelID)
+          assertCurrent(false)
+          // Selecting an external model deliberately updates local_only once. Other policy changes remain conflicts.
+          if (controller.state.processingPolicy !== processing) {
+            const remote = params.model && (params.model.providerID === HOSTED_PROVIDER || controller.view.connections?.providers.some(item => item.id === params.model!.providerID && item.kind !== "local"))
+            if (processing !== "local_only" || controller.state.processingPolicy !== "external_allowed" || !remote) throw new Error(connectionText("attachment_changed"))
+            processing = controller.state.processingPolicy
+          }
+          destination = controller.client.getSelectedDestination()
+          if (params.model && (destination.providerId !== params.model.providerID || controller.state.selectedModel !== params.model.modelID)) throw new Error(connectionText("attachment_changed"))
           assertCurrent()
           if (params.agent === "plan" || params.agent === "build" || params.agent === "autonomous") {
             const autonomy = params.agent === "autonomous"

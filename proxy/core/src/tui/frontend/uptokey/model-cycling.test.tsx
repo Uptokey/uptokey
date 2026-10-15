@@ -1,0 +1,221 @@
+/** @jsxImportSource @opentui/solid */
+import { expect, test } from "bun:test"
+import { testRender, useKeyboard, useRenderer } from "@opentui/solid"
+import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
+import { onCleanup } from "solid-js"
+import { createStore } from "solid-js/store"
+import { mkdtemp, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { LocalProvider, useLocal } from "../vendor/opencode-tui/context/local"
+import { SyncContext } from "../vendor/opencode-tui/context/sync"
+import { SDKProvider } from "../vendor/opencode-tui/context/sdk"
+import { ArgsProvider } from "../vendor/opencode-tui/context/args"
+import { PermissionProvider } from "../vendor/opencode-tui/context/permission"
+import { RouteProvider } from "../vendor/opencode-tui/context/route"
+import { TuiPathsProvider, TuiStartupProvider } from "../vendor/opencode-tui/context/runtime"
+import { TuiConfigProvider, resolve as resolveConfig } from "../vendor/opencode-tui/config"
+import { KVProvider } from "../vendor/opencode-tui/context/kv"
+import { ThemeProvider } from "../vendor/opencode-tui/context/theme"
+import { ToastProvider } from "../vendor/opencode-tui/ui/toast"
+import { DialogProvider, useDialog, type DialogContext } from "../vendor/opencode-tui/ui/dialog"
+import { DialogModel } from "../vendor/opencode-tui/component/dialog-model"
+import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../vendor/opencode-tui/keymap"
+import { setBackend } from "./backend/registry.ts"
+import { accountText } from "../../account-ui.ts"
+import { getLang, setLang, type Lang } from "../../i18n.ts"
+
+type Choice = { providerID: string; modelID: string }
+const choice = (modelID: string, providerID = "connected") => ({ providerID, modelID })
+const a = choice("model-a"), b = choice("model-b"), c = choice("model-c"), removed = choice("removed")
+
+async function mount(recent: Choice[], available: Choice[], current = a, favorite: Choice[] = []) {
+  const root = await mkdtemp(join(tmpdir(), "uptokey-model-cycle-"))
+  const original = JSON.stringify({ recent, favorite, variant: {} })
+  await Promise.all([
+    writeFile(join(root, "model.json"), original),
+    writeFile(join(root, "session.json"), '{"pinned":[]}'),
+    writeFile(join(root, "kv.json"), "{}"),
+  ])
+  const providerList = (items: Choice[]) => [...new Set(items.map(item => item.providerID))].map(id => ({
+    id, name: id, models: Object.fromEntries(items.filter(item => item.providerID === id).map(item => [item.modelID, {
+      id: item.modelID, name: item.modelID, providerID: id, status: "active", release_date: "", cost: { input: 0, output: 0 },
+      options: id === "uptokey-hosted" ? { uptokeyFunding: "hosted-free" } : {},
+    }])),
+  }))
+  const [data, setData] = createStore({
+    provider: providerList(available), provider_default: {}, config: { model: `${current.providerID}/${current.modelID}` },
+    agent: [{ name: "build", mode: "primary" }], session: [], mcp: {},
+    provider_next: { all: [], default: {}, connected: available.map(item => item.providerID) },
+    provider_auth: {}, console_state: { consoleManagedProviders: [] },
+  })
+  const events: unknown[] = [], changes = new Set<() => void>()
+  const account = { view: { session: { configured: true, authenticated: true, state: "connected" } } }
+  setBackend({ directory: root, controller: { account }, client: {}, subscribe: () => () => {},
+    emit: (event: unknown) => events.push(event),
+    onChange: (handler: () => void) => { changes.add(handler); return () => changes.delete(handler) },
+  } as never)
+  let local!: ReturnType<typeof useLocal>
+  let dialog!: DialogContext
+  function Consumer() {
+    local = useLocal()
+    dialog = useDialog()
+    useKeyboard(key => { if (key.name === "f2") local.model.cycle(key.shift ? -1 : 1) })
+    return <text>{local.model.parsed().provider}:{local.model.parsed().model}</text>
+  }
+  function Harness() {
+    const renderer = useRenderer(), keymap = createDefaultOpenTuiKeymap(renderer), config = resolveConfig({}, { terminalSuspend: false })
+    const off = registerOpencodeKeymap(keymap, renderer, config); onCleanup(off)
+    return <TuiPathsProvider value={{ cwd: root, home: root, state: root, worktree: root }}>
+      <TuiStartupProvider value={{ skipInitialLoading: true }}><OpencodeKeymapProvider keymap={keymap}><ArgsProvider><PermissionProvider><SDKProvider url="http://127.0.0.1">
+        <SyncContext.Provider value={{ data } as never}><TuiConfigProvider config={config}><KVProvider>
+          <ThemeProvider mode="dark" source={{ discover: async () => ({}) }}><ToastProvider><RouteProvider>
+            <LocalProvider><DialogProvider><Consumer /></DialogProvider></LocalProvider>
+          </RouteProvider></ToastProvider></ThemeProvider>
+        </KVProvider></TuiConfigProvider></SyncContext.Provider>
+      </SDKProvider></PermissionProvider></ArgsProvider></OpencodeKeymapProvider></TuiStartupProvider>
+    </TuiPathsProvider>
+  }
+  const app = await testRender(() => <Harness />, { width: 110, height: 34, kittyKeyboard: true })
+  const until = Date.now() + 2000
+  while (!local?.model.ready && Date.now() < until) { await Bun.sleep(5); await app.renderOnce() }
+  expect(local.model.ready).toBe(true)
+  return {
+    local, app, original, root, events, account,
+    async openModels() { dialog.replace(() => <DialogModel />); await app.flush(); await app.renderOnce() },
+    dialog: () => dialog,
+    async accountChanged() { for (const handler of changes) handler(); await Bun.sleep(160); await app.flush(); await app.renderOnce() },
+    available(items: Choice[]) { setData("provider", providerList(items)) },
+    async press(direction: 1 | -1) {
+      app.mockInput.pressKey("F2", direction === -1 ? { shift: true } : {})
+      await app.flush(); await app.renderOnce()
+    },
+    async unchanged() {
+      expect(await Bun.file(join(root, "model.json")).text()).toBe(original)
+    },
+  }
+}
+
+test("F2 skips a removed recent model instead of repeatedly returning to the fallback", async () => {
+  const h = await mount([a, removed, b], [a, b])
+  try {
+    await h.press(1); expect(h.local.model.current()).toEqual(b)
+    expect(h.app.captureCharFrame()).toContain("connected:model-b")
+    await h.press(1); expect(h.local.model.current()).toEqual(a)
+    await h.press(-1); expect(h.local.model.current()).toEqual(b)
+    await h.unchanged()
+  } finally { h.app.renderer.destroy() }
+})
+
+test("both directions skip several removed entries and wrap across valid recent models", async () => {
+  const h = await mount([removed, a, choice("gone-2"), b, choice("gone-3"), c], [a, b, c])
+  try {
+    for (const expected of [b, c, a]) { await h.press(1); expect(h.local.model.current()).toEqual(expected) }
+    for (const expected of [c, b, a]) { await h.press(-1); expect(h.local.model.current()).toEqual(expected) }
+    await h.unchanged()
+  } finally { h.app.renderer.destroy() }
+})
+
+test("a current model outside recent history enters at the first or last valid choice", async () => {
+  const h = await mount([removed, a, b], [a, b, c], c)
+  try {
+    await h.press(1); expect(h.local.model.current()).toEqual(a)
+    h.local.model.set(c)
+    await h.press(-1); expect(h.local.model.current()).toEqual(b)
+    await h.unchanged()
+  } finally { h.app.renderer.destroy() }
+})
+
+test("empty or wholly removed recents preserve the current model and its persisted preferences", async () => {
+  for (const recent of [[], [removed, choice("gone-2")]]) {
+    const h = await mount(recent, [a])
+    try {
+      await h.press(1); await h.press(-1)
+      expect(h.local.model.current()).toEqual(a)
+      await h.unchanged()
+    } finally { h.app.renderer.destroy() }
+  }
+})
+
+test("catalog removal while open is applied to the next shortcut without pruning saved history", async () => {
+  const h = await mount([a, b, c], [a, b, c])
+  try {
+    await h.press(1); expect(h.local.model.current()).toEqual(b)
+    h.available([a, c])
+    await h.press(1); expect(h.local.model.current()).toEqual(c)
+    h.available([])
+    await h.press(1); expect(h.local.model.current()).toBeUndefined()
+    expect(h.local.model.recent()).toEqual([a, b, c])
+    await h.unchanged()
+  } finally { h.app.renderer.destroy() }
+})
+
+test("same provider/model across two account UUIDs remains two distinct destinations", async () => {
+  const personal = choice("same-model", "conn:11111111-1111-4111-8111-111111111111")
+  const work = choice("same-model", "conn:22222222-2222-4222-8222-222222222222")
+  const disconnected = choice("same-model", "conn:33333333-3333-4333-8333-333333333333")
+  const h = await mount([personal, disconnected, work], [personal, work], personal, [work, personal])
+  try {
+    await h.press(1); expect(h.local.model.current()).toEqual(work)
+    await h.press(-1); expect(h.local.model.current()).toEqual(personal)
+    expect(h.local.model.favorite()).toEqual([work, personal])
+    await h.unchanged()
+  } finally { h.app.renderer.destroy() }
+})
+
+test("the real model dialog keeps connected BYOK/local before Free, including saved Free favorites", async () => {
+  const free = choice("Free-model-one", "uptokey-hosted"), local = choice("Local-model", "ollama")
+  const h = await mount([free], [a, free, local], a, [free])
+  try {
+    await h.openModels()
+    const frame = h.app.captureCharFrame()
+    expect(frame).toContain("Free-model-one")
+    expect(frame.indexOf("model-a")).toBeLessThan(frame.indexOf("Free-model-one"))
+    expect(frame.indexOf("Local-model")).toBeLessThan(frame.indexOf("Free-model-one"))
+    expect(h.local.model.parsed().hostedFree).toBe(false)
+    await h.app.mockInput.typeText("Free-model-one"); await h.app.flush(); await h.app.renderOnce()
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    expect(h.local.model.current()).toEqual(free)
+    expect(h.local.model.parsed().hostedFree).toBe(true)
+    expect(h.dialog().stack).toHaveLength(0)
+    expect(h.events).toEqual([])
+  } finally { h.app.renderer.destroy() }
+})
+
+test("Free model labels and the optional sign-in entry are localized in all ten languages", async () => {
+  const previous = getLang(), free = choice("Hosted-model", "uptokey-hosted")
+  const h = await mount([], [a, free], a)
+  try {
+    for (const lang of ["en", "pt-BR", "es", "fr", "de", "it", "ja", "ko", "zh-CN", "ar"] as Lang[]) {
+      setLang(lang)
+      await h.openModels()
+      expect(h.app.captureCharFrame()).toContain(accountText("free"))
+      expect(h.app.captureCharFrame()).not.toContain(`${accountText("sign_in")} · ${accountText("free")}`)
+      h.account.view.session.authenticated = false
+      h.available([a])
+      await h.openModels()
+      expect(h.app.captureCharFrame()).toContain(`${accountText("sign_in")} · ${accountText("free")}`)
+      expect(h.app.captureCharFrame()).not.toContain("Hosted-model")
+      h.account.view.session.authenticated = true
+      h.available([a, free])
+    }
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})
+
+test("signed-out Free entry opens the existing account panel only on explicit selection", async () => {
+  const previous = getLang(), h = await mount([], [a])
+  setLang("en")
+  h.account.view.session.authenticated = false
+  try {
+    await h.openModels()
+    expect(h.events).toEqual([])
+    await h.app.mockInput.typeText("Sign in"); await h.app.flush(); await h.app.renderOnce()
+    h.app.mockInput.pressEnter(); await h.app.flush()
+    expect(h.events).toEqual([{ type: "uptokey.panel.open", properties: { name: "account" } }])
+    expect(h.local.model.current()).toEqual(a)
+    await h.unchanged()
+    h.account.view.session.configured = false
+    await h.accountChanged()
+    expect(h.app.captureCharFrame()).not.toContain("Sign in · Free")
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})

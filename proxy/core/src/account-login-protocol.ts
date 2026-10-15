@@ -1,4 +1,5 @@
 export interface AccountPublicProfile { displayName?: string; email?: string; plan?: string }
+export const DEFAULT_ACCOUNT_SERVICE_ORIGIN = "https://app.uptokey.com";
 export interface AccountPublicSession { configured: boolean; authenticated: boolean; loginAvailable: boolean; state: 'signed_out'|'connecting'|'connected'|'unavailable'; profile?: AccountPublicProfile;requiresSignIn?:boolean }
 export const ACCOUNT_REF = /^acc_[a-f0-9]{64}$/;
 export const ACCOUNT_MAX_AVAILABLE = 256;
@@ -34,10 +35,13 @@ export const ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{
 export interface AccountProof { id: string; action: 'poll'|'status'|'logout'|'usage'; nonce: string; issuedAt: number; signature: string }
 export interface AccountMobilityRequest { path: string; bodyDigest: string; accountRef:string; revision:number }
 export interface AccountMobilityProof extends Omit<AccountProof,'action'> { action:'mobility'; request:AccountMobilityRequest }
-export type AccountControlOperation='team.roster'|'team.invite'|'team.accept'|'team.role'|'team.revoke'|'billing.profile'|'billing.balances'|'billing.invoices'|'billing.portal'|'billing.client-config';
+export type AccountSubscriptionOperation='subscription.offer'|'subscription.status'|'subscription.checkout'|'subscription.portal';
+export type AccountControlOperation='team.roster'|'team.invite'|'team.accept'|'team.role'|'team.revoke'|'billing.profile'|'billing.balances'|'billing.invoices'|'billing.portal'|'billing.client-config'|AccountSubscriptionOperation;
 export interface AccountControlRequest {operation:AccountControlOperation;payload:Record<string,unknown>}
 export interface AccountControlProof extends Omit<AccountProof,'action'> {action:'control';request:AccountControlRequest}
-const accountControlOperations=new Set<AccountControlOperation>(['team.roster','team.invite','team.accept','team.role','team.revoke','billing.profile','billing.balances','billing.invoices','billing.portal','billing.client-config']);
+const accountSubscriptionOperations=new Set<AccountSubscriptionOperation>(['subscription.offer','subscription.status','subscription.checkout','subscription.portal']);
+export function isAccountSubscriptionOperation(value:string):value is AccountSubscriptionOperation{return accountSubscriptionOperations.has(value as AccountSubscriptionOperation);}
+const accountControlOperations=new Set<AccountControlOperation>(['team.roster','team.invite','team.accept','team.role','team.revoke','billing.profile','billing.balances','billing.invoices','billing.portal','billing.client-config',...accountSubscriptionOperations]);
 const exactKeys=(row:Record<string,unknown>,keys:string[])=>Object.keys(row).sort().join(',')===keys.slice().sort().join(',');
 const accountResourceId=(value:unknown)=>typeof value==='string'&&/^[A-Za-z0-9_-]{3,100}$/.test(value)?value:(()=>{throw Error('account_request_invalid');})();
 const accountEmail=(value:unknown)=>typeof value==='string'&&value.length<=254&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value)?value.toLowerCase():(()=>{throw Error('account_request_invalid');})();
@@ -45,11 +49,13 @@ const accountExpectedRevision=(value:unknown)=>typeof value==='number'&&Number.i
 export function readAccountControlRequest(value:unknown):AccountControlRequest{
  const row=accountRecord(value);if(!exactKeys(row,['operation','payload'])||typeof row.operation!=='string'||!accountControlOperations.has(row.operation as AccountControlOperation))throw Error('account_request_invalid');
  const operation=row.operation as AccountControlOperation,payload=accountRecord(row.payload);let clean:Record<string,unknown>;
- if(['team.roster','billing.profile','billing.balances','billing.invoices','billing.portal','billing.client-config'].includes(operation)){if(Object.keys(payload).length)throw Error('account_request_invalid');clean={};}
+ if(['team.roster','billing.profile','billing.balances','billing.invoices','billing.portal','billing.client-config','subscription.offer','subscription.status'].includes(operation)){if(Object.keys(payload).length)throw Error('account_request_invalid');clean={};}
+ else if(operation==='subscription.checkout'||operation==='subscription.portal'){if(!exactKeys(payload,operation==='subscription.checkout'?['accountRef','requestId']:['accountRef'])||typeof payload.accountRef!=='string'||!/^account_[a-f0-9]{64}$/.test(payload.accountRef)||operation==='subscription.checkout'&&(typeof payload.requestId!=='string'||!ACCOUNT_ID.test(payload.requestId)))throw Error('account_request_invalid');clean={accountRef:payload.accountRef,...(operation==='subscription.checkout'?{requestId:payload.requestId}:{})};}
  else if(operation==='team.invite'){if(!exactKeys(payload,['email','role','requestId'])||!['member','admin'].includes(String(payload.role))||typeof payload.requestId!=='string'||!ACCOUNT_ID.test(payload.requestId))throw Error('account_request_invalid');clean={email:accountEmail(payload.email),role:payload.role,requestId:payload.requestId};}
  else if(operation==='team.accept'){if(!exactKeys(payload,['email','inviteToken'])||typeof payload.inviteToken!=='string'||!/^utk_team_invite_[A-Za-z0-9_-]{43}$/.test(payload.inviteToken))throw Error('account_request_invalid');clean={email:accountEmail(payload.email),inviteToken:payload.inviteToken};}
  else if(operation==='team.role'){if(!exactKeys(payload,['memberId','expectedRevision','role'])||!['member','admin'].includes(String(payload.role)))throw Error('account_request_invalid');clean={memberId:accountResourceId(payload.memberId),expectedRevision:accountExpectedRevision(payload.expectedRevision),role:payload.role};}
- else {if(!exactKeys(payload,['seatId','expectedRevision']))throw Error('account_request_invalid');clean={seatId:accountResourceId(payload.seatId),expectedRevision:accountExpectedRevision(payload.expectedRevision)};}
+ else if(operation==='team.revoke'){if(!exactKeys(payload,['seatId','expectedRevision']))throw Error('account_request_invalid');clean={seatId:accountResourceId(payload.seatId),expectedRevision:accountExpectedRevision(payload.expectedRevision)};}
+ else throw Error('account_request_invalid');
  return {operation,payload:clean};
 }
 export function accountControlProofPayload(proof:Omit<AccountControlProof,'signature'>):string{const request=readAccountControlRequest(proof.request);return JSON.stringify(['uptokey.account.control.v1',proof.id,proof.action,proof.nonce,proof.issuedAt,request.operation,request.payload]);}

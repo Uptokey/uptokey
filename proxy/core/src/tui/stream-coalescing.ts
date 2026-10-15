@@ -3,7 +3,7 @@
  * render work while preserving event order. The default window is 60 ms.
  */
 
-/** Default coalescing window: one terminal frame at 60 fps. */
+/** Default batching window for subsequent streaming text. */
 export const STREAM_COALESCE_MS = 60;
 
 export interface CoalescedTextEvent {
@@ -28,6 +28,8 @@ export type CoalescedStreamEvent =
 export interface StreamCoalescerOptions {
   /** Coalescing window in ms. Defaults to {@link STREAM_COALESCE_MS}. */
   windowMs?: number;
+  /** Deliver the first nonempty text immediately, then batch subsequent text. Defaults to false. */
+  leading?: boolean;
   /** Called when a coalesced batch is ready. */
   onFlush: (event: CoalescedStreamEvent) => void;
 }
@@ -49,6 +51,7 @@ export function createStreamCoalescer(
 ): StreamCoalescer {
   const windowMs = options.windowMs ?? STREAM_COALESCE_MS;
   const { onFlush } = options;
+  let firstText = true;
 
   let pendingText = "";
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -71,6 +74,13 @@ export function createStreamCoalescer(
   return {
     push(event: CoalescedStreamEvent): void {
       if (event.type === "text") {
+        if (!event.data) return;
+        if (options.leading && firstText) {
+          firstText = false;
+          onFlush(event);
+          return;
+        }
+        firstText = false;
         pendingText += event.data;
         if (timer === null) {
           timer = setTimeout(flushText, windowMs);

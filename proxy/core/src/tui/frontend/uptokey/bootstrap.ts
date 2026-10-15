@@ -63,10 +63,13 @@ export async function bootstrapFrontend(options: UptokeyMainOptions) {
   let controller = options.controller
   if (!controller) {
     await adoptTuiServiceProfile(options.cwd)
+    // Direct frontend launches use the same version/consent boundary as the Node CLI.
+    // Service failures must not be mislabeled as an identity or credential failure.
+    try { await startSharedService(url, options.cwd) }
+    catch (error) { stopStats(); throw error }
     const probe = new TuiClient({ baseUrl: url })
     let token: string | undefined
     try {
-      if ((await probe.health()).status !== "ok") await startSharedService(url, options.cwd)
       if ((await probe.health()).status === "ok") {
         token = await resolveInteractiveToken(probe, {
           show: message => void process.stderr.write(`${message}\n`),

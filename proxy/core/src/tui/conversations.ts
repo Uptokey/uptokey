@@ -15,6 +15,7 @@ import { isProvider } from "../provider-registry.ts";
 import type { Message } from "./state.ts";
 import type { MediaDispatchPart, PreparedMediaInput } from "./media-input.ts";
 import { contextRanges } from "./context-ranges.ts";
+import { validateHostedDestination, type TuiHostedDestination } from "./hosted.ts";
 
 export interface ConversationMeta {
   id: string;
@@ -230,7 +231,7 @@ export class ConversationService {
       destination = resolved.destination;
       media.set(part.id, resolved.part);
     }
-    return { history: composeHistory(thread, { toolMode: "native", media }), destination };
+    return { history: composeHistory(thread, { toolMode: destination.hosted ? "text" : "native", media }), destination };
   }
 
   async getConversation(id: string): Promise<Conversation> {
@@ -400,6 +401,11 @@ export class ConversationService {
     const resolvedHistory = await this.dispatchHistory(conversation, thread, input.model, destination, signal);
     const history = resolvedHistory.history; destination = resolvedHistory.destination;
     const userParts: Array<Record<string, unknown>> = [];
+    if (destination.hosted) {
+      destination = Object.freeze({ ...destination, hostedRequestId: `hosted-${randomUUID()}` });
+      userParts.push({ type: "status", text: `hosted:v1 ${JSON.stringify({ requestId: destination.hostedRequestId,
+        destination: destination.hosted, state: "pending" })}` });
+    }
     if (input.userText) userParts.push({ type: "text", text: input.userText });
     for (const ref of input.references ?? []) userParts.push(fileReferencePart(ref));
     if (input.media) userParts.push(...input.media.persistedParts);
@@ -411,9 +417,11 @@ export class ConversationService {
     signal?.throwIfAborted();
     input.onDispatch?.(dispatched, history.compaction);
     let text = ""; let completed = false; let outputBytes = 0;
+    let hostedReceipt: string | undefined;
     const calls = new Map<number, { callId: string; name: string; arguments: string }>();
     try {
       for await (const event of this.client.chatStream(input.model, dispatched, input.conversationId, conversation.processingPolicy, signal, destination)) {
+        if (event.type === "hosted_receipt") { hostedReceipt = event.data; continue; }
         if (event.type === "text" || event.type === "tool_call") {
           outputBytes += Buffer.byteLength(event.data, "utf8");
           if (outputBytes > CONVERSATION_MESSAGE_TEXT_MAX_BYTES) throw new Error("conversation_response_too_large");
@@ -432,6 +440,7 @@ export class ConversationService {
       }
     } finally {
       const parts: Array<Record<string, unknown>> = text ? [{ type: "text", text }] : [];
+      if (hostedReceipt) parts.push({ type: "status", text: `hosted:v1 ${JSON.stringify({ ...JSON.parse(hostedReceipt), destination: destination.hosted })}` });
       if (completed) for (const call of calls.values()) parts.push({ type: "tool_call", text: { callId: call.callId, name: call.name, arguments: JSON.parse(call.arguments || "{}") } });
       if (!completed) parts.push({ type: "status", text: "interrupted" });
       if (!completed && signal?.aborted) parts.push({ type: "status", text: "cancelled_by_user" });
@@ -820,6 +829,17 @@ export function historicalDestinationOf(message: ThreadMessage): ModelDestinatio
 export function toDisplayMessage(m: ThreadMessage): Message {
   const compaction = compactionOf(m);
   const destination = historicalDestinationOf(m);
+  let hostedDestination: TuiHostedDestination | undefined;
+  let hostedRequestId: string | undefined;
+  for (const part of [...m.parts].reverse()) {
+    if (part.type !== "status" || typeof part.text !== "string" || !part.text.startsWith("hosted:v1 ") || Buffer.byteLength(part.text) > 4096) continue;
+    try {
+      const value = JSON.parse(part.text.slice(10));
+      hostedDestination = validateHostedDestination(value.destination);
+      if (typeof value.requestId === "string" && /^[A-Za-z0-9:_-]{1,160}$/.test(value.requestId)) hostedRequestId = value.requestId;
+      break;
+    } catch { /* Invalid metadata never selects a destination. */ }
+  }
   const refs = m.parts.map(contextReferenceOf).filter((r): r is ContextReference => r !== null);
   const results = m.parts.filter((p) => p.type === "tool_result" && typeof p.text === "object").map((p) => p.text as { callId: string; receiptId?: string; output: unknown });
   return {
@@ -833,6 +853,8 @@ export function toDisplayMessage(m: ThreadMessage): Message {
     ...(m.parts.some(part => (part.type === "image" || part.type === "audio") && part.artifactRef) ? { mediaAttachments: m.parts.flatMap(part => (part.type === "image" || part.type === "audio") && part.artifactRef ? [{ kind: part.type, artifactId: part.artifactRef, ...(part.name ? { name: part.name } : {}) }] : []) } : {}),
     ...(compaction ? { compaction: { covered: compaction.covered, throughMessageId: compaction.throughMessageId } } : {}),
     ...(destination ? { destination } : {}),
+    ...(hostedDestination ? { hostedDestination } : {}),
+    ...(hostedRequestId ? { hostedRequestId } : {}),
     toolCalls: m.parts.filter(p => p.type === "tool_call").map(p => {
       const call = p.text as { callId: string; name: string; arguments: Record<string, unknown> };
       return { id: call.callId, name: call.name, arguments: JSON.stringify(call.arguments) };

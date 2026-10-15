@@ -104,8 +104,11 @@ export async function runTui(args: readonly string[]): Promise<void> {
   }
   await adoptTuiServiceProfile(cwd);
   try { await startSharedService(discoverCoreUrl(opts.port), cwd); }
-  catch {
-    process.stderr.write(`${t('svc_start_failed')}\n`); process.exitCode = 3; return;
+  catch (error) {
+    const failure = error as { name?: unknown; message?: unknown } | null;
+    if (failure?.name === "AbortError") { process.exitCode = 130; return; }
+    const text = failure?.name === "TuiServiceUpdateError" && typeof failure.message === "string" ? failure.message : t('svc_start_failed');
+    process.stderr.write(`${text}\n`); process.exitCode = 3; return;
   }
   const { runFrontend } = await import('./frontend-launcher.ts');
   let launchArgs = args.filter(arg => arg !== '--next');

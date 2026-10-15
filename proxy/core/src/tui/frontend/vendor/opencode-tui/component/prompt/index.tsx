@@ -62,6 +62,7 @@ import { getBackend } from "../../../../uptokey/backend/registry.ts"
 import { ui } from "../../../../uptokey/i18n.ts"
 import { tr } from "../../../../uptokey/tr.ts"
 import { promptFilePath } from '../../../../uptokey/prompt-parts.ts'
+import { accountText } from "../../../../../account-ui.ts"
 
 registerOpencodeSpinner()
 
@@ -1536,6 +1537,9 @@ export function Prompt(props: PromptProps) {
                             {local.model.parsed().model}
                           </text>
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
+                          <Show when={local.model.parsed().hostedFree}>
+                            <text fg={fadeColor(theme.success, modelMetaAlpha())}>{accountText("free")}</text>
+                          </Show>
                           <Show when={showVariant()}>
                             <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
                             <text>

@@ -26,6 +26,10 @@ export async function main(options: UptokeyMainOptions) {
 }
 
 if (import.meta.main) {
-  await main(mainOptionsFromArgs())
+  try { await main(mainOptionsFromArgs()) }
+  catch (error) {
+    if (!(error instanceof Error) || error.name !== "AbortError") throw error
+    process.exitCode = 130
+  }
   process.exit(process.exitCode ?? 0)
 }

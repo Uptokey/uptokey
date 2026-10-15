@@ -52,7 +52,7 @@ for (const file of walk(outDir).filter(file => /\.(?:c|m)?js$/.test(file))) {
 }
 
 // Notices: exactly what the bundler inlined, plus what ships beside it (runtime and native library).
-const externals = ["@napi-rs/keyring", "tree-sitter-wasm", "web-tree-sitter", "@repomix/tree-sitter-wasms", "js-tiktoken", "@opentui/core-*", "undici"];
+const externals = ["@napi-rs/keyring", "tree-sitter-wasm", "web-tree-sitter", "js-tiktoken", "@opentui/core-*", "undici"];
 const generated = generateThirdPartyNotices({ root, bundles: [{ bundle: "dist/tui/main.js", metafile }, { bundle: "dist/tui/linear-entry.js", metafile: linearMetafile }], externals });
 const nativePackage = portable ? "@opentui/core" : `@opentui/core-${process.platform}-${process.arch}`;
 const nativeDir = join(frontend, "node_modules", nativePackage);
