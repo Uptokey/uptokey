@@ -14,6 +14,7 @@ import { inferenceFetch } from "../streaming-transport.ts";
 import { MAX_INFERENCE_REQUEST_BYTES } from "@uptokey/sync-contract/limits";
 import type { MediaDispatchPart } from "./media-input.ts";
 import { ACCOUNT_ID, ACCOUNT_MAX_RESPONSE_BYTES, ACCOUNT_MAX_CLIENT_RESPONSE_BYTES, readAccountPublicSession, readAccountPublicUsage, readAccountAvailable, readAccountAdoption, readAccountShareChallenge, readAccountShareRequests, readAccountShareApproval, type AccountPublicSession, type AccountPublicUsage, type AccountAvailable, type AccountAdoption, type AccountShareChallenge, type AccountShareRequest } from "../account-login-protocol.ts";
+import { HOSTED_PROVIDER, validateHostedDestination, loadHostedModels, hostedInput, sendHosted, getHostedReceipt, type TuiHostedDestination } from "./hosted.ts";
 
 export type TuiAccountAvailable = AccountAvailable;
 export type TuiAccountMutation = AccountAdoption;
@@ -33,6 +34,9 @@ export interface TuiInferenceDestination {
   readonly routingComboId?: string;
   readonly connectionId?: string;
   readonly modelId?: string;
+  readonly hosted?: TuiHostedDestination;
+  /** Stored in the canonical user message before a hosted POST. */
+  readonly hostedRequestId?: string;
 }
 
 /** A declared tool offered to the selected provider; execution remains with its owner. */
@@ -66,7 +70,7 @@ export interface ConnectionState {
 }
 
 export interface StreamEvent {
-  type: "text" | "tool_call" | "tool_result" | "error" | "done" | "keepalive";
+  type: "text" | "tool_call" | "tool_result" | "error" | "done" | "keepalive" | "hosted_receipt";
   data: string;
   id?: string;
 }
@@ -123,6 +127,19 @@ export class TuiClient extends EventEmitter {
   }
 
   getSelectedDestination(): TuiInferenceDestination { return this.selectedDestination; }
+
+  setHostedDestination(destination: TuiHostedDestination): void {
+    const hosted = validateHostedDestination(destination);
+    this.selectedDestination = Object.freeze({ providerId: HOSTED_PROVIDER, modelId: hosted.modelId, hosted });
+  }
+
+  getHostedModels(accountRef: string, revision: number, signal?: AbortSignal) {
+    return loadHostedModels(this.fetchRaw.bind(this), accountRef, revision, signal);
+  }
+
+  getHostedReceipt(accountRef: string, revision: number, requestId: string, signal?: AbortSignal) {
+    return getHostedReceipt(this.fetchRaw.bind(this), { accountRef, revision }, requestId, signal);
+  }
 
   private defaultHeaders(extra?: Record<string, string>): Record<string, string> {
     const h: Record<string, string> = { "Content-Type": "application/json" };
@@ -239,6 +256,10 @@ export class TuiClient extends EventEmitter {
   }
 
   serializeChatInput(model: string, messages: Array<{ role: string; content: string | MediaDispatchPart[] }>, destination: TuiInferenceDestination = this.selectedDestination, tools?: readonly TuiFunctionTool[]): string {
+    if (destination.hosted) {
+      if (destination.providerId !== HOSTED_PROVIDER || model !== destination.hosted.modelId || tools?.length) throw Error("hosted_request_invalid");
+      return JSON.stringify(hostedInput(destination.hosted, destination.hostedRequestId ?? "hosted-preflight", messages));
+    }
     if (destination.providerId !== undefined && !isProvider(destination.providerId)) throw new Error("tui_provider_invalid");
     if (destination.routingComboId !== undefined && (!destination.providerId || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(destination.routingComboId))) throw new Error("tui_routing_combo_invalid");
     const body: Record<string, unknown> = { model, messages, stream: true };
@@ -343,6 +364,16 @@ export class TuiClient extends EventEmitter {
 
   async *chatStream(model: string, messages: Array<{ role: string; content: string | MediaDispatchPart[] }>, conversationId?: string, processingPolicy?: string, signal?: AbortSignal, destination: TuiInferenceDestination = this.selectedDestination, tools?: readonly TuiFunctionTool[]): AsyncGenerator<StreamEvent> {
     const serialized = this.serializeChatInput(model, messages, destination, tools);
+    if (destination.hosted) {
+      if (!destination.hostedRequestId) throw Error("hosted_request_not_recorded");
+      const result = await sendHosted(this.fetchRaw.bind(this), destination.hosted, destination.hostedRequestId, messages, processingPolicy, signal);
+      yield { type: "hosted_receipt", data: JSON.stringify({ requestId: result.requestId, state: result.status,
+        ...(result.status === "completed" ? { chargedMicros: result.chargedMicros, priceVersion: result.priceVersion, usage: result.usage } : {}) }) };
+      if (result.status !== "completed") throw Object.assign(Error(result.status === "rejected" ? result.error : `hosted_${result.status}`), { requestId: result.requestId });
+      if (result.content) yield { type: "text", data: result.content };
+      yield { type: "done", data: "" };
+      return;
+    }
     const extraHeaders: Record<string, string> = {};
     if (conversationId) extraHeaders["x-uptokey-conversation-id"] = conversationId;
     if (processingPolicy) extraHeaders["x-uptokey-processing-policy"] = processingPolicy;
@@ -422,14 +453,15 @@ export class TuiClient extends EventEmitter {
    * for structured reconciliation (no retry, no thrown http_ status). Transport
    * failures still throw; write outcomes remain unknown to the caller, never replayed.
    */
-  async fetchRaw(path: string, init: RequestInit = {}): Promise<Response> {
+  async fetchRaw(path: string, init: RequestInit = {}, timeoutMs = this.requestTimeoutMs): Promise<Response> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 140_000) throw Error("tui_timeout_invalid");
     const target = new URL(path, this.baseUrl);
     if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || target.origin !== this.baseUrl || target.username || target.password || target.hash) throw new Error("tui_request_path_invalid");
     const headers = new Headers(init.headers);
     if (!headers.has("content-type")) headers.set("content-type", "application/json");
     if (this.token) headers.set("authorization", "Bearer " + this.token);
     else headers.delete("authorization");
-    const deadline = createDeadline(this.requestTimeoutMs);
+    const deadline = createDeadline(timeoutMs);
     const signal = AbortSignal.any([this.lifetimeSignal, deadline.signal, ...(init.signal ? [init.signal] : [])]);
     const abortError = () => deadline.signal.aborted ? new Error("tui_request_timeout") : new DOMException("aborted", "AbortError");
     let transferred = false;

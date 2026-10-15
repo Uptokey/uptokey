@@ -14,6 +14,7 @@ import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
 import { tr } from "../../../uptokey/tr.ts"
+import { isHostedFreeModel } from "../../../uptokey/model-funding.ts"
 
 export type LocalTheme = {
   secondary: RGBA
@@ -263,6 +264,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               provider: "Connect a provider",
               model: "No provider selected",
               reasoning: false,
+              hostedFree: false,
             }
           }
           const provider = sync.data.provider.find((item) => item.id === value.providerID)
@@ -271,15 +273,15 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             provider: provider?.name ?? value.providerID,
             model: info?.name ?? value.modelID,
             reasoning: info?.capabilities?.reasoning ?? false,
+            hostedFree: isHostedFreeModel(info),
           }
         }),
         cycle(direction: 1 | -1) {
           const current = currentModel()
           if (!current) return
-          const recent = modelStore.recent
+          const recent = modelStore.recent.filter(isModelValid)
           const index = recent.findIndex((x) => x.providerID === current.providerID && x.modelID === current.modelID)
-          if (index === -1) return
-          let next = index + direction
+          let next = index === -1 ? (direction === 1 ? 0 : recent.length - 1) : index + direction
           if (next < 0) next = recent.length - 1
           if (next >= recent.length) next = 0
           const val = recent[next]

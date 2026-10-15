@@ -4,6 +4,7 @@
  */
 import { EventEmitter } from "node:events";
 import type { ModelDestination } from "./client.ts";
+import type { TuiHostedDestination } from "./hosted.ts";
 
 export type ConnectionPhase = "disconnected" | "connecting" | "authenticated" | "expired" | "incompatible" | "error";
 export type TurnPhase = "idle" | "composing" | "submitting" | "streaming" | "waiting_tool" | "waiting_approval" | "completed" | "failed" | "cancelling" | "cancelled";
@@ -50,6 +51,9 @@ export interface Message {
   compaction?: { covered: number; throughMessageId: string };
   /** Public admitted route from canonical assistant metadata, never a credential. */
   destination?: ModelDestination;
+  /** Verified broker destination retained for reopening, revalidated before the next dispatch. */
+  hostedDestination?: TuiHostedDestination;
+  hostedRequestId?: string;
   /** Durable tool results (callId, receipt and bounded output). */
   toolResults?: Array<{ callId: string; receiptId: string; output: string }>;
 }

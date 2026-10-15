@@ -83,7 +83,6 @@ export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROO
       // js-tiktoken stays external: it must be a runtime dependency of every
       // published profile (see scripts/npm-pack-beta.mjs).
       "--external=js-tiktoken",
-      "--external=@repomix/tree-sitter-wasms",
       "--external=tree-sitter-wasm"
   ];
   // Bundler metafiles are the source of truth for THIRD-PARTY-NOTICES (exactly what

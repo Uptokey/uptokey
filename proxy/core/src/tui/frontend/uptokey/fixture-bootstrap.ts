@@ -4,9 +4,12 @@ import { TuiClient } from "../../client.ts"
 import { TuiController } from "../../controller.ts"
 import { createProviderSetupService } from "../../provider-setup.ts"
 import { MemorySecretStore } from "../../../secret-store.ts"
+import { autoDetect, setLang } from "../../i18n.ts"
 import type { UptokeyMainOptions } from "./bootstrap.ts"
 
 export async function fixtureOptions(): Promise<UptokeyMainOptions> {
+  // A packaged main has a separate module instance; configure the injected controller's dictionary too.
+  setLang(autoDetect([], process.env))
   const fixture = JSON.parse(process.env.UPTOKEY_FIXTURE ?? "{}") as {
     baseUrl: string; token: string; privateKeyPem: string; cwd: string; model?: string
     admin: string; empty?: boolean; upstreamPort: number

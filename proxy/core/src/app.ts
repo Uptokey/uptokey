@@ -1,7 +1,7 @@
 import {createManagedVoice} from './voice-profile.ts';
 import {isLocalWorkflowPlan,isLocalWorkflowRequest} from './workspace/local-workflow-policy.ts';
 import {WORKFLOW_LIMITS} from '@uptokey/sync-contract/workflow';
-import {isAccountMobilityPath,readAccountControlRequest} from './account-login-protocol.ts';
+import {isAccountMobilityPath,readAccountControlRequest,DEFAULT_ACCOUNT_SERVICE_ORIGIN} from './account-login-protocol.ts';
 import {ACCOUNT_HOSTED_MAX_REQUEST_BYTES,readAccountHostedRequest} from './account-hosted-protocol.ts';
 import {createManagedMedia,type MediaLaunchDependencies} from './managed-media.ts';
 import {LocalDelegatedKeys} from './delegated-access.ts';
@@ -1694,7 +1694,7 @@ export function createApp(
   conversationBudgetOwner=(principalId,projectId,runRequestId)=>conversations.store.conversationScopeForRunRequest(principalId,projectId,runRequestId);
   // Account sharing has its own explicit approval. It neither forwards a broker
   // credential nor grants access to the approving client's projects or folders.
-  const accountOrigin=process.env.UPTOKEY_ACCOUNT_SERVICE_ORIGIN;
+  const accountOrigin=process.env.UPTOKEY_ACCOUNT_SERVICE_ORIGIN??DEFAULT_ACCOUNT_SERVICE_ORIGIN;
   let accountLogin:AccountLoginService|undefined;
   let accountShare:AccountShareService|undefined;
   const accountService=():AccountLoginService=>accountLogin??=new AccountLoginService({secrets,origin:accountOrigin,

@@ -8,6 +8,16 @@
     "test": "node --test test/*.test.mjs"
   },
   "exports": {
+    "./hosted-catalog": {
+      "types": "./hosted-catalog.d.ts",
+      "import": "./hosted-catalog.js",
+      "default": "./hosted-catalog.js"
+    },
+    "./hosted-result": {
+      "types": "./hosted-result.d.ts",
+      "import": "./hosted-result.js",
+      "default": "./hosted-result.js"
+    },
     "./hosted-request": {
       "types": "./hosted-request.d.ts",
       "import": "./hosted-request.js",

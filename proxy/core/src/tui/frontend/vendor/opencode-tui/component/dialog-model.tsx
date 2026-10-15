@@ -9,12 +9,17 @@ import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
 import { tr } from "../../../uptokey/tr.ts"
+import { isHostedFreeModel } from "../../../uptokey/model-funding.ts"
+import { getBackend } from "../../../uptokey/backend/registry.ts"
+import { useControllerTick } from "../../../uptokey/panels/use-controller.ts"
+import { accountText } from "../../../../account-ui.ts"
 
 export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
   const sync = useSync()
   const dialog = useDialog()
   const [query, setQuery] = createSignal("")
+  const tick = useControllerTick()
 
   const connected = useConnected()
   const providers = createDialogProviderOptions()
@@ -41,8 +46,8 @@ export function DialogModel(props: { providerID?: string }) {
             title: model.name ?? item.modelID,
             description: provider.name,
             category,
-            disabled: provider.id === "opencode" && model.id.includes("-nano"),
-            footer: model.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
+            hostedFree: isHostedFreeModel(model),
+            footer: isHostedFreeModel(model) ? accountText("free") : undefined,
             onSelect: () => {
               onSelect(provider.id, model.id)
             },
@@ -62,7 +67,7 @@ export function DialogModel(props: { providerID?: string }) {
     const providerOptions = pipe(
       sync.data.provider,
       sortBy(
-        (provider) => provider.id !== "opencode",
+        (provider) => Object.values(provider.models).some(isHostedFreeModel),
         (provider) => provider.name,
       ),
       flatMap((provider) =>
@@ -79,8 +84,8 @@ export function DialogModel(props: { providerID?: string }) {
               ? "(Favorite)"
               : undefined,
             category: connected() ? provider.name : undefined,
-            disabled: provider.id === "opencode" && model.includes("-nano"),
-            footer: info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
+            hostedFree: isHostedFreeModel(info),
+            footer: isHostedFreeModel(info) ? accountText("free") : undefined,
             onSelect() {
               onSelect(provider.id, model)
             },
@@ -117,6 +122,14 @@ export function DialogModel(props: { providerID?: string }) {
         )
       : []
 
+    tick()
+    const session = getBackend().controller.account.view.session
+    const accountOptions = !props.providerID && session?.configured && !session.authenticated ? [{
+      title: `${accountText("sign_in")} · ${accountText("free")}`,
+      value: { action: "account" as const },
+      onSelect() { getBackend().emit({ type: "uptokey.panel.open", properties: { name: "account" } }) },
+    }] : []
+
     if (needle) {
       return [
         ...sortModelOptions(
@@ -124,10 +137,17 @@ export function DialogModel(props: { providerID?: string }) {
           false,
         ),
         ...fuzzysort.go(needle, popularProviders, { keys: ["title"] }).map((x) => x.obj),
+        ...fuzzysort.go(needle, accountOptions, { keys: ["title"] }).map((x) => x.obj),
       ]
     }
 
-    return [...favoriteOptions, ...recentOptions, ...providerOptions, ...popularProviders]
+    const models = [...favoriteOptions, ...recentOptions, ...providerOptions]
+    return [
+      ...models.filter((option) => !option.hostedFree),
+      ...models.filter((option) => option.hostedFree),
+      ...accountOptions,
+      ...popularProviders,
+    ]
   })
 
   const provider = createMemo(() =>
@@ -170,6 +190,7 @@ export function DialogModel(props: { providerID?: string }) {
           command: "model.dialog.favorite",
           title: tr("Favorite"),
           hidden: !connected(),
+          disabled: (option) => !option || typeof option.value !== "object" || !("modelID" in option.value),
           onTrigger: (option) => {
             local.model.toggleFavorite(option.value as { providerID: string; modelID: string })
           },
@@ -184,14 +205,14 @@ export function DialogModel(props: { providerID?: string }) {
   )
 }
 
-export function sortModelOptions<T extends { footer?: string; releaseDate: string | number; title: string }>(
+export function sortModelOptions<T extends { hostedFree?: boolean; releaseDate: string | number; title: string }>(
   options: T[],
   newestFirst: boolean,
 ) {
   if (newestFirst) return sortBy(options, [(option) => option.releaseDate, "desc"], (option) => option.title)
   return sortBy(
     options,
-    (option) => option.footer !== "Free",
+    (option) => option.hostedFree === true,
     [(option) => option.releaseDate, "desc"],
     (option) => option.title,
   )

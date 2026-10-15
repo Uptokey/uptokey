@@ -29,15 +29,15 @@
     "lightStep8": "#a0a0a0",
     "lightStep9": "#0066DB",
     "lightStep10": "#0052B0",
-    "lightStep11": "#8a8a8a",
+    "lightStep11": "#666666",
     "lightStep12": "#1a1a1a",
     "lightSecondary": "#5A33F0",
-    "lightAccent": "#1E9AA2",
-    "lightRed": "#D3305A",
-    "lightOrange": "#D45400",
-    "lightGreen": "#6F8030",
-    "lightCyan": "#1E8C94",
-    "lightYellow": "#A38600",
+    "lightAccent": "#157980",
+    "lightRed": "#B5274C",
+    "lightOrange": "#A84200",
+    "lightGreen": "#596824",
+    "lightCyan": "#1B767D",
+    "lightYellow": "#7C6500",
     "darkCoral": "#FF9382",
     "darkTan": "#CDAD7A",
     "lightCoral": "#D9624F",
@@ -110,11 +110,11 @@
     },
     "diffRemoved": {
       "dark": "#F34971",
-      "light": "#C42A50"
+      "light": "#B5274C"
     },
     "diffContext": {
       "dark": "#8A93B8",
-      "light": "#6B7590"
+      "light": "#626C85"
     },
     "diffHunkHeader": {
       "dark": "#6C47FF",
@@ -122,11 +122,11 @@
     },
     "diffHighlightAdded": {
       "dark": "#C9D88A",
-      "light": "#7E9035"
+      "light": "#53601F"
     },
     "diffHighlightRemoved": {
       "dark": "#FF9382",
-      "light": "#D3305A"
+      "light": "#B5274C"
     },
     "diffAddedBg": {
       "dark": "#1E2A16",

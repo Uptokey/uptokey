@@ -1,6 +1,7 @@
 import { t } from "./i18n.ts";
 import { chromeText } from "./ui-chrome.ts";
 import { accountText } from "./account-ui.ts";
+import { hostedText } from "./hosted-ui.ts";
 /**
  * Uptokey TUI — single command registry.
  *
@@ -119,6 +120,7 @@ export function parseFlags(input: string, flagNames: string[]): { args: string[]
 }
 
 export const COMMANDS: CommandSpec[] = [
+  { id: "hosted.receipt", get title() { return hostedText("receipt"); }, group: "Conversa", slash: ["receipt", "recibo"], arg: "[id]", run: ({ controller }, arg) => controller.checkHostedReceipt(arg) },
   { id: "account.show", get title() { return accountText("title"); }, group: "Interface", slash: ["account", "conta", "cuenta", "compte", "konto", "アカウント", "계정", "账户", "حساب"], run: ({ ui, controller }) => { void controller.account.refresh(); ui.openPanel("account"); } },
   { id: "chat.select", get title() { return t("selection_title"); }, group: "Conversa", slash: ["select-text", "selecionar"], run: ({ ui }) => ui.beginTranscriptSelection?.() },
   { id: "chat.files", get title() { return t("file_actions_title"); }, group: "Conversa", slash: ["chat-files", "arquivos-chat"], run: ({ ui }) => ui.showChatFiles?.() },

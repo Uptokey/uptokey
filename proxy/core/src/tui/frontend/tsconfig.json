@@ -29,6 +29,6 @@
       "@opencode-ai/ui/audio/*": ["./vendor/opencode-core/audio.ts"]
     }
   },
-  "include": ["vendor/**/*.ts", "vendor/**/*.tsx", "uptokey/**/*.ts", "uptokey/**/*.tsx"],
+  "include": ["vendor/**/*.ts", "vendor/**/*.tsx", "uptokey/**/*.ts", "uptokey/**/*.tsx", "../../pngjs.d.ts"],
   "exclude": ["node_modules", "vendor/opencode-tui-tests", "**/opencode-plugin/index.ts"]
 }

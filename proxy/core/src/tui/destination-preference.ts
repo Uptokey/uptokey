@@ -35,7 +35,7 @@ function validate(value: unknown): TuiDestinationPreference {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("tui_destination_preference_invalid");
   const item = value as Record<string, unknown>;
   if (Object.keys(item).some(key => !["providerId", "model", "routingComboId", "processingPolicy"].includes(key))
-    || !isProvider(item.providerId)
+    || !(isProvider(item.providerId) || item.providerId === "uptokey-hosted")
     || typeof item.model !== "string" || !item.model.trim() || item.model !== item.model.trim()
     || item.model.length > 512 || /[\x00-\x1f\x7f]/.test(item.model)
     || (item.routingComboId !== undefined && (typeof item.routingComboId !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(item.routingComboId)))

@@ -13,7 +13,7 @@ const output = join(repo, 'output/integration-required', `${new Date().toISOStri
 mkdirSync(output, { recursive: true });
 const safe = new Set(['systemroot', 'windir', 'path', 'pathext', 'temp', 'tmp', 'comspec', 'lang', 'lc_all', 'home', 'userprofile']);
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => safe.has(key.toLowerCase())));
-const suites = mode === 'artifact' ? ['tui-v2-artifact.test.ts'] : ['uptokey/panels/account.test.tsx', 'uptokey/transcript-selection.native.test.ts', 'uptokey/backend/stability.test.ts'];
+const suites = mode === 'artifact' ? ['tui-v2-artifact.test.ts'] : ['uptokey/panels/account.test.tsx', 'uptokey/transcript-selection.native.test.ts', 'uptokey/backend/stability.test.ts', 'uptokey/model-cycling.test.tsx'];
 const artifact = join(core, 'dist/cli.js');
 if (mode === 'artifact') for (const name of ['cli.js', 'BUILD_INFO.json']) assert.ok(existsSync(join(core, 'dist', name)), `required built artifact missing: ${name}; build before this gate`);
 const junit = join(output, 'renderer.xml');

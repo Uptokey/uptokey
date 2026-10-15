@@ -1,4 +1,4 @@
-import { t } from "./i18n.ts";
+import { t, getLang } from "./i18n.ts";
 import { chromeText } from "./ui-chrome.ts";
 import { approveActiveContext } from "./context-link.ts";
 import { localizedContextError, localizedDiagnostic, operationText } from "./operation-ui.ts";
@@ -55,6 +55,9 @@ import { loadDestinationPreference, saveDestinationPreference } from "./destinat
 import { prepareMediaInput as prepareCanonicalMediaInput, resolveMediaArtifact, MediaInputError, type MediaInputPart, type PreparedMediaInput } from "./media-input.ts";
 import { connectionText } from "./frontend/uptokey/integration-connections.ts";
 import { TuiAccount } from "./account.ts";
+import { HOSTED_PROVIDER, type TuiHostedModel } from "./hosted.ts";
+import { hostedText } from "./hosted-ui.ts";
+import { accountErrorText } from "./account-ui.ts";
 
 export type Mode = "build" | "plan";
 
@@ -186,6 +189,12 @@ export class TuiController extends EventEmitter {
   private readonly options: ControllerOptions;
   private emitScheduled = false;
   private readonly preparedMediaContexts = new WeakMap<PreparedMediaInput, () => void>();
+  hostedModels: readonly TuiHostedModel[] = [];
+  private hostedIdentity = "";
+  private hostedGeneration = 0;
+  private hostedLoading: Promise<void> | null = null;
+  private started = false;
+  private rememberedHosted: { model: string; processingPolicy: "local_only" | "external_allowed" } | undefined;
 
   constructor(options: ControllerOptions) {
     super();
@@ -194,7 +203,7 @@ export class TuiController extends EventEmitter {
     this.bindingHint = options.projectHint;
     this.client = options.client ?? new TuiClient({ baseUrl: options.baseUrl, ...(options.token ? { token: options.token } : {}) });
     this.account = new TuiAccount(this.client);
-    this.account.on("change", () => this.changed());
+    this.account.on("change", () => { this.changed(); if (!this.account.view.busy) void this.refreshHostedModels(); });
     this.conversations = new ConversationService(this.client);
     this.workspace = new WorkspaceService(this.client);
     this.conversations.setMediaResolver(async (conversation, part, model, destination, signal) => {
@@ -282,6 +291,7 @@ export class TuiController extends EventEmitter {
       this.notice("warning", t("model_preference_read_failed"));
       return undefined;
     });
+    this.rememberedHosted = remembered?.providerId === HOSTED_PROVIDER ? remembered : undefined;
     const savedOwner = remembered && eligible.find(p => p.id === remembered.providerId && p.models.includes(remembered.model));
     const requested = this.options.model && models.some((m) => m.id === this.options.model) ? this.options.model : undefined;
     const owner = requested
@@ -308,11 +318,74 @@ export class TuiController extends EventEmitter {
     // empty so the cover remains the onboarding surface.
     await this.bindProject(this.options.preferredBinding);
     if (this.options.resume) await this.openConversation(this.options.resume);
+    this.started = true;
+    await this.chooseHostedDefault();
     void this.refreshConversationList();
+  }
+
+  /** Catalog is loaded once per verified account revision, never once per render or stream delta. */
+  async refreshHostedModels(force = false): Promise<void> {
+    const account = this.account.view;
+    const ref = account.session?.authenticated && account.available?.currentAccountRef;
+    const revision = account.available?.revision;
+    const identity = ref && revision !== undefined ? `${ref}:${revision}` : "";
+    if (identity && identity === this.hostedIdentity && this.hostedLoading) return this.hostedLoading;
+    if (identity === this.hostedIdentity && !force) return this.hostedLoading ?? undefined;
+    this.hostedIdentity = identity;
+    const generation = ++this.hostedGeneration;
+    this.hostedModels = [];
+    const selectedHosted = this.client.getSelectedDestination().hosted;
+    if (selectedHosted && (!identity || selectedHosted.accountRef !== ref || selectedHosted.revision !== revision)) {
+      this.turnAbort?.abort(); this.client.setSelectedProvider();
+      this.store.dispatch({ type: "model_selected", model: "" });
+    }
+    this.emit("modelsChanged"); this.changed();
+    if (!identity || !ref || revision === undefined || this.disposed) return;
+    const pending = (async () => {
+      try {
+        const models = await this.client.getHostedModels(ref, revision, this.lifecycleAbort.signal);
+        if (this.disposed || generation !== this.hostedGeneration) return;
+        this.hostedModels = models;
+        const current = this.client.getSelectedDestination().hosted;
+        if (current && !models.some(model => model.modelId === current.modelId && model.accountRef === current.accountRef && model.revision === current.revision)) {
+          this.turnAbort?.abort(); this.client.setSelectedProvider();
+          this.store.dispatch({ type: "model_selected", model: "" });
+        } else if (current) {
+          // A refreshed catalog can rotate the price version without changing the model or account.
+          this.client.setHostedDestination(models.find(model => model.modelId === current.modelId)!);
+        }
+        this.emit("modelsChanged"); this.changed();
+        await this.chooseHostedDefault();
+      } catch {
+        // A stale successful snapshot cannot keep claiming availability after a failed explicit refresh.
+        if (this.disposed || generation !== this.hostedGeneration) return;
+        if (this.client.getSelectedDestination().hosted) {
+          this.turnAbort?.abort(); this.client.setSelectedProvider();
+          this.store.dispatch({ type: "model_selected", model: "" });
+        }
+        this.emit("modelsChanged"); this.changed();
+      }
+    })();
+    this.hostedLoading = pending;
+    await pending;
+    if (this.hostedLoading === pending) this.hostedLoading = null;
+  }
+
+  private async chooseHostedDefault(): Promise<void> {
+    if (!this.started || this.disposed || this.state.selectedModel || this.options.model || this.options.resume || this.options.processingPolicy) return;
+    const saved = this.rememberedHosted;
+    if (saved?.processingPolicy === "local_only") return;
+    const model = this.hostedModels.find(item => item.modelId === saved?.model) ?? this.hostedModels[0];
+    if (!model || this.state.activeConversation) return;
+    // The server catalog, not a product hardcode, determines the eligible default.
+    this.client.setHostedDestination(model);
+    this.store.dispatch({ type: "processing_policy_changed", processingPolicy: "external_allowed" });
+    this.store.dispatch({ type: "model_selected", model: model.modelId });
   }
 
   dispose(): void {
     this.disposed = true;
+    ++this.hostedGeneration;
     this.lifecycleAbort.abort();
     this.account.dispose();
     this.features.dispose();
@@ -444,6 +517,8 @@ export class TuiController extends EventEmitter {
     } catch (error) {
       this.notice("warning", t("ctl_connections_unavailable", { reason: errorText(error) }));
     }
+    // Local/BYOK startup never waits for the hosted network. Refresh can finish in the background.
+    void this.refreshHostedModels(true);
     this.changed();
   }
 
@@ -731,10 +806,13 @@ export class TuiController extends EventEmitter {
       // The router revalidates that exact identity; another account is never substituted.
       // This is restoration, not a new selection or permission/policy mutation.
       if (this.client.getSelectedDestination() === previousDestination && this.store.state.selectedModel === previousModel) {
-        const destination = [...messages].reverse().find(message => message.role === "assistant" && message.destination)?.destination;
-        if (destination) {
-          this.client.setSelectedDestination(destination);
-          this.store.dispatch({ type: "model_selected", model: destination.modelId });
+        const routed = [...messages].reverse().find(message => message.destination || message.hostedDestination);
+        if (routed?.hostedDestination) {
+          this.client.setHostedDestination(routed.hostedDestination);
+          this.store.dispatch({ type: "model_selected", model: routed.hostedDestination.modelId });
+        } else if (routed?.destination) {
+          this.client.setSelectedDestination(routed.destination);
+          this.store.dispatch({ type: "model_selected", model: routed.destination.modelId });
         }
       }
       this.store.dispatch({ type: "messages_loaded", messages });
@@ -793,16 +871,18 @@ export class TuiController extends EventEmitter {
 
   // ─── chat turn ─────────────────────────────────────────────────────────
 
-  private systemMessages(webTools: readonly string[] = [], mcpTools: readonly string[] = [], nativeWrite = false): DispatchMessage[] {
+  private systemMessages(webTools: readonly string[] = [], mcpTools: readonly string[] = [], nativeWrite = false, destination = this.client.getSelectedDestination(), model = this.store.state.selectedModel): DispatchMessage[] {
     const binding = this.view.binding;
     const parts = [SYSTEM_BASE()];
-    const model = this.store.state.selectedModel;
-    const providerId = this.client.getSelectedDestination().providerId;
+    const providerId = destination.providerId;
     const provider = model ? this.view.connections?.providers.find((candidate) => candidate.eligible && candidate.id === providerId) : undefined;
-    parts.push(provider
+    parts.push(destination.hosted
+      ? t("system_provider_effective", { provider: "Uptokey", id: HOSTED_PROVIDER, model: model! }) : provider
       ? t("system_provider_effective", { provider: provider.displayName, id: provider.id, model: model! })
       : t("system_provider_none"));
-    if (binding) parts.push(t("system_project_bound", { projectName: binding.projectName, rootPath: binding.rootPath, accessMode: binding.accessMode === "read_only" ? t("system_access_read_only") : t("system_access_read_write"), tools: PROJECT_READ_TOOLS.map(tool => tool.function.name).join(", "), toolsStatus: this.view.toolsEnabled ? t("system_tools_enabled") : t("system_tools_disabled") }));
+    const hosted = destination.hosted;
+    if (hosted) parts.push(`Use only project context supplied in this conversation${binding ? ` for ${binding.projectName}` : ""}. No file, command or web tools are available to this model. Ask for missing context; never claim to have read, changed or tested files without an actual result.`);
+    else if (binding) parts.push(t("system_project_bound", { projectName: binding.projectName, rootPath: binding.rootPath, accessMode: binding.accessMode === "read_only" ? t("system_access_read_only") : t("system_access_read_write"), tools: PROJECT_READ_TOOLS.map(tool => tool.function.name).join(", "), toolsStatus: this.view.toolsEnabled ? t("system_tools_enabled") : t("system_tools_disabled") }));
     else parts.push(t("system_project_unbound"));
     if (this.view.manifestFiles.length) {
       const listed = this.view.manifestFiles.slice(0, 300);
@@ -810,9 +890,9 @@ export class TuiController extends EventEmitter {
     }
     if (webTools.length) parts.push(t("system_web_tools", { tools: webTools.join(", ") }));
     if (mcpTools.length) parts.push(t("system_mcp_tools", { tools: mcpTools.join(", ") }));
-    if (binding && this.view.toolsEnabled && this.signer) parts.push(t("system_execute_command"));
+    if (binding && this.view.toolsEnabled && this.signer && !hosted) parts.push(t("system_execute_command"));
     if (this.view.repoMapText) parts.push(this.view.repoMapText);
-    parts.push(this.view.mode !== "build" ? t("system_plan_mode") : nativeWrite ? NATIVE_EDIT_PROTOCOL : t("system_edit_protocol"));
+    parts.push(this.view.mode !== "build" ? t("system_plan_mode") : hosted ? "Propose edits using the relative file path followed by SEARCH/REPLACE blocks:\npath/to/file\n<<<<<<< SEARCH\nexact supplied current content\n=======\nreplacement\n>>>>>>> REPLACE\nFor a new file, SEARCH is empty. Proposed edits are reviewed and applied by Uptokey, not by you. Never claim they were applied before an actual result." : nativeWrite ? NATIVE_EDIT_PROTOCOL : t("system_edit_protocol"));
     if (nativeWrite && this.view.autonomy) parts.push(AUTONOMY_PROTOCOL);
     const out: DispatchMessage[] = [{ role: "system", content: parts.join("\n\n") }];
     if (this.instructions) out.push({ role: "system", content: this.instructions });
@@ -939,7 +1019,7 @@ export class TuiController extends EventEmitter {
     this.view.correction = null;
     this.view.verifyOffer = null;
     this.store.dispatch({ type: "turn_changed", turn: "submitting" });
-    const coalescer = createStreamCoalescer({ onFlush: (event) => { if (event.type === "text") { this.store.dispatch({ type: "stream_delta", text: event.data }); this.emit("delta", event.data); } } });
+    const coalescer = createStreamCoalescer({ leading: true, onFlush: (event) => { if (event.type === "text") { this.store.dispatch({ type: "stream_delta", text: event.data }); this.emit("delta", event.data); } } });
     let conversationId: string | null = null;
     let userMessageId: string | null = null;
     let storedBefore = -1;
@@ -957,7 +1037,7 @@ export class TuiController extends EventEmitter {
       if (options.steer) options.steer.state = "submitted";
       this.store.dispatch({ type: "turn_changed", turn: "streaming" });
       const binding = this.view.binding;
-      const useReadTools = binding && this.view.toolsEnabled;
+      const useReadTools = binding && this.view.toolsEnabled && !destination.hosted;
       const sign = this.signer;
       const webTools = useReadTools && sign && expectedProcessingPolicy === "external_allowed"
         ? await nativeWebTools(this.client, abort.signal).catch(error => { abort.signal.throwIfAborted(); if (errorCode(error) !== "tui_transport_unavailable") this.notice("warning", t("ctl_web_unavailable", { reason: errorText(error) })); return []; }) : [];
@@ -1001,7 +1081,7 @@ export class TuiController extends EventEmitter {
         return result;
       };
       if (useReadTools) this.view.toolsAvailable = tools.map(tool => tool.function.name);
-      const system = this.systemMessages(webTools.map(tool => tool.function.name), mcpToolsList.map(tool => tool.function.name), writeTool !== null);
+      const system = this.systemMessages(webTools.map(tool => tool.function.name), mcpToolsList.map(tool => tool.function.name), writeTool !== null, destination, model);
       const stream = this.conversations.sendTurn({
         conversationId, model, destination, system, expectedProcessingPolicy, userText: text,
         ...(useReadTools ? { tools, maxToolRounds: this.view.autonomy ? 100 : 16, executeReadTool: ((call, signal, context) => NATIVE_WRITE_TOOLS.some(tool => tool.function.name === call.name) ? executeWrite(call, signal, context) : NATIVE_COMMAND_TOOLS.some(tool => tool.function.name === call.name) ? commandTool!(call, signal, context) : NATIVE_CODING_TOOLS.some(t => t.function.name === call.name) ? codingTool!(call, signal, context) : SHADOW_BASH_TOOLS.some(t => t.function.name === call.name) ? shadowBashTool!(call, signal, context) : call.name === "web_fetch" || call.name === "web_search" ? webTool!(call, signal, context) : call.name.startsWith("mcp_") ? mcpTool!(call, signal, context) : readTool!(call, signal, context)) as import("./conversations.ts").NativeReadToolExecutor } : {}),
@@ -1048,6 +1128,10 @@ export class TuiController extends EventEmitter {
 
   private reportTurnError(error: unknown, accepted: boolean): void {
     const code = error instanceof ConversationServiceError ? error.code : errorCode(error);
+    if (code.startsWith("account_")) { this.notice("warning", accountErrorText(code)); return; }
+    if (["hosted_outcome_unknown", "hosted_reconciliation_required", "hosted_already_submitted"].includes(code)) { this.notice("warning", hostedText("unknown")); return; }
+    if (["hosted_daily_quota_exceeded", "hosted_sponsorship_daily_exhausted", "hosted_credit_insufficient", "hosted_sybil_limit_exceeded"].includes(code)) { this.notice("info", hostedText("quota")); return; }
+    if (code.startsWith("hosted_")) { this.notice("warning", hostedText("unavailable")); return; }
     if (code.startsWith("attachment_") || ["input_image_undeclared", "input_audio_undeclared", "input_capability_undeclared", "conversation_attachment_resolution_required"].includes(code)) {
       this.notice("warning", connectionText(code === "attachment_size" ? "attachment_size" : "attachment_unavailable"));
       return;
@@ -2517,6 +2601,21 @@ export class TuiController extends EventEmitter {
 
   /** Explicit model choice in the provider picker also fixes its destination. */
   async selectProviderModel(model: string, providerId: string, routingComboId?: string): Promise<void> {
+    if (providerId === HOSTED_PROVIDER) {
+      const available = this.account.view.available;
+      const hosted = this.hostedModels.find(item => item.modelId === model && item.accountRef === available?.currentAccountRef && item.revision === available?.revision);
+      if (!this.account.view.session?.authenticated || !hosted) throw Error("selected_model_unavailable");
+      if (this.state.processingPolicy === "local_only") {
+        await this.setProcessingPolicy("external_allowed");
+        if ((this.state.processingPolicy as string) !== "external_allowed") throw Error("conversation_policy_update_failed");
+      }
+      // Revalidate after the policy write, which may overlap logout or account adoption.
+      if (!this.account.view.session?.authenticated || this.account.view.available?.currentAccountRef !== hosted.accountRef || this.account.view.available?.revision !== hosted.revision) throw Error("account_share_conflict");
+      this.client.setHostedDestination(hosted);
+      this.store.dispatch({ type: "model_selected", model });
+      await this.rememberDestination();
+      return;
+    }
     const provider = this.view.connections?.providers.find(p => p.id === providerId);
     if (!provider?.eligible || !provider.models.includes(model)) throw new Error("selected_model_unavailable");
     if (provider?.kind !== "local" && this.store.state.processingPolicy === "local_only") {
@@ -2528,6 +2627,19 @@ export class TuiController extends EventEmitter {
     // must never observe a new model paired with the previous/empty provider.
     this.store.dispatch({ type: "model_selected", model });
     await this.rememberDestination();
+  }
+
+  async checkHostedReceipt(requested = ""): Promise<void> {
+    const requestId = requested.trim() || [...this.state.messages].reverse().find(message => message.hostedRequestId)?.hostedRequestId;
+    const account = this.account.view.available;
+    if (!requestId || !/^[A-Za-z0-9:_-]{1,160}$/.test(requestId) || !account?.currentAccountRef || !this.account.view.session?.authenticated) {
+      this.notice("info", accountErrorText("account_share_conflict")); return;
+    }
+    try {
+      const receipt = await this.client.getHostedReceipt(account.currentAccountRef, account.revision, requestId, this.lifecycleAbort.signal);
+      if (this.account.view.available?.currentAccountRef !== account.currentAccountRef || this.account.view.available?.revision !== account.revision || !this.account.view.session?.authenticated) return;
+      this.notice("info", receipt.state === "settled" ? hostedText("settled", { amount: new Intl.NumberFormat(getLang(), { style: "currency", currency: "USD" }).format((receipt.chargedMicros ?? 0) / 1_000_000) }) : hostedText("pending"));
+    } catch { this.notice("warning", hostedText("unknown")); }
   }
 
   /**
@@ -2584,7 +2696,13 @@ export class TuiController extends EventEmitter {
         coveredHistory.map((m) => `### ${m.role}\n${m.content}`).join("\n\n"),
       ].join("\n");
       let summary = "";
-      for await (const event of this.client.chatStream(this.store.state.selectedModel || "auto", [{ role: "user", content: prompt }], conversationId, this.store.state.processingPolicy, abort.signal)) {
+      let destination = this.client.getSelectedDestination();
+      if (destination.hosted) {
+        destination = Object.freeze({ ...destination, hostedRequestId: `hosted-${randomUUID()}` });
+        await this.conversations.appendAtTip(conversationId, "assistant", [{ type: "status", text: `hosted:v1 ${JSON.stringify({ requestId: destination.hostedRequestId, destination: destination.hosted, state: "pending" })}` }], destination.hostedRequestId!);
+      }
+      for await (const event of this.client.chatStream(this.store.state.selectedModel || "auto", [{ role: "user", content: prompt }], conversationId, this.store.state.processingPolicy, abort.signal, destination)) {
+        if (event.type === "hosted_receipt") await this.conversations.appendAtTip(conversationId, "assistant", [{ type: "status", text: `hosted:v1 ${JSON.stringify({ ...JSON.parse(event.data), destination: destination.hosted })}` }], `${destination.hostedRequestId}:result`).catch(() => undefined);
         if (event.type === "text") summary += event.data;
         if (event.type === "done") break;
       }
@@ -2918,6 +3036,22 @@ export function errorCode(error: unknown): string {
 export function errorText(error: unknown): string {
   return localizedDiagnostic(errorCode(error));
 }
+type DurableToolResult = NonNullable<Message["toolResults"]>[number];
+// Cache only classification, never parsed payloads; released conversations remain collectible.
+const toolResultFailures = new WeakMap<DurableToolResult, { output: string; failed: boolean }>();
+
+function toolResultFailed(result: DurableToolResult): boolean {
+  const known = toolResultFailures.get(result);
+  if (known && known.output === result.output) return known.failed;
+  let failed = false;
+  try {
+    const output = JSON.parse(result.output);
+    failed = output?.status === "not_completed" || typeof output?.error === "string";
+  } catch { /* legacy textual result */ }
+  toolResultFailures.set(result, { output: result.output, failed });
+  return failed;
+}
+
 /** Maps one canonical message to transcript items (text, tool calls/results, compaction). */
 export function messageItems(message: Message): TranscriptItem[] {
   if (message.compaction) return [{ kind: "compaction", id: message.id, covered: message.compaction.covered, summary: message.content }];
@@ -2934,8 +3068,7 @@ export function messageItems(message: Message): TranscriptItem[] {
   }
   for (const call of message.toolCalls ?? []) {
     const result = message.toolResults?.find(result => result.callId === call.id);
-    let failed = false;
-    if (result) { try { const output = JSON.parse(result.output); failed = output?.status === "not_completed" || typeof output?.error === "string"; } catch { /* legacy textual result */ } }
+    const failed = result ? toolResultFailed(result) : false;
     items.push({ kind: "tool", id: `${message.id}:${call.id}`, name: call.name, summary: call.arguments.length > 120 ? `${call.arguments.slice(0, 120)}…` : call.arguments, status: failed ? "error" : result || call.result ? "done" : "pending", ...(result ? { detail: result.output, receipt: result.receiptId || null } : {}) });
   }
   return items;
