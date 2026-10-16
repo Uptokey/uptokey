@@ -190,6 +190,7 @@ export class TuiController extends EventEmitter {
   private emitScheduled = false;
   private readonly preparedMediaContexts = new WeakMap<PreparedMediaInput, () => void>();
   hostedModels: readonly TuiHostedModel[] = [];
+  hostedCatalogError: "account_reauthentication_required" | "hosted_model_unavailable" | null = null;
   private hostedIdentity = "";
   private hostedGeneration = 0;
   private hostedLoading: Promise<void> | null = null;
@@ -334,6 +335,7 @@ export class TuiController extends EventEmitter {
     this.hostedIdentity = identity;
     const generation = ++this.hostedGeneration;
     this.hostedModels = [];
+    this.hostedCatalogError = null;
     const selectedHosted = this.client.getSelectedDestination().hosted;
     if (selectedHosted && (!identity || selectedHosted.accountRef !== ref || selectedHosted.revision !== revision)) {
       this.turnAbort?.abort(); this.client.setSelectedProvider();
@@ -356,19 +358,31 @@ export class TuiController extends EventEmitter {
         }
         this.emit("modelsChanged"); this.changed();
         await this.chooseHostedDefault();
-      } catch {
+      } catch (error) {
         // A stale successful snapshot cannot keep claiming availability after a failed explicit refresh.
         if (this.disposed || generation !== this.hostedGeneration) return;
+        // Only successful catalogs are cached. The next explicit account/status refresh
+        // can retry this same account revision; no timer or state-change retry loop.
+        this.hostedIdentity = "";
+        this.hostedCatalogError = error instanceof Error && error.message === "account_reauthentication_required"
+          ? "account_reauthentication_required" : "hosted_model_unavailable";
         if (this.client.getSelectedDestination().hosted) {
           this.turnAbort?.abort(); this.client.setSelectedProvider();
           this.store.dispatch({ type: "model_selected", model: "" });
         }
+        this.notice("warning", this.hostedCatalogError === "account_reauthentication_required"
+          ? accountErrorText(this.hostedCatalogError) : hostedText("unavailable"));
         this.emit("modelsChanged"); this.changed();
       }
     })();
     this.hostedLoading = pending;
     await pending;
     if (this.hostedLoading === pending) this.hostedLoading = null;
+  }
+
+  /** Explicit model-list recovery; concurrent clicks share the same catalog read. */
+  retryHostedModels(): Promise<void> {
+    return this.refreshHostedModels(true);
   }
 
   private async chooseHostedDefault(): Promise<void> {

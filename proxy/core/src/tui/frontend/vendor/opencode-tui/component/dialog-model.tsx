@@ -25,6 +25,48 @@ export function DialogModel(props: { providerID?: string }) {
   const providers = createDialogProviderOptions()
 
   const showExtra = createMemo(() => connected() && !props.providerID)
+  const accountAction = createMemo(() => {
+    tick()
+    const controller = getBackend().controller
+    const session = controller.account.view.session
+    if (props.providerID || session?.configured === false) return null
+    if (!session?.authenticated || controller.hostedCatalogError === "account_reauthentication_required") return "account"
+    return controller.hostedCatalogError ? "refresh" : null
+  })
+
+  const catalogOptions = createMemo(() => {
+    const favorites = connected() ? local.model.favorite() : []
+    return pipe(
+      sync.data.provider,
+      sortBy(
+        (provider) => Object.values(provider.models).some(isHostedFreeModel),
+        (provider) => provider.name,
+      ),
+      flatMap((provider) =>
+        pipe(
+          provider.models,
+          entries(),
+          filter(([_, info]) => info.status !== "deprecated"),
+          filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
+          map(([model, info]) => ({
+            value: { providerID: provider.id, modelID: model },
+            title: info.name ?? model,
+            releaseDate: info.release_date,
+            description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
+              ? "(Favorite)"
+              : undefined,
+            category: connected() ? provider.name : undefined,
+            hostedFree: isHostedFreeModel(info),
+            footer: isHostedFreeModel(info) ? accountText("free") : undefined,
+            onSelect() {
+              onSelect(provider.id, model)
+            },
+          })),
+          (options) => sortModelOptions(options, props.providerID !== undefined),
+        ),
+      ),
+    )
+  })
 
   const options = createMemo(() => {
     const needle = query().trim()
@@ -64,52 +106,12 @@ export function DialogModel(props: { providerID?: string }) {
       "Recent",
     )
 
-    const providerOptions = pipe(
-      sync.data.provider,
-      sortBy(
-        (provider) => Object.values(provider.models).some(isHostedFreeModel),
-        (provider) => provider.name,
-      ),
-      flatMap((provider) =>
-        pipe(
-          provider.models,
-          entries(),
-          filter(([_, info]) => info.status !== "deprecated"),
-          filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
-          map(([model, info]) => ({
-            value: { providerID: provider.id, modelID: model },
-            title: info.name ?? model,
-            releaseDate: info.release_date,
-            description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
-              ? "(Favorite)"
-              : undefined,
-            category: connected() ? provider.name : undefined,
-            hostedFree: isHostedFreeModel(info),
-            footer: isHostedFreeModel(info) ? accountText("free") : undefined,
-            onSelect() {
-              onSelect(provider.id, model)
-            },
-          })),
-          filter((option) => {
-            if (!showSections) return true
-            if (
-              favorites.some(
-                (item) => item.providerID === option.value.providerID && item.modelID === option.value.modelID,
-              )
-            )
-              return false
-            if (
-              recents.some(
-                (item) => item.providerID === option.value.providerID && item.modelID === option.value.modelID,
-              )
-            )
-              return false
-            return true
-          }),
-          (options) => sortModelOptions(options, props.providerID !== undefined),
-        ),
-      ),
-    )
+    const sectionModels = [...favorites, ...recents]
+    const providerOptions = showSections
+      ? catalogOptions().filter((option) => !sectionModels.some(
+          (item) => item.providerID === option.value.providerID && item.modelID === option.value.modelID,
+        ))
+      : catalogOptions()
 
     const popularProviders = !connected()
       ? pipe(
@@ -122,30 +124,33 @@ export function DialogModel(props: { providerID?: string }) {
         )
       : []
 
-    tick()
-    const session = getBackend().controller.account.view.session
-    const accountOptions = !props.providerID && session?.configured && !session.authenticated ? [{
-      title: `${accountText("sign_in")} · ${accountText("free")}`,
+    const accountOptions = accountAction() ? [{
+      title: `${accountText(accountAction() === "refresh" ? "refresh" : "sign_in")} · ${accountText("free")}`,
+      category: "Uptokey",
       value: { action: "account" as const },
-      onSelect() { getBackend().emit({ type: "uptokey.panel.open", properties: { name: "account" } }) },
+      onSelect() {
+        const backend = getBackend()
+        if (accountAction() === "refresh") { void backend.controller.retryHostedModels(); return }
+        backend.emit({ type: "uptokey.panel.open", properties: { name: "account" } })
+      },
     }] : []
 
     if (needle) {
       return [
+        ...fuzzysort.go(needle, accountOptions, { keys: ["title", "category"] }).map((x) => x.obj),
         ...sortModelOptions(
           fuzzysort.go(needle, providerOptions, { keys: ["title", "category"] }).map((x) => x.obj),
           false,
         ),
         ...fuzzysort.go(needle, popularProviders, { keys: ["title"] }).map((x) => x.obj),
-        ...fuzzysort.go(needle, accountOptions, { keys: ["title"] }).map((x) => x.obj),
       ]
     }
 
     const models = [...favoriteOptions, ...recentOptions, ...providerOptions]
     return [
+      ...accountOptions,
       ...models.filter((option) => !option.hostedFree),
       ...models.filter((option) => option.hostedFree),
-      ...accountOptions,
       ...popularProviders,
     ]
   })
@@ -177,6 +182,7 @@ export function DialogModel(props: { providerID?: string }) {
 
   return (
     <DialogSelect<ReturnType<typeof options>[number]["value"]>
+      virtualize={true}
       options={options()}
       actions={[
         {

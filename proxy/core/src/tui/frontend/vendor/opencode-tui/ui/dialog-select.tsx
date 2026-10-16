@@ -28,6 +28,8 @@ export interface DialogSelectProps<T> {
   footer?: JSX.Element
   emptyView?: JSX.Element
   options: DialogSelectOption<T>[]
+  /** Keep large one-dimensional catalogs bounded to the visible rows, without dropping searchable options. */
+  virtualize?: boolean
   flat?: boolean
   ref?: (ref: DialogSelectRef<T>) => void
   onMove?: (option: DialogSelectOption<T>) => void
@@ -98,6 +100,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   let selection: { value: T; category?: string } | undefined
   let resetSelection = false
   let visibilityGeneration = 0
+  let virtualScrollGeneration = 0
 
   createEffect(
     on(
@@ -211,7 +214,65 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   })
 
   const dimensions = useTerminalDimensions()
-  const height = createMemo(() => Math.min(rows(), Math.floor(dimensions().height / 2) - 6))
+  const height = createMemo(() => Math.max(1, Math.min(rows(), Math.floor(dimensions().height / 2) - 6)))
+  const [scrollTop, setScrollTop] = createSignal(0)
+  const layout = createMemo(() => {
+    let top = 0
+    const optionRows: { top: number; height: number }[] = []
+    const groups = grouped().map(([category, options], index) => {
+      const start = top
+      if (category) top += index > 0 ? 2 : 1
+      const positions = options.map((option) => {
+        const row = { top, height: 1 + (option.details?.length ?? 0) }
+        optionRows.push(row)
+        top += row.height
+        return row
+      })
+      return { category, options, index, start, end: top, positions }
+    })
+    return { groups, optionRows, height: top }
+  })
+  const window = createMemo(() => {
+    const all = layout()
+    const from = props.virtualize ? Math.max(0, scrollTop() - 4) : 0
+    const to = props.virtualize ? scrollTop() + height() + 4 : all.height
+    let start = all.height
+    let end = 0
+    const groups = all.groups.flatMap((group) => {
+      if (group.end <= from || group.start >= to) return []
+      const headerHeight = group.category ? (group.index > 0 ? 2 : 1) : 0
+      const header = headerHeight > 0 && group.start + headerHeight > from
+      let first = 0, last = group.positions.length
+      // Binary search the metadata only: native renderables are created for the viewport, not the whole catalog.
+      if (props.virtualize) {
+        let low = 0, high = last
+        while (low < high) {
+          const mid = (low + high) >>> 1, row = group.positions[mid]!
+          if (row.top + row.height <= from) low = mid + 1
+          else high = mid
+        }
+        first = low
+        low = first; high = last
+        while (low < high) {
+          const mid = (low + high) >>> 1
+          if (group.positions[mid]!.top < to) low = mid + 1
+          else high = mid
+        }
+        last = low
+      }
+      if (!header && first === last) return []
+      start = Math.min(start, header ? group.start : group.positions[first]!.top)
+      end = Math.max(end, last > first ? group.positions[last - 1]!.top + group.positions[last - 1]!.height : group.start + headerHeight)
+      return [{ ...group, header, options: group.options.slice(first, last) }]
+    })
+    return { groups, before: groups.length ? start : 0, after: Math.max(0, all.height - end) }
+  })
+  const renderGroups = createMemo(() => props.virtualize ? window().groups
+    : grouped().map(([category, options], index) => ({ category, options, index, header: Boolean(category) })))
+  createEffect(() => {
+    const max = Math.max(0, layout().height - height())
+    setScrollTop((value) => Math.min(value, max))
+  })
 
   const selected = createMemo(() => flat()[store.selected])
 
@@ -270,6 +331,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   )
   onCleanup(() => {
     visibilityGeneration++
+    virtualScrollGeneration++
   })
 
   createEffect(
@@ -309,8 +371,27 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     scrollToSelection(center)
   }
 
-  function scrollToSelection(center: boolean) {
+  function scrollToSelection(center: boolean, attempt = 0) {
     if (!scroll) return
+    const generation = ++virtualScrollGeneration
+    if (props.virtualize) {
+      const row = layout().optionRows[store.selected]
+      if (!row) return
+      const viewport = Math.max(1, height())
+      const top = scroll.scrollTop
+      const target = center ? Math.max(0, row.top - Math.floor(viewport / 2))
+        : row.top < top ? row.top : row.top + row.height > top + viewport ? row.top + row.height - viewport : top
+      const bounded = Math.min(target, Math.max(0, layout().height - viewport))
+      const apply = () => {
+        if (generation !== virtualScrollGeneration || !scroll || scroll.isDestroyed) return
+        scroll.scrollTo(bounded)
+        setScrollTop(scroll.scrollTop)
+      }
+      apply()
+      // The initial current model can be near the end before native Yoga layout knows the spacer heights.
+      if (scroll.scrollTop !== bounded) requestAnimationFrame(() => requestAnimationFrame(apply))
+      return
+    }
     let remaining = store.selected
     let index = 0
     // Locate the row by position because a unique renderable ID cannot currently be ensured.
@@ -324,8 +405,15 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       remaining -= options.length
     }
     const target = scroll.getChildren()[index]
-    if (!target) return
-    const y = target.y - scroll.y
+    const y = target ? target.y - scroll.y : Number.NaN
+    // A replaced/filtering row has no native coordinates until layout. Never feed NaN into scroll state.
+    if (!target || !Number.isFinite(y) || !Number.isFinite(scroll.height) || scroll.height <= 0) {
+      if (attempt < 2) requestAnimationFrame(() => {
+        if (generation !== virtualScrollGeneration || !scroll || scroll.isDestroyed) return
+        scrollToSelection(center, attempt + 1)
+      })
+      return
+    }
     if (center) {
       const centerOffset = Math.floor(scroll.height / 2)
       scroll.scrollBy(y - centerOffset)
@@ -484,6 +572,10 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   })
 
   let scroll: ScrollBoxRenderable | undefined
+  const updateScrollWindow = ({ position }: { position: number }) => {
+    if (props.virtualize) setScrollTop(position)
+  }
+  onCleanup(() => scroll?.verticalScrollBar.off("change", updateScrollWindow))
   const ref: DialogSelectRef<T> = {
     get filter() {
       return store.filter
@@ -613,14 +705,20 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
             paddingRight={1}
             scrollbarOptions={{ visible: false }}
             scrollAcceleration={scrollAcceleration()}
-            ref={(r: ScrollBoxRenderable) => (scroll = r)}
+            ref={(r: ScrollBoxRenderable) => {
+              scroll = r
+              r.verticalScrollBar.on("change", updateScrollWindow)
+            }}
             maxHeight={height()}
           >
-            <For each={grouped()}>
-              {([category, options], index) => (
+            <Show when={props.virtualize && window().before > 0}>
+              <box height={window().before} flexShrink={0} />
+            </Show>
+            <For each={renderGroups()}>
+              {({ category, options, index, header }) => (
                 <>
-                  <Show when={category}>
-                    <box paddingTop={index() > 0 ? 1 : 0} paddingLeft={3}>
+                  <Show when={header}>
+                    <box paddingTop={index > 0 ? 1 : 0} paddingLeft={3}>
                       <Show
                         when={options[0]?.categoryView}
                         fallback={
@@ -712,6 +810,9 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                 </>
               )}
             </For>
+            <Show when={props.virtualize && window().after > 0}>
+              <box height={window().after} flexShrink={0} />
+            </Show>
           </scrollbox>
         </Show>
       </box>
