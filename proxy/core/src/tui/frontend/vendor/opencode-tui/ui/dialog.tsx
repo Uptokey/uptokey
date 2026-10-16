@@ -104,7 +104,9 @@ function init() {
   }
 
   useBindings(() => ({
-    enabled: store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
+    // Native selection is not a Solid signal. Evaluate it for each key so
+    // clearing/copying a selection cannot leave dialog dismissal disabled.
+    enabled: () => store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
     bindings: [
       {
         key: "escape",

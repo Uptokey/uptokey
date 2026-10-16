@@ -44,12 +44,12 @@ async function until(predicate: () => boolean) {
   assert.fail("hosted workflow did not settle");
 }
 
-async function fixture(t: TestContext, options: { own?: boolean; model?: string; processingPolicy?: "local_only" | "external_allowed"; held?: boolean; signedOut?: boolean } = {}) {
+async function fixture(t: TestContext, options: { own?: boolean; model?: string; processingPolicy?: "local_only" | "external_allowed"; held?: boolean; signedOut?: boolean; catalogStatus?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "uptokey-hosted-workflow-"));
   const previous = process.env.UPTOKEY_SETTINGS_DIR;
   process.env.UPTOKEY_SETTINGS_DIR = root;
   let accountRef: string | null = options.signedOut ? null : ACCOUNT_A, revision = 1;
-  let supplied = catalog(ids()), catalogStatus = 200;
+  let supplied = catalog(ids()), catalogStatus = options.catalogStatus ?? 200;
   const principal = "isolated-hosted-workflow";
   const conversations = new ConversationStore(new MemorySecretStore(), join(root, "conversations"));
   let chatMode: "complete" | "hold" | "disconnect" = "complete", heldChat: (() => void) | undefined;
@@ -200,6 +200,39 @@ test("signed-out first use keeps BYOK usable and does not request a hosted catal
   assert.equal(f.controller.state.selectedModel, "byok-chat");
   assert.equal(f.controller.hostedModels.length, 0);
   assert.equal(f.calls.filter(call => call.path.includes("/hosted") || call.path.includes("/login")).length, 0);
+});
+
+test("an initial catalog failure recovers on account refresh at the same revision, without a retry loop or inference", async t => {
+  const f = await fixture(t, { own: true, catalogStatus: 503 }); await f.settled();
+  assert.equal(f.controller.hostedModels.length, 0);
+  assert.equal(f.controller.hostedCatalogError, "hosted_model_unavailable");
+  const failedCalls = f.calls.filter(call => call.body?.operation === "models").length;
+  await delay(75);
+  assert.equal(f.calls.filter(call => call.body?.operation === "models").length, failedCalls);
+  f.catalogStatus(200);
+  await f.controller.account.refresh();
+  await until(() => f.controller.hostedModels.length === 7);
+  assert.equal(f.calls.filter(call => call.body?.operation === "models").length, failedCalls + 1);
+  assert.equal(f.controller.account.view.available?.revision, 1);
+  assert.equal(f.controller.hostedCatalogError, null);
+  assert.equal(f.controller.state.selectedModel, "byok-chat");
+  assert.equal(f.calls.filter(call => call.body?.operation === "chat" || call.path.includes("/login")).length, 0);
+});
+
+test("explicit catalog recovery coalesces concurrent retries and clears its sanitized error", async t => {
+  const f = await fixture(t, { own: true }); await f.settled();
+  f.catalogStatus(401); await f.controller.retryHostedModels();
+  assert.equal(f.controller.hostedCatalogError, "account_reauthentication_required");
+  assert.equal(f.controller.hostedModels.length, 0);
+  f.catalogStatus(200); f.hold(ACCOUNT_A);
+  const before = f.calls.filter(call => call.body?.operation === "models").length;
+  const retries = [f.controller.retryHostedModels(), f.controller.retryHostedModels(), f.controller.retryHostedModels()];
+  await until(() => f.held(ACCOUNT_A) === 1);
+  assert.equal(f.calls.filter(call => call.body?.operation === "models").length, before + 1);
+  f.release(ACCOUNT_A); await Promise.all(retries);
+  assert.equal(f.controller.hostedCatalogError, null);
+  assert.equal(f.controller.hostedModels.length, 7);
+  assert.equal(f.calls.filter(call => call.body?.operation === "chat").length, 0);
 });
 
 test("account switch invalidates the previous destination immediately, before the next catalog responds", async t => {

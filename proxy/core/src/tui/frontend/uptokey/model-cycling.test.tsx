@@ -37,9 +37,10 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
     writeFile(join(root, "session.json"), '{"pinned":[]}'),
     writeFile(join(root, "kv.json"), "{}"),
   ])
+  let catalogReads = 0
   const providerList = (items: Choice[]) => [...new Set(items.map(item => item.providerID))].map(id => ({
     id, name: id, models: Object.fromEntries(items.filter(item => item.providerID === id).map(item => [item.modelID, {
-      id: item.modelID, name: item.modelID, providerID: id, status: "active", release_date: "", cost: { input: 0, output: 0 },
+      id: item.modelID, name: item.modelID, providerID: id, status: "active", get release_date() { catalogReads++; return "" }, cost: { input: 0, output: 0 },
       options: id === "uptokey-hosted" ? { uptokeyFunding: "hosted-free" } : {},
     }])),
   }))
@@ -51,7 +52,11 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
   })
   const events: unknown[] = [], changes = new Set<() => void>()
   const account = { view: { session: { configured: true, authenticated: true, state: "connected" } } }
-  setBackend({ directory: root, controller: { account }, client: {}, subscribe: () => () => {},
+  let retries = 0
+  const controller = { account, hostedCatalogError: null as "account_reauthentication_required" | "hosted_model_unavailable" | null,
+    async retryHostedModels() { retries++ },
+  }
+  setBackend({ directory: root, controller, client: {}, subscribe: () => () => {},
     emit: (event: unknown) => events.push(event),
     onChange: (handler: () => void) => { changes.add(handler); return () => changes.delete(handler) },
   } as never)
@@ -81,11 +86,17 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
   while (!local?.model.ready && Date.now() < until) { await Bun.sleep(5); await app.renderOnce() }
   expect(local.model.ready).toBe(true)
   return {
-    local, app, original, root, events, account,
+    local, app, original, root, events, account, controller, retries: () => retries,
+    catalogReads: () => catalogReads,
+    changeSubscribers: () => changes.size,
     async openModels() { dialog.replace(() => <DialogModel />); await app.flush(); await app.renderOnce() },
     dialog: () => dialog,
     async accountChanged() { for (const handler of changes) handler(); await Bun.sleep(160); await app.flush(); await app.renderOnce() },
     available(items: Choice[]) { setData("provider", providerList(items)) },
+    updateModel(model: Choice, update: { name?: string; status?: string; options?: Record<string, string> }) {
+      const index = data.provider.findIndex(provider => provider.id === model.providerID)
+      if (index >= 0) setData("provider", index, "models", model.modelID, update)
+    },
     async press(direction: 1 | -1) {
       app.mockInput.pressKey("F2", direction === -1 ? { shift: true } : {})
       await app.flush(); await app.renderOnce()
@@ -95,6 +106,121 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
     },
   }
 }
+
+test("unrelated controller changes leave a large open model catalog intact and closing removes its subscription", async () => {
+  const models = Array.from({ length: 750 }, (_, index) => choice(`catalog-model-${index.toString().padStart(4, "0")}`))
+  const h = await mount([], models, models[0])
+  try {
+    await h.openModels()
+    expect(h.changeSubscribers()).toBe(1)
+    const reads = h.catalogReads()
+    expect(reads).toBeGreaterThanOrEqual(models.length)
+    await h.accountChanged()
+    expect(h.catalogReads()).toBe(reads)
+    h.dialog().clear()
+    await h.app.flush(); await h.app.renderOnce()
+    expect(h.changeSubscribers()).toBe(0)
+    await h.accountChanged()
+    expect(h.catalogReads()).toBe(reads)
+  } finally { h.app.renderer.destroy() }
+})
+
+test("Uptokey Free sign-in is visible without scrolling a large catalog and catalog recovery never sends inference", async () => {
+  const previous = getLang(); setLang("en")
+  const models = Array.from({ length: 750 }, (_, index) => choice(`model-${index.toString().padStart(4, "0")}`))
+  const h = await mount([], models, models[0])
+  try {
+    h.account.view.session.authenticated = false
+    await h.openModels()
+    expect(h.app.captureCharFrame()).toContain("Sign in · Free")
+    expect(h.events).toEqual([])
+    expect(h.retries()).toBe(0)
+    h.account.view.session.authenticated = true
+    h.controller.hostedCatalogError = "hosted_model_unavailable"
+    await h.accountChanged()
+    expect(h.app.captureCharFrame()).toContain("Refresh · Free")
+    await h.app.mockInput.typeText("Uptokey"); await h.app.flush(); await h.app.renderOnce()
+    h.app.mockInput.pressEnter(); await h.app.flush()
+    expect(h.retries()).toBe(1)
+    expect(h.events).toEqual([])
+    h.controller.hostedCatalogError = null
+    const free = choice("Recovered-free-model", "uptokey-hosted")
+    h.available([models[0]!, free]); await h.accountChanged()
+    expect(h.app.captureCharFrame()).not.toContain("Refresh · Free")
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})
+
+test("searching a large model catalog does not re-project every model on each query key", async () => {
+  const models = Array.from({ length: 750 }, (_, index) => choice(`catalog-model-${index.toString().padStart(4, "0")}`))
+  const h = await mount([], models, models[0])
+  try {
+    await h.openModels()
+    await Bun.sleep(5); await h.app.flush()
+    const reads = h.catalogReads()
+    expect(reads).toBeGreaterThanOrEqual(models.length)
+    await h.app.mockInput.typeText("0749"); await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).toContain("catalog-model-0749")
+    expect(h.catalogReads()).toBe(reads)
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    expect(h.local.model.current()).toEqual(models[749])
+    expect(h.dialog().stack).toHaveLength(0)
+  } finally { h.app.renderer.destroy() }
+})
+
+test("the memoized catalog follows metadata, funding and favorite changes under an active query", async () => {
+  const previous = getLang()
+  setLang("en")
+  const h = await mount([b], [a, b])
+  try {
+    await h.openModels()
+    await Bun.sleep(5); await h.app.flush()
+    await h.app.mockInput.typeText("renamed"); await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).not.toContain("model-b")
+    h.updateModel(b, { name: "renamed-model" })
+    await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).toContain("renamed-model")
+    h.updateModel(b, { status: "deprecated" })
+    await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).not.toContain("renamed-model")
+    const reads = h.catalogReads()
+    h.updateModel(b, { status: "active", options: { uptokeyFunding: "hosted-free" } })
+    await h.app.flush(); await h.app.renderOnce()
+    expect(h.catalogReads()).toBeGreaterThan(reads)
+    h.local.model.toggleFavorite(b)
+    await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).toContain("(Favorite)")
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    expect(h.local.model.current()).toEqual(b)
+    expect(h.local.model.parsed().hostedFree).toBe(true)
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})
+
+test("an open model dialog follows account visibility and catalog revocation without reopening", async () => {
+  const previous = getLang(), free = choice("Hosted-live-model", "uptokey-hosted")
+  setLang("en")
+  const h = await mount([], [a, free])
+  try {
+    await h.openModels()
+    expect(h.app.captureCharFrame()).not.toContain("Sign in · Free")
+    h.account.view.session.authenticated = false
+    h.available([a])
+    await h.accountChanged()
+    expect(h.app.captureCharFrame()).toContain("Sign in · Free")
+    expect(h.app.captureCharFrame()).not.toContain("Hosted-live-model")
+    h.account.view.session.configured = false
+    await h.accountChanged()
+    expect(h.app.captureCharFrame()).not.toContain("Sign in · Free")
+    h.account.view.session.configured = true
+    h.account.view.session.authenticated = true
+    h.available([a, free])
+    await h.accountChanged()
+    expect(h.app.captureCharFrame()).toContain("Hosted-live-model")
+    expect(h.app.captureCharFrame()).not.toContain("Sign in · Free")
+    await h.app.mockInput.typeText("Hosted-live-model"); await h.app.flush(); await h.app.renderOnce()
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    expect(h.local.model.current()).toEqual(free)
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})
 
 test("F2 skips a removed recent model instead of repeatedly returning to the fallback", async () => {
   const h = await mount([a, removed, b], [a, b])
