@@ -324,7 +324,7 @@ export class TuiClient extends EventEmitter {
     const row = parsed.value as Record<string, unknown>;
     if (!response.ok) {
       const error = typeof row.error === "string" ? row.error : (row.error as { type?: unknown } | undefined)?.type;
-      throw new Error(typeof error === "string" && /^account_[a-z_]{1,80}$/.test(error) ? error : "account_service_unavailable");
+      throw Object.assign(new Error(typeof error === "string" && /^account_[a-z_]{1,80}$/.test(error) ? error : "account_service_unavailable"), { status: response.status });
     }
     return row;
   }
