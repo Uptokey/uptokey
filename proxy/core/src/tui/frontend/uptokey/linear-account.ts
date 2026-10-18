@@ -1,5 +1,5 @@
 import type { TuiAccount } from "../../account.ts"
-import { accountText } from "../../account-ui.ts"
+import { accountErrorText, accountText } from "../../account-ui.ts"
 import { accountPlanPresentation, accountViewSummary } from "../../account-plan.ts"
 import { getLang } from "../../i18n.ts"
 
@@ -15,18 +15,31 @@ export async function runLinearAccount(account: TuiAccount, ui: {
   await account.refresh()
   await account.loadPlan()
   ui.say(`${accountText("title")}\n${accountSummary(account)}`)
+  const showLoginLink = () => {
+    if (!account.view.login) return
+    ui.say(account.view.login.loginUrl)
+    if (account.view.error) ui.say(accountErrorText(account.view.error))
+  }
+  showLoginLink()
   if (account.view.session?.authenticated) {
     for (const line of accountPlanPresentation(account.view.plan).details) ui.say(line)
     ui.say(accountText("local_byok_free"))
   }
   const actions: Array<{ label: string; run: () => Promise<void> | void }> = []
   const view = account.view
-  if (view.challenge || view.login) actions.push({ label: accountText("cancel"), run: () => account.cancelPending() })
+  if (view.login) {
+    actions.push({ label: accountText("open_browser"), run: () => account.reopenLogin() })
+    actions.push({ label: accountText("cancel"), run: () => account.cancelPending() })
+  }
+  else if (view.challenge) {
+    if (view.session?.loginAvailable) actions.push({ label: accountText("sign_in"), run: () => { account.cancelPending(); return account.login() } })
+    actions.push({ label: accountText("cancel"), run: () => account.cancelPending() })
+  }
   else if (!view.session?.authenticated) {
     for (const item of view.available?.accounts ?? []) actions.push({ label: accountText("use", { name: item.session.profile?.displayName ?? item.session.profile?.email ?? accountText("title") }), run: () => account.adopt(item.accountRef) })
     if (view.session?.configured) {
-      actions.push({ label: accountText("share"), run: () => account.requestAccess() })
       if (view.session.loginAvailable) actions.push({ label: accountText("sign_in"), run: () => account.login() })
+      actions.push({ label: accountText("share"), run: () => account.requestAccess() })
     }
   } else {
     actions.push({ label: accountText("usage"), run: async () => {
@@ -47,5 +60,5 @@ export async function runLinearAccount(account: TuiAccount, ui: {
   actions.push({ label: accountText("refresh"), run: async () => { await account.refresh(); await account.loadPlan() } })
   if (view.error) actions.push({ label: accountText("details"), run: () => ui.say(view.error!) })
   const selected = await ui.choose(actions, item => item.label)
-  if (selected) { await selected.run(); ui.say(accountSummary(account)) }
+  if (selected) { await selected.run(); ui.say(accountSummary(account)); showLoginLink() }
 }

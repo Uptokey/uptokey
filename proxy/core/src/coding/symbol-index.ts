@@ -43,6 +43,8 @@ export interface SymbolIndex {
   definitions(file?: string): Symbol[];
   remove(file: string): void;
   references(symbol: Symbol): SymbolReference[];
+  /** Same references grouped by source file, without materializing every occurrence for every name candidate. */
+  referenceFiles(symbol: Symbol): Array<{ file: string; count: number }>;
   refresh(file: string | FileNode): Promise<void>;
   save(): Promise<void>;
   load(): Promise<void>;
@@ -98,9 +100,14 @@ function nameNode(node: Node): Node | null {
 
 class SymbolIndexImpl implements SymbolIndex {
   private readonly root: string;
-  private readonly files = new Map<string, { source: string; language: SupportedLanguage; symbols: Symbol[]; identifiers: { name: string; range: SymbolRange }[] }>();
+  private readonly files = new Map<string, { source: string; language: SupportedLanguage; symbols: Symbol[]; identifiers: { name: string; range: SymbolRange }[]; order: number }>();
+  private fileSequence = 0;
   private readonly symbols = new Map<number, Symbol>();
+  private readonly symbolsByName = new Map<string, Symbol[]>();
+  private readonly identifiersByName = new Map<string, Map<string, { name: string; range: SymbolRange }[]>>();
   private readonly refs = new Map<number, SymbolReference[]>();
+  private readonly persistedFiles = new Set<string>();
+  private referencesDirty = false;
   private readonly languages = new Map<SupportedLanguage, Language>();
   private parserPromise: Promise<void> | undefined;
   private nextId = 1;
@@ -139,26 +146,59 @@ class SymbolIndexImpl implements SymbolIndex {
     tree.delete();
     parser.delete();
     const old = this.files.get(path);
-    if (old) for (const symbol of old.symbols) this.symbols.delete(symbol.id);
-    this.files.set(path, { source, language, symbols, identifiers: identifiers.filter((item) => !declarationRanges.has(`${item.range.startIndex}:${item.range.endIndex}`)) });
-    for (const symbol of symbols) this.symbols.set(symbol.id, symbol);
-    this.rebuildReferences();
+    if (old) for (const symbol of old.symbols) this.deleteSymbol(symbol);
+    else if (this.persistedFiles.has(path)) for (const symbol of this.definitions(path)) this.deleteSymbol(symbol);
+    this.persistedFiles.delete(path);
+    if (old) this.removeIdentifiers(path, old.identifiers);
+    const occurrences = identifiers.filter((item) => !declarationRanges.has(`${item.range.startIndex}:${item.range.endIndex}`));
+    this.files.set(path, { source, language, symbols, identifiers: occurrences, order: old?.order ?? ++this.fileSequence });
+    for (const identifier of occurrences) {
+      let byFile = this.identifiersByName.get(identifier.name);
+      if (!byFile) this.identifiersByName.set(identifier.name, byFile = new Map());
+      let items = byFile.get(path);
+      if (!items) byFile.set(path, items = []);
+      items.push(identifier);
+    }
+    for (const symbol of symbols) this.insertSymbol(symbol);
+    // A bulk repository scan adds many files before any reference is read. Rebuilding the entire
+    // cross-file graph after every file made that scan quadratic and blocked the terminal thread.
+    this.referencesDirty = true;
+    this.refs.clear();
   }
 
   query(name: string, opts: SymbolQueryOptions = {}): Symbol[] {
-    return [...this.symbols.values()].filter((symbol) => symbol.name === name && (!opts.file || symbol.file === this.resolveFile(opts.file)) && (!opts.kind || symbol.kind === opts.kind));
+    const file = opts.file ? this.resolveFile(opts.file) : undefined;
+    return (this.symbolsByName.get(name) ?? []).filter((symbol) => (!file || symbol.file === file) && (!opts.kind || symbol.kind === opts.kind));
   }
 
   definitions(file?: string): Symbol[] { return [...this.symbols.values()].filter(symbol => !file || symbol.file === this.resolveFile(file)); }
 
   remove(file: string): void {
     const path = this.resolveFile(file);
-    for (const symbol of this.symbols.values()) if (symbol.file === path) this.symbols.delete(symbol.id);
+    for (const symbol of this.symbols.values()) if (symbol.file === path) this.deleteSymbol(symbol);
+    const old = this.files.get(path);
+    if (old) this.removeIdentifiers(path, old.identifiers);
     this.files.delete(path);
-    this.rebuildReferences();
+    this.persistedFiles.delete(path);
+    this.referencesDirty = true;
+    this.refs.clear();
   }
 
-  references(symbol: Symbol): SymbolReference[] { return [...(this.refs.get(symbol.id) ?? [])]; }
+  references(symbol: Symbol): SymbolReference[] {
+    if (!this.referencesDirty) return [...(this.refs.get(symbol.id) ?? [])];
+    const refs: SymbolReference[] = [];
+    for (const [file, identifiers] of this.referenceGroups(symbol)) for (const identifier of identifiers) {
+      refs.push({ symbolId: symbol.id, name: identifier.name, file, line: identifier.range.startPosition.row, range: identifier.range });
+    }
+    return refs;
+  }
+
+  referenceFiles(symbol: Symbol): Array<{ file: string; count: number }> {
+    if (this.referencesDirty) return this.referenceGroups(symbol).map(([file, identifiers]) => ({ file, count: identifiers.length }));
+    const counts = new Map<string, number>();
+    for (const ref of this.refs.get(symbol.id) ?? []) counts.set(ref.file, (counts.get(ref.file) ?? 0) + 1);
+    return [...counts].map(([file, count]) => ({ file, count }));
+  }
 
   async refresh(file: string | FileNode): Promise<void> {
     const raw = filePath(file);
@@ -177,7 +217,7 @@ class SymbolIndexImpl implements SymbolIndex {
       const insertSymbol = db.prepare("INSERT INTO symbols(id,name,kind,file,start,end,start_row,start_col,end_row,end_col,scope,language) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)");
       for (const s of this.symbols.values()) insertSymbol.run(s.id, s.name, s.kind, s.file, s.range.startIndex, s.range.endIndex, s.range.startPosition.row, s.range.startPosition.column, s.range.endPosition.row, s.range.endPosition.column, JSON.stringify(s.scope), s.language);
       const insertRef = db.prepare("INSERT INTO refs(symbol_id,ref_file,ref_line,start,end,start_row,start_col,end_row,end_col) VALUES(?,?,?,?,?,?,?,?,?)");
-      for (const [id, refs] of this.refs) for (const ref of refs) insertRef.run(id, ref.file, ref.line, ref.range.startIndex, ref.range.endIndex, ref.range.startPosition.row, ref.range.startPosition.column, ref.range.endPosition.row, ref.range.endPosition.column);
+      for (const symbol of this.symbols.values()) for (const ref of this.references(symbol)) insertRef.run(symbol.id, ref.file, ref.line, ref.range.startIndex, ref.range.endIndex, ref.range.startPosition.row, ref.range.startPosition.column, ref.range.endPosition.row, ref.range.endPosition.column);
     } finally { db.close(); }
   }
 
@@ -188,17 +228,51 @@ class SymbolIndexImpl implements SymbolIndex {
       try {
         const rows = db.prepare("SELECT * FROM symbols ORDER BY id").all() as Array<Record<string, unknown>>;
         const refs = db.prepare("SELECT * FROM refs").all() as Array<Record<string, unknown>>;
-        this.symbols.clear(); this.refs.clear();
+        this.symbols.clear(); this.symbolsByName.clear(); this.identifiersByName.clear(); this.files.clear(); this.refs.clear(); this.persistedFiles.clear(); this.referencesDirty = false;
         for (const row of rows) {
           const symbol: Symbol = { id: Number(row.id), name: String(row.name), kind: String(row.kind) as SymbolKind, file: String(row.file), language: String(row.language) as SupportedLanguage, scope: JSON.parse(String(row.scope)) as string[], range: { startIndex: Number(row.start), endIndex: Number(row.end), startPosition: { row: Number(row.start_row), column: Number(row.start_col) }, endPosition: { row: Number(row.end_row), column: Number(row.end_col) } } };
-          this.symbols.set(symbol.id, symbol); this.nextId = Math.max(this.nextId, symbol.id + 1);
+          this.insertSymbol(symbol); this.persistedFiles.add(symbol.file); this.nextId = Math.max(this.nextId, symbol.id + 1);
         }
-        for (const row of refs) { const symbolId = Number(row.symbol_id); const symbol = this.symbols.get(symbolId); if (!symbol) continue; const range: SymbolRange = { startIndex: Number(row.start), endIndex: Number(row.end), startPosition: { row: Number(row.start_row), column: Number(row.start_col) }, endPosition: { row: Number(row.end_row), column: Number(row.end_col) } }; const ref: SymbolReference = { symbolId, name: symbol.name, file: String(row.ref_file), line: Number(row.ref_line), range }; this.refs.set(symbolId, [...(this.refs.get(symbolId) ?? []), ref]); }
+        for (const row of refs) { const symbolId = Number(row.symbol_id); const symbol = this.symbols.get(symbolId); if (!symbol) continue; const range: SymbolRange = { startIndex: Number(row.start), endIndex: Number(row.end), startPosition: { row: Number(row.start_row), column: Number(row.start_col) }, endPosition: { row: Number(row.end_row), column: Number(row.end_col) } }; const ref: SymbolReference = { symbolId, name: symbol.name, file: String(row.ref_file), line: Number(row.ref_line), range }; const items = this.refs.get(symbolId); if (items) items.push(ref); else this.refs.set(symbolId, [ref]); }
       } finally { db.close(); }
     } catch { /* first run: there is no index yet */ }
   }
 
   private resolveFile(file: string): string { return isAbsolute(file) ? resolve(file) : resolve(this.root, file); }
+  private insertSymbol(symbol: Symbol): void {
+    this.symbols.set(symbol.id, symbol);
+    const sameName = this.symbolsByName.get(symbol.name);
+    if (sameName) sameName.push(symbol);
+    else this.symbolsByName.set(symbol.name, [symbol]);
+  }
+  private deleteSymbol(symbol: Symbol): void {
+    this.symbols.delete(symbol.id);
+    const rest = this.symbolsByName.get(symbol.name)?.filter(candidate => candidate.id !== symbol.id);
+    if (rest?.length) this.symbolsByName.set(symbol.name, rest);
+    else this.symbolsByName.delete(symbol.name);
+  }
+  private removeIdentifiers(path: string, identifiers: { name: string }[]): void {
+    for (const name of new Set(identifiers.map(item => item.name))) {
+      const files = this.identifiersByName.get(name);
+      files?.delete(path);
+      if (files?.size === 0) this.identifiersByName.delete(name);
+    }
+  }
+  private referenceGroups(symbol: Symbol): Array<[string, { name: string; range: SymbolRange }[]]> {
+    if (!this.symbols.has(symbol.id)) return [];
+    const family = (language: SupportedLanguage) => language === "javascript" || language === "typescript" ? "ecmascript" : language;
+    const language = family(symbol.language);
+    const localFiles = new Set((this.symbolsByName.get(symbol.name) ?? []).filter(candidate => family(candidate.language) === language).map(candidate => candidate.file));
+    const groups: Array<[string, { name: string; range: SymbolRange }[]]> = [];
+    for (const [file, identifiers] of this.identifiersByName.get(symbol.name) ?? []) {
+      const entry = this.files.get(file);
+      if (!entry || family(entry.language) !== language) continue;
+      // A file's own declaration wins over an identically named declaration elsewhere, exactly as before.
+      if (localFiles.has(file) && file !== symbol.file) continue;
+      groups.push([file, identifiers]);
+    }
+    return groups.sort(([a], [b]) => this.files.get(a)!.order - this.files.get(b)!.order);
+  }
   private async parserFor(language: SupportedLanguage): Promise<Parser> {
     await this.ensureParser();
     const parser = new Parser();
@@ -208,23 +282,6 @@ class SymbolIndexImpl implements SymbolIndex {
   private async ensureParser(): Promise<void> {
     if (!this.parserPromise) this.parserPromise = Parser.init({ locateFile: () => require.resolve("web-tree-sitter/web-tree-sitter.wasm") });
     await this.parserPromise;
-  }
-  private rebuildReferences(): void {
-    this.refs.clear();
-    const byName = new Map<string, Symbol[]>();
-    for (const symbol of this.symbols.values()) byName.set(symbol.name, [...(byName.get(symbol.name) ?? []), symbol]);
-    const family = (language: SupportedLanguage) => language === "javascript" || language === "typescript" ? "ecmascript" : language;
-    for (const [file, entry] of this.files) for (const identifier of entry.identifiers) {
-      const candidates = byName.get(identifier.name)?.filter(symbol => family(symbol.language) === family(entry.language));
-      if (!candidates?.length) continue;
-      const local = candidates.filter(symbol => symbol.file === file);
-      // This index supplies name candidates, not semantic import resolution.
-      // Never assign a JS call to Python merely because it was indexed first.
-      for (const target of local.length ? local : candidates) {
-        const ref: SymbolReference = { symbolId: target.id, name: identifier.name, file, line: identifier.range.startPosition.row, range: identifier.range };
-        this.refs.set(target.id, [...(this.refs.get(target.id) ?? []), ref]);
-      }
-    }
   }
 }
 

@@ -5,7 +5,7 @@ import { gunzipSync } from "node:zlib";
 import { resolve, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NOTICES_FILE, NOTICES_HEADER } from "./generate-third-party-notices.mjs";
-import { frontendPackageFiles, verifyFrontendEntries, verifyRuntimeDependencies } from "./beta-runtime-contract.mjs";
+import { extractRuntimeAssets, frontendPackageFiles, verifyFrontendEntries, verifyRuntimeDependencies } from "./beta-runtime-contract.mjs";
 import { portableDependencies } from "../src/tui/portable-runtime.mjs";
 
 export const QUIMERA_DEV_DEPENDENCIES = Object.freeze([
@@ -62,6 +62,12 @@ export function verifyPackageEntries(entries, profile = "beta") {
     const pkg = JSON.parse(entries.get("package/package.json").toString("utf8"));
     if (JSON.stringify(pkg.uptokeyTui) !== JSON.stringify({ manifest: "dist/tui/BUILD_INFO.json", entry: "dist/tui/main.js", accessibleEntry: "dist/tui/linear-entry.js", accessibleRuntime: "node", platform: frontendInfo.platform })) throw new Error("beta_frontend_package_metadata_invalid");
     verifyFrontendEntries(entries, frontendInfo, pkg.version);
+    // Pipe mode constructs the same controller inside the Node CLI bundle.
+    // Its worker path is relative to dist/cli.js, not to the frontend chunk.
+    if (!/^0\.1\.0-beta\.(?:[0-9]|1[0-7])$/.test(pkg.version)
+      && !extractRuntimeAssets(entries.get("package/dist/cli.js").toString("utf8")).includes("./tui/repo-map-worker.js")) {
+      throw new Error("beta_core_repo_map_worker_invalid");
+    }
     if (frontendInfo.platform === "portable") {
       const expected = portableDependencies(frontendInfo);
       if (pkg.dependencies?.bun !== undefined || JSON.stringify(pkg.optionalDependencies) !== JSON.stringify(expected.optionalDependencies)

@@ -17,6 +17,7 @@ import { ThemeProvider } from "../../vendor/opencode-tui/context/theme"
 import { ToastProvider } from "../../vendor/opencode-tui/ui/toast"
 import { DialogProvider, useDialog, type DialogContext } from "../../vendor/opencode-tui/ui/dialog"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../../vendor/opencode-tui/keymap"
+import { ClipboardProvider } from "../../vendor/opencode-tui/context/clipboard"
 
 test("rendered account panel requests/adopts once, returns focus and exposes real localized state in ten languages", async () => {
   const previous = getLang(), parent = resolve("../../../output")
@@ -59,12 +60,13 @@ test("rendered account panel requests/adopts once, returns focus and exposes rea
   const waitFrame = async (predicate: (frame: string) => boolean) => {
     const until = Date.now() + 3000
     do { await Bun.sleep(10); await app.renderOnce(); if (predicate(app.captureCharFrame())) return } while (Date.now() < until)
-    expect(predicate(app.captureCharFrame())).toBe(true)
+    expect(predicate(app.captureCharFrame()), JSON.stringify({ calls, authenticated, approved, challenge: account.view.challenge, busy: account.view.busy }) + "\n" + app.captureCharFrame()).toBe(true)
   }
   try {
     await app.renderOnce()
-    await waitFrame(frame => frame.includes("Uptokey account") && frame.includes("Use account on this computer"))
+    await waitFrame(frame => frame.includes("Uptokey account") && frame.includes("Use another app on this computer"))
     expect(calls.includes("login")).toBe(false); expect(calls.includes("usage")).toBe(false)
+    app.mockInput.pressArrow("down"); await app.flush()
     app.mockInput.pressEnter(); await app.flush()
     await waitFrame(frame => frame.includes("ABCD1234"))
     approved = true
@@ -87,7 +89,8 @@ test("rendered account panel requests/adopts once, returns focus and exposes rea
     expect(account.view.session?.authenticated).toBe(true)
     setLang("en"); authenticated = false; approved = false; await account.refresh(); delayedConsumption = true
     dialog.replace(() => <AccountPanel />)
-    await waitFrame(frame => frame.includes("Use account on this computer"))
+    await waitFrame(frame => frame.includes("Use another app on this computer"))
+    app.mockInput.pressArrow("down"); await app.flush()
     app.mockInput.pressEnter(); await app.flush()
     await waitFrame(frame => Boolean(finishConsumption) && frame.includes("Cancel"))
     const adoptions = calls.filter(value => value === "adopt").length
@@ -103,5 +106,85 @@ test("rendered account panel requests/adopts once, returns focus and exposes rea
     app.mockInput.pressEscape(); await app.flush(); expect(dialog.stack.length).toBe(0)
     delayedStatus = false; finishStatus!(); await Bun.sleep(35); await app.renderOnce()
     expect(calls.filter(value => value === "subscription.status").length).toBe(planReads)
+  } finally { app.renderer.destroy(); account.dispose(); setLang(previous) }
+}, 15_000)
+
+test("account starts browser sign-in first and keeps the same usable link, copy and refresh actions while polling", async () => {
+  const previous = getLang(), parent = resolve("../../../output")
+  await mkdir(parent, { recursive: true })
+  const root = await mkdtemp(join(parent, "tui-account-login-render-")); await writeFile(join(root, "kv.json"), "{}")
+  const calls: string[] = [], copied: string[] = [], opened: string[] = []
+  const url = "https://app.uptokey.com/api/account/native/authorize?id=af4b344f-1848-4016-9c42-f3b3454fe9c1"
+  const signedOut = { configured: true, authenticated: false, loginAvailable: true, state: "signed_out" as const }
+  const connected = { ...signedOut, authenticated: true, state: "connected" as const, profile: { displayName: "Fixture" } }
+  const ref = "acc_" + "c".repeat(64)
+  let authenticated = false, delayStatus = false, finishStatus: (() => void) | undefined
+  const account = new TuiAccount({
+    getAccountSession: async () => { calls.push("status"); if (delayStatus) await new Promise<void>(resolve => { finishStatus = resolve }); return authenticated ? connected : signedOut },
+    getAvailableAccounts: async () => ({ revision: authenticated ? 1 : 0, currentAccountRef: authenticated ? ref : null, currentOwned: authenticated ? true : null, accounts: [] }),
+    getAccountRequests: async () => [],
+    requestAccountAccess: async () => { calls.push("share"); throw Error("unexpected_local_share") },
+    consumeAccountAccess: async () => {}, approveAccountRequest: async () => {},
+    adoptAccount: async () => { throw Error("unexpected_adoption") }, unlinkAccount: async () => { throw Error("unexpected_unlink") },
+    startAccountLogin: async () => { calls.push("login"); return { loginUrl: url, userCode: "1234ABCD", expiresAt: Date.now() + 60_000 } },
+    signOutAccount: async () => signedOut,
+    getAccountUsage: async () => ({ state: "unavailable", verifiedAt: new Date().toISOString() }),
+    getAccountPlan: async () => { calls.push("subscription.status"); return { accountRef: "account_" + "d".repeat(64), subscription: { status: "none", cancelAtPeriodEnd: false, currentPeriodEnd: null }, allowance: null } },
+  }, { intervalMs: 60_000 })
+  const login = account.login.bind(account), reopen = account.reopenLogin.bind(account)
+  account.login = () => login(async value => { opened.push(value); return false })
+  account.reopenLogin = () => reopen(async value => { opened.push(value); return true })
+  setLang("en")
+  setBackend({ controller: { account }, onChange: (handler: () => void) => { account.on("change", handler); return () => account.off("change", handler) } } as never)
+  let dialog!: DialogContext
+  function Launch() { dialog = useDialog(); onMount(() => dialog.replace(() => <AccountPanel />)); return <box /> }
+  function Harness() {
+    const renderer = useRenderer(), keymap = createDefaultOpenTuiKeymap(renderer), config = resolveConfig({}, { terminalSuspend: false })
+    const off = registerOpencodeKeymap(keymap, renderer, config); onCleanup(off)
+    return <TuiPathsProvider value={{ cwd: root, home: root, state: root, worktree: root }}><OpencodeKeymapProvider keymap={keymap}><TuiConfigProvider config={config}><KVProvider><ThemeProvider mode="dark" source={{ discover: async () => ({}) }}><ClipboardProvider value={{ write: async value => { copied.push(value) } }}><ToastProvider><DialogProvider><Launch /></DialogProvider></ToastProvider></ClipboardProvider></ThemeProvider></KVProvider></TuiConfigProvider></OpencodeKeymapProvider></TuiPathsProvider>
+  }
+  const app = await testRender(() => <Harness />, { width: 120, height: 38, kittyKeyboard: true })
+  const waitFrame = async (predicate: (frame: string) => boolean) => {
+    const until = Date.now() + 3000
+    do { await Bun.sleep(10); await app.renderOnce(); if (predicate(app.captureCharFrame())) return } while (Date.now() < until)
+    expect(predicate(app.captureCharFrame())).toBe(true)
+  }
+  try {
+    await waitFrame(frame => frame.includes("Sign in") && frame.includes("Use another app on this computer"))
+    expect(app.captureCharFrame().indexOf("Sign in")).toBeLessThan(app.captureCharFrame().indexOf("Use another app on this computer"))
+    app.mockInput.pressEnter(); await app.flush()
+    await waitFrame(frame => frame.includes("Open browser") && frame.includes("Copy link"))
+    expect(calls.filter(value => value === "login")).toHaveLength(1)
+    expect(calls).not.toContain("share")
+    expect(opened).toEqual([url])
+    expect(account.view.error).toBe("account_browser_unavailable")
+    expect(app.captureCharFrame().replace(/\s/g, "")).toContain(url)
+    expect(app.captureCharFrame()).toContain("Open or copy the link to sign in.")
+    for (const lang of ["en", "pt-BR", "es", "fr", "de", "it", "ja", "ko", "zh-CN", "ar"] as Lang[]) {
+      setLang(lang); dialog.replace(() => <AccountPanel />)
+      await waitFrame(frame => frame.includes(accountText("open_browser")) && frame.includes(accountText("copy_link")))
+      expect(app.captureCharFrame().replace(/\s/g, "")).toContain(url)
+      expect(calls.filter(value => value === "login")).toHaveLength(1)
+    }
+    setLang("en"); dialog.replace(() => <AccountPanel />)
+    await waitFrame(frame => frame.includes("Open browser"))
+    app.mockInput.pressArrow("down"); await app.flush(); app.mockInput.pressEnter(); await app.flush()
+    await waitFrame(() => copied.length === 1)
+    expect(copied).toEqual([url])
+    // Reopening the browser reuses the pending authorization rather than generating another code.
+    app.mockInput.pressArrow("up"); await app.flush(); app.mockInput.pressEnter(); await app.flush()
+    await waitFrame(() => opened.length === 2)
+    expect(opened).toEqual([url, url]); expect(calls.filter(value => value === "login")).toHaveLength(1)
+    delayStatus = true; const refresh = account.refresh()
+    await waitFrame(frame => Boolean(finishStatus) && frame.includes("Open browser") && frame.includes("Copy link") && frame.includes("Refresh"))
+    expect(account.view.busy).toBe(true)
+    app.mockInput.pressArrow("down"); await app.flush(); app.mockInput.pressEnter(); await app.flush()
+    await waitFrame(() => copied.length === 2)
+    expect(copied).toEqual([url, url])
+    expect(opened).toEqual([url, url])
+    authenticated = true; delayStatus = false; finishStatus!(); await refresh
+    await waitFrame(frame => frame.includes("Fixture") && frame.includes("Free") && frame.includes("Hosted AI included"))
+    expect(account.view.login).toBe(null)
+    expect(calls.filter(value => value === "login")).toHaveLength(1)
   } finally { app.renderer.destroy(); account.dispose(); setLang(previous) }
 }, 15_000)

@@ -73,7 +73,7 @@ export function extractRuntimeSpecifiers(code) {
 
 export function extractRuntimeAssets(code) {
   return [...new Set(tokens(code).filter(token => token.kind === "string" && token.value.startsWith("./")
-    && /(?:\.(?:wasm|scm)|\/audio-[\w-]+\.ts)$/.test(token.value)).map(token => token.value))].sort();
+    && /(?:\.(?:wasm|scm)|\/audio-[\w-]+\.ts|\/repo-map-worker\.js)$/.test(token.value)).map(token => token.value))].sort();
 }
 
 function safePath(path) {
@@ -102,7 +102,12 @@ export function frontendPackageFiles(info) {
     if (!product && !runtime && !native) throw new Error(`beta_frontend_file_forbidden:${file.path}`);
     paths.add(file.path);
   }
+  // Versions through beta.17 did not run repository analysis in a worker. Keep
+  // their exact artifacts verifiable for rollback, while every new release must
+  // ship the worker even if a malformed build removed its runtime reference.
+  const legacyWithoutRepoMapWorker = /^0\.1\.0-beta\.(?:[0-9]|1[0-7])$/.test(info.version ?? "");
   for (const required of [info.entry, info.accessibleEntry, "opentui-tree-sitter-worker.js", info.parserRuntime, "runtime/LICENSE-Bun.md", info.notices,
+    ...(!legacyWithoutRepoMapWorker ? ["repo-map-worker.js"] : []),
     ...(!portable ? [info.runtime, `node_modules/${nativeName}/package.json`, `node_modules/${nativeName}/LICENSE`] : [])]) if (!paths.has(required)) throw new Error(`beta_frontend_required_missing:${required}`);
   if (!portable && ![...paths].some(path => path.startsWith(`node_modules/${nativeName}/`) && /\.(?:dll|dylib|so|node)$/.test(path))) throw new Error("beta_frontend_native_library_missing");
   return ["dist/tui/BUILD_INFO.json", ...[...paths].map(path => `dist/tui/${path}`)].sort();

@@ -39,6 +39,7 @@ import { parseConversation } from '@uptokey/sync-contract/conversation'
 import { localizedDiagnostic, safeDiagnosticCode } from '../../../operation-ui.ts'
 import { historyPage } from '../history.ts'
 import { PendingSteerStore } from './pending-steer.ts'
+import { indexModelViews } from './model-index.ts'
 
 /** Title the core gives a conversation created without one (workspace/conversations.ts::createConversation). */
 const DEFAULT_CORE_TITLE = "Nova conversa"
@@ -413,14 +414,13 @@ export class UptokeyBackend {
     }
   }
 
-  private toProvider(provider: ProviderView, models: ModelView[]): Provider {
-    const entries = provider.models.map((id) => [id, this.toModel(provider, id, models.find((model) => model.id === id))] as const)
+  private toProvider(provider: ProviderView, models: ReadonlyMap<string, ModelView>): Provider {
+    const entries = provider.models.map((id) => [id, this.toModel(provider, id, models.get(id))] as const)
     return { id: provider.id, name: provider.displayName, source: "api", env: [], options: {}, models: Object.fromEntries(entries) }
   }
 
-  private connectedProviders(): Provider[] {
-    const snapshot = this.options.controller.view.connections
-    const own = (snapshot?.providers ?? []).filter((provider) => provider.eligible && provider.models.length > 0).map((provider) => this.toProvider(provider, snapshot?.models ?? []))
+  private connectedProviders(snapshot = this.options.controller.view.connections, models = indexModelViews(snapshot?.models ?? [])): Provider[] {
+    const own = (snapshot?.providers ?? []).filter((provider) => provider.eligible && provider.models.length > 0).map((provider) => this.toProvider(provider, models))
     const hosted = this.hostedProvider()
     return hosted ? [...own, hosted] : own
   }
@@ -977,9 +977,10 @@ export class UptokeyBackend {
           gate(async () => {
             await self.refreshModelInputs()
             const snapshot = controller.view.connections
-            const connected = self.connectedProviders()
+            const models = indexModelViews(snapshot?.models ?? [])
+            const connected = self.connectedProviders(snapshot, models)
             const hosted = self.hostedProvider()
-            const all = [...(snapshot?.providers ?? []).map((provider) => self.toProvider(provider, snapshot?.models ?? [])), ...(hosted ? [hosted] : [])]
+            const all = [...(snapshot?.providers ?? []).map((provider) => self.toProvider(provider, models)), ...(hosted ? [hosted] : [])]
             return { data: { all, default: self.defaults(connected), connected: connected.map((provider) => provider.id) }, error: undefined }
           }),
         auth: () => ok({}),

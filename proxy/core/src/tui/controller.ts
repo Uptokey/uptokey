@@ -201,6 +201,7 @@ export class TuiController extends EventEmitter {
   private conversationOpenGeneration = 0;
   private modelSelectionGeneration = 0;
   private bindingAbort: AbortController | null = null;
+  private repoMapAbort: AbortController | null = null;
   private readonly lifecycleAbort=new AbortController();
   private readonly options: ControllerOptions;
   private emitScheduled = false;
@@ -415,6 +416,7 @@ export class TuiController extends EventEmitter {
 
   dispose(): void {
     this.disposed = true;
+    this.repoMapAbort?.abort();
     ++this.hostedGeneration;
     this.lifecycleAbort.abort();
     this.account.dispose();
@@ -484,6 +486,10 @@ export class TuiController extends EventEmitter {
   }
 
   private applyBinding(binding: ProjectBinding): void {
+    this.repoMapAbort?.abort();
+    const repoMapAbort = new AbortController();
+    this.repoMapAbort = repoMapAbort;
+    this.view.repoMapText = null;
     if(this.view.binding&&this.view.binding.rootBindingId!==binding.rootBindingId){
       this.turnAbort?.abort();this.features.cancel();void this.features.debugger?.dispose();
       for(const client of this.lspClients.values())client.stop();this.lspClients.clear();
@@ -504,7 +510,7 @@ export class TuiController extends EventEmitter {
     void this.loadProjectKnowledge(binding);
     void this.loadHooks().catch(() => undefined);
     void discoverSkills(binding.rootPath).then((skills) => { if (this.view.binding !== binding || this.disposed) return; this.view.skills = skills; this.changed(); }).catch(() => undefined);
-    void buildRepoMap(binding.rootPath, { maxFiles: 500 }).then(entries => {
+    void buildRepoMap(binding.rootPath, { maxFiles: 500, signal: repoMapAbort.signal }).then(entries => {
       if (this.view.binding !== binding || this.disposed) return;
       this.view.repoMapText = formatRepoMap(entries, 2000);
       this.changed();

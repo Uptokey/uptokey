@@ -1,6 +1,6 @@
 /** Account UI state only. Credentials, account grants and identity remain with the canonical core. */
 import { EventEmitter } from "node:events";
-import { spawn } from "node:child_process";
+import { spawn, type SpawnOptions } from "node:child_process";
 import type { AccountPublicSession, AccountPublicUsage } from "../account-login-protocol.ts";
 import type { TuiClient, TuiAccountAvailable, TuiAccountChallenge, TuiAccountLogin, TuiAccountRequest } from "./client.ts";
 import type { AccountPlanState } from "./account-plan.ts";
@@ -18,19 +18,32 @@ export interface AccountView {
   error: string | null;
 }
 
+export const ACCOUNT_POLL_INTERVAL_MS = 4_000;
+type AccountBrowserOpener = (url: string) => boolean | Promise<boolean>;
+type BrowserLaunch = (command: string, args: string[], options: SpawnOptions) => ReturnType<typeof spawn>;
+
 /** Only core-generated authorization URLs are opened; model text and arbitrary shell commands never reach this. */
-export function openAccountLoginUrl(value: string): boolean {
+export async function openAccountLoginUrl(value: string, launch: BrowserLaunch = spawn, platform: NodeJS.Platform = process.platform): Promise<boolean> {
   let target: URL;
   try { target = new URL(value); } catch { return false; }
   if (target.username || target.password || target.hash || target.pathname !== "/api/account/native/authorize" || [...target.searchParams.keys()].length !== 1 || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(target.searchParams.get("id") ?? "") || target.protocol !== "https:" && !(target.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname))) return false;
-  const [command, args] = process.platform === "win32"
+  const [command, args] = platform === "win32"
     ? ["rundll32", ["url.dll,FileProtocolHandler", target.href]]
-    : process.platform === "darwin" ? ["open", [target.href]] : ["xdg-open", [target.href]];
+    : platform === "darwin" ? ["open", [target.href]] : ["xdg-open", [target.href]];
   try {
-    const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
-    child.on("error", () => undefined);
+    const child = launch(command, args, { detached: true, stdio: "ignore", windowsHide: true });
+    const result = new Promise<boolean>(resolve => {
+      // A successful spawn alone says nothing about `open`/`xdg-open` accepting
+      // the URL. Keep the fallback link when the command fails or never settles.
+      const timer = setTimeout(() => resolve(false), 5_000);
+      timer.unref?.();
+      const settle = (opened: boolean) => { clearTimeout(timer); resolve(opened); };
+      child.once("error", () => settle(false));
+      child.once("exit", code => settle(code === 0));
+    });
+    const opened = await result;
     child.unref();
-    return true;
+    return opened;
   } catch { return false; }
 }
 
@@ -41,6 +54,9 @@ export class TuiAccount extends EventEmitter {
   private abort: AbortController | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private refreshing: Promise<void> | null = null;
+  private active: Promise<void> | null = null;
+  private activeKind: "read" | "mutation" | null = null;
+  private retryAt = 0;
   private planAbort: AbortController | null = null;
   private planRead: Promise<void> | null = null;
   private planBinding: string | null = null;
@@ -49,7 +65,7 @@ export class TuiAccount extends EventEmitter {
   private readonly interval: number;
   private readonly client: AccountTransport;
   constructor(client: AccountTransport, options: { now?: () => number; intervalMs?: number } = {}) {
-    super(); this.client = client; this.now = options.now ?? Date.now; this.interval = options.intervalMs ?? 2500;
+    super(); this.client = client; this.now = options.now ?? Date.now; this.interval = options.intervalMs ?? ACCOUNT_POLL_INTERVAL_MS;
   }
   private change() { if (!this.disposed) this.emit("change"); }
   private binding(available = this.view.available): string | null {
@@ -63,21 +79,36 @@ export class TuiAccount extends EventEmitter {
     const code = error instanceof Error ? error.message : "";
     return /^account_[a-z_]{1,80}$/.test(code) ? code : "account_service_unavailable";
   }
-  private begin() {
-    if (this.disposed || this.view.busy) return null;
+  private begin(kind: "read" | "mutation") {
+    if (this.disposed || this.view.busy && (kind === "read" || this.activeKind !== "read")) return null;
+    if (this.view.busy && this.activeKind === "read") this.refreshing = null;
     this.abort?.abort(); clearTimeout(this.timer);
     const abort = new AbortController(), generation = ++this.generation;
-    this.abort = abort; this.view.busy = true; this.view.error = null; this.change();
+    this.abort = abort; this.activeKind = kind; this.view.busy = true; this.view.error = null; this.change();
     return { signal: abort.signal, current: () => !this.disposed && generation === this.generation && !abort.signal.aborted };
   }
-  private async perform(action: (signal: AbortSignal) => Promise<void>): Promise<void> {
-    const operation = this.begin(); if (!operation) return;
-    try { await action(operation.signal); }
-    catch (error) { if (operation.current()) this.view.error = this.error(error); }
-    finally { if (operation.current()) { this.view.busy = false; this.change(); this.schedule(); } }
+  private perform(action: (signal: AbortSignal) => Promise<void>, kind: "read" | "mutation" = "mutation"): Promise<void> {
+    const operation = this.begin(kind); if (!operation) return this.active ?? Promise.resolve();
+    const promise = (async () => {
+      try { await action(operation.signal); if (operation.current()) this.retryAt = 0; }
+      catch (error) { if (operation.current()) {
+        this.view.error = this.error(error);
+        if (this.view.error === "account_rate_limited") this.retryAt = this.now() + Math.max(this.interval, Number((error as { retryAfterMs?: number }).retryAfterMs) || 10_000);
+      } }
+      finally { if (operation.current()) { this.active = null; this.activeKind = null; this.view.busy = false; this.change(); this.schedule(); } }
+    })();
+    this.active = promise;
+    return promise;
   }
   private async read(signal: AbortSignal): Promise<void> {
-    const session = await this.client.getAccountSession(signal);
+    let session: AccountPublicSession;
+    try { session = await this.client.getAccountSession(signal); }
+    catch (error) {
+      // Pending challenges may be reported as HTTP 409 while the browser waits
+      // for approval. That response is not a failed account service.
+      if (this.view.login && this.error(error) === "account_challenge_pending") return;
+      throw error;
+    }
     if (signal.aborted || this.disposed) return;
     this.view.session = session;
     this.view.usage = session.authenticated ? this.view.usage : null;
@@ -95,7 +126,10 @@ export class TuiAccount extends EventEmitter {
   }
   refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
-    const promise = this.perform(signal => this.read(signal));
+    const generation = this.generation;
+    const promise = this.activeKind === "mutation" && this.active
+      ? this.active.then(() => { if (!this.disposed && this.generation === generation) return this.perform(signal => this.read(signal), "read"); })
+      : this.perform(signal => this.read(signal), "read");
     this.refreshing = promise;
     void promise.finally(() => { if (this.refreshing === promise) this.refreshing = null; });
     return promise;
@@ -148,14 +182,36 @@ export class TuiAccount extends EventEmitter {
   approve(request: TuiAccountRequest, accountRef: string): Promise<void> {
     return this.perform(async signal => { await this.client.approveAccountRequest(request.id, request.userCode, accountRef, signal); if (!signal.aborted) await this.read(signal); });
   }
-  login(open: (url: string) => boolean = openAccountLoginUrl): Promise<void> {
+  login(open: AccountBrowserOpener = openAccountLoginUrl): Promise<void> {
     return this.perform(async signal => {
       const result = await this.client.startAccountLogin(signal);
       if (signal.aborted || this.disposed) return;
       this.view.challenge = null;
       if ("session" in result) { this.view.session = result.session; this.view.login = null; await this.read(signal); }
-      else { this.view.login = result; if (!open(result.loginUrl)) this.view.error = "account_browser_unavailable"; }
+      else {
+        this.view.login = result;
+        let opened = false;
+        try { opened = await open(result.loginUrl); } catch { /* Keep the full login URL as the recovery path. */ }
+        if (!signal.aborted && !this.disposed && this.view.login === result && !opened) this.view.error = "account_browser_unavailable";
+      }
     });
+  }
+  /** Reopening the existing challenge never creates or replaces a device login. */
+  async reopenLogin(open: AccountBrowserOpener = openAccountLoginUrl): Promise<void> {
+    const login = this.view.login;
+    if (this.disposed || !login) return;
+    if (login.expiresAt <= this.now()) {
+      this.cancelPending();
+      this.view.error = "account_challenge_expired";
+      this.change();
+      return;
+    }
+    let opened = false;
+    try { opened = await open(login.loginUrl); } catch { /* Opening the browser must not discard a pending challenge. */ }
+    if (!this.disposed && this.view.login === login) {
+      this.view.error = opened ? null : "account_browser_unavailable";
+      this.change();
+    }
   }
   disconnect(): Promise<void> {
     return this.perform(async signal => {
@@ -177,12 +233,13 @@ export class TuiAccount extends EventEmitter {
   }
   loadUsage(): Promise<void> {
     void this.loadPlan();
-    return this.perform(async signal => { const result = await this.client.getAccountUsage(signal); if (!signal.aborted && !this.disposed) this.view.usage = result; });
+    return this.perform(async signal => { const result = await this.client.getAccountUsage(signal); if (!signal.aborted && !this.disposed) this.view.usage = result; }, "read");
   }
   cancelPending(): void {
     this.planRequested = false;
     this.clearPlan();
     ++this.generation; this.abort?.abort(); clearTimeout(this.timer);
+    this.refreshing = null; this.active = null; this.activeKind = null; this.retryAt = 0;
     this.view.challenge = null; this.view.login = null; this.view.busy = false; this.view.error = null; this.change();
   }
   cancelPlanRead(): void { this.planRequested = false; if (this.planRead) { this.clearPlan(); this.change(); } }
@@ -191,7 +248,7 @@ export class TuiAccount extends EventEmitter {
     if (this.disposed || this.view.busy || !this.view.challenge && !this.view.login) return;
     const expiresAt = this.view.challenge ? Date.parse(this.view.challenge.expiresAt) : this.view.login!.expiresAt;
     if (expiresAt <= this.now()) { this.view.challenge = null; this.view.login = null; this.view.error = "account_challenge_expired"; this.change(); return; }
-    this.timer = setTimeout(() => void this.poll(), Math.min(this.interval, expiresAt - this.now()));
+    this.timer = setTimeout(() => void this.poll(), Math.min(Math.max(this.interval, this.retryAt - this.now()), expiresAt - this.now()));
     this.timer.unref?.();
   }
   private poll(): Promise<void> {
@@ -210,7 +267,7 @@ export class TuiAccount extends EventEmitter {
         const result = await this.client.adoptAccount(available.accounts[0]!.accountRef, available.revision, signal);
         if (!signal.aborted && !this.disposed) { this.view.session = result.session; await this.read(signal); }
       }
-    });
+    }, this.view.challenge ? "mutation" : "read");
   }
   dispose(): void { this.disposed = true; this.clearPlan(); ++this.generation; this.abort?.abort(); clearTimeout(this.timer); this.removeAllListeners(); }
 }
