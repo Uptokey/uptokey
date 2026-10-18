@@ -5,6 +5,8 @@ export type HostedCatalogModel = {
   limits: {inputTokens: number; outputTokens: number; contextTokens: number};
   inputReservation?: "full_context";
   contextValidation?: "provider";
+  /** The model accepts declared function tools and may return tool calls. */
+  toolCalls?: true;
 };
 export type HostedCatalog = {
   models: HostedCatalogModel[];

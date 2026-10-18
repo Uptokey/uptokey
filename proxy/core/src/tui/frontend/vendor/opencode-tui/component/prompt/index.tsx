@@ -48,7 +48,6 @@ import { DialogAlert } from "../../ui/dialog-alert"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
-import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
@@ -61,6 +60,7 @@ import { DialogConfirm } from "../../ui/dialog-confirm"
 import { getBackend } from "../../../../uptokey/backend/registry.ts"
 import { ui } from "../../../../uptokey/i18n.ts"
 import { tr } from "../../../../uptokey/tr.ts"
+import { usageSummary } from "../../../../uptokey/usage-summary.ts"
 import { promptFilePath } from '../../../../uptokey/prompt-parts.ts'
 import { accountText } from "../../../../../account-ui.ts"
 
@@ -148,6 +148,7 @@ let stashed: { prompt: PromptInfo; cursor: number } | undefined
 
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
+  let promptRevision = 0
   let anchor: BoxRenderable
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
@@ -283,21 +284,13 @@ export function Prompt(props: PromptProps) {
 
   const usage = createMemo(() => {
     if (!props.sessionID) return
-    const session = sync.session.get(props.sessionID)
     const msg = sync.data.message[props.sessionID] ?? []
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
-    if (!last) return
-
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    if (tokens <= 0) return
-
-    const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
-    const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
-    const cost = session?.cost ?? 0
+    const summary = usageSummary(msg, (providerID, modelID) => sync.data.provider.find((item) => item.id === providerID)?.models[modelID]?.limit.context || undefined)
+    if (!summary.context && !summary.cost) return
+    const context = summary.context
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? money.format(cost) : undefined,
+      context: context ? `${context.estimated ? "~" : ""}${Locale.number(context.tokens)}${context.percent === null ? "" : ` (${context.percent}%)`}` : undefined,
+      cost: summary.cost && (summary.cost.usd > 0 || summary.cost.partial) ? `${summary.cost.partial ? "≥ " : summary.cost.estimated ? "~" : ""}${money.format(summary.cost.usd)}` : undefined,
     }
   })
 
@@ -537,20 +530,9 @@ export function Prompt(props: PromptProps) {
         name: "prompt.skills",
         category: tr("Prompt"),
         slashName: "skills",
-        run: () => {
-          dialog.replace(() => (
-            <DialogSkill
-              onSelect={(skill) => {
-                input.setText(`/${skill} `)
-                setStore("prompt", {
-                  input: `/${skill} `,
-                  parts: [],
-                })
-                input.gotoBufferEnd()
-              }}
-            />
-          ))
-        },
+        // The same picker as /skills activates project context without replacing
+        // the draft with a slash command that the canonical registry cannot run.
+        run: () => sdk.client.session.command({ command: "skills" }),
       },
       {
         title: tr("Warp"),
@@ -1008,13 +990,26 @@ export function Prompt(props: PromptProps) {
       return false
     }
 
+    const preflightInput = store.prompt.input
+    const preflightMode = store.mode
+    const preflightRevision = promptRevision
+    const ownsDraft = () => promptRevision === preflightRevision && store.prompt.input === preflightInput && store.mode === preflightMode
+    const firstWord = preflightInput.split("\n")[0].split(" ")[0]
+    const registeredCommand = firstWord.startsWith("/") && sync.data.command.some((x) => x.name === firstWord.slice(1))
+
     // UPTOKEY MODIFICATION (see UPSTREAM.json): a folder named in ordinary text is offered as the working folder.
-    {
+    // Registered commands own their arguments; /projects <folder> must run once
+    // through the registry rather than become an ordinary request to rebind.
+    if (preflightMode !== "shell" && !registeredCommand) {
       const backend = getBackend()
-      const folder = await backend.detectFolder(store.prompt.input)
+      const folder = await backend.detectFolder(preflightInput)
+      if (!ownsDraft()) return false
       if (folder) {
         const confirmed = await DialogConfirm.show(dialog, ui("folder_bind_title", { path: folder }), ui("folder_bind_body"))
-        if (confirmed && (await backend.bindFolder(folder)) && props.sessionID) {
+        if (!ownsDraft()) return false
+        const bound = confirmed && await backend.bindFolder(folder)
+        if (!ownsDraft()) return false
+        if (bound && props.sessionID) {
           // The project changed, so the conversation did too: continue from a fresh start with the same text ready.
           route.navigate({ type: "home", prompt: { input: store.prompt.input, parts: store.prompt.parts } } as never)
           return true
@@ -1024,8 +1019,10 @@ export function Prompt(props: PromptProps) {
       // shell mode keep their own confirmations; effects still need the core's approval either way.
       if (store.mode !== "shell" && !store.prompt.input.trimStart().startsWith("/")) {
         const risk = await backend.judgeRequest(store.prompt.input)
+        if (!ownsDraft()) return false
         if (risk.confirm) {
           const confirmed = await DialogConfirm.show(dialog, ui("jev_destructive_title"), ui("jev_destructive_body", { percent: risk.percent }))
+          if (!ownsDraft()) return false
           if (!confirmed) return false
         }
       }
@@ -1036,9 +1033,8 @@ export function Prompt(props: PromptProps) {
     let finishMoveProgress = false
     // Uptokey: a slash command typed on the home screen (/sessoes, /modelos, /conexoes…) runs without creating an
     // empty conversation; commands that need one create it in the controller, which then navigates by itself.
-    const firstWord = store.prompt.input.split("\n")[0].split(" ")[0]
     const homeCommand =
-      sessionID == null && store.mode !== "shell" && firstWord.startsWith("/") && sync.data.command.some((x) => x.name === firstWord.slice(1))
+      sessionID == null && store.mode !== "shell" && registeredCommand
     if (sessionID == null && !homeCommand) {
       const selectedWorkspace = workspace.selection()
       const workspaceID = selectedWorkspace?.type === "existing" ? selectedWorkspace.workspaceID : undefined
@@ -1057,6 +1053,7 @@ export function Prompt(props: PromptProps) {
           variant,
         },
       })
+      if (!ownsDraft()) return false
 
       if (res.error) {
         if (finishMoveProgress) move.finishSubmit()
@@ -1439,6 +1436,7 @@ export function Prompt(props: PromptProps) {
               minHeight={1}
               maxHeight={maxHeight()}
               onContentChange={() => {
+                promptRevision++
                 const value = input.plainText
                 setStore("prompt", "input", value)
                 auto()?.onInput(value)
@@ -1528,7 +1526,16 @@ export function Prompt(props: PromptProps) {
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>{tr("auto")}</text>
                       </Show>
                       <Show when={store.mode === "normal"}>
-                        <box flexDirection="row" gap={1}>
+                        <box
+                          flexDirection="row"
+                          gap={1}
+                          // The selected destination is a direct target for the same model list as the keyboard.
+                          // A mouse-up that ends a text selection keeps the selection instead of opening it.
+                          onMouseUp={() => {
+                            if (renderer.getSelection()?.getSelectedText()) return
+                            keymap.dispatchCommand("model.list")
+                          }}
+                        >
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
                           <text
                             flexShrink={0}

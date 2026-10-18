@@ -33,6 +33,13 @@ import { gitJourney } from "./lib/journey-git.mjs";
 import { runnerJourney } from "./lib/journey-runner.mjs";
 import { jevJourney } from "./lib/journey-jev.mjs";
 import { toolsJourney } from "./lib/journey-tools.mjs";
+import { historyJourney } from "./lib/journey-history.mjs";
+import { undoJourney } from "./lib/journey-undo.mjs";
+import { steerRecoveryJourney } from "./lib/journey-steer-recovery.mjs";
+import { reasoningJourney } from "./lib/journey-reasoning.mjs";
+import { claimJourney } from "./lib/journey-claim.mjs";
+import { delegateTaskJourney } from "./lib/journey-delegate-task.mjs";
+import { toolStatusJourney } from "./lib/journey-tool-status.mjs";
 import { voiceJourney } from "./lib/journey-voice.mjs";
 import { debugJourney } from "./lib/journey-debug.mjs";
 import { lspJourney } from "./lib/journey-lsp.mjs";
@@ -66,7 +73,8 @@ const wanted = process.argv.slice(2);
 // Default suite. Run the others by name: slashlist (diagnostic) and delegate (blocked until the core resolves delegation
 // connections by the same identity the TUI snapshot lists: connection-profile id versus provider id; multimodel front).
 const LOCALE_JOURNEYS = LOCALES.map((lang) => `locale-${lang}`);
-const KNOWN_JOURNEYS = ["boot", "chat", "connect", "edit", "commands", "folder", "scroll", "copy", "exit", "cancel", "panels", "sessions", "slashlist", "delegate", "reopen", "paste", "conflict", "network", "export", "temporary", "homonym", "switch", "revoke", "git", "runner", "jev", "tools", "voice", "debug", "lsp", "restart", "switch-project", "panels-more", "click", "search", "update", "runner-real", "app", "linear", ...LOCALE_JOURNEYS];
+const KNOWN_JOURNEYS = ["boot", "chat", "connect", "edit", "commands", "folder", "scroll", "copy", "exit", "cancel", "panels", "sessions", "slashlist", "delegate", "reopen", "paste", "conflict", "network", "export", "temporary", "homonym", "switch", "revoke", "git", "runner", "jev", "tools", "voice", "debug", "lsp", "restart", "switch-project", "panels-more", "click", "search", "update", "runner-real", "app", "linear", "history", "undo", "steer-recovery", "reasoning", "claim", "delegate-task", "tool-status", ...LOCALE_JOURNEYS];
+KNOWN_JOURNEYS.push("undo-recovery");
 const DEFAULT_JOURNEYS = KNOWN_JOURNEYS.filter((name) => !["slashlist", "delegate", "update", "runner-real", "app", "search"].includes(name));
 // "locales" expands to the ten language runs.
 const journeys = (wanted.length ? wanted.flatMap((name) => (name === "locales" ? LOCALE_JOURNEYS : [name])) : DEFAULT_JOURNEYS).filter((name) => KNOWN_JOURNEYS.includes(name));
@@ -109,7 +117,7 @@ function childEnv(info, work, lang = "pt-BR") {
 async function run(name, body, extra = [], lang = "pt-BR") {
   await mkdir(output, { recursive: true });
   // J21 places a relay between the window and the core to cut it or lose an acknowledgement on purpose.
-  const proxy = name === "restart" ? await startCoreProxy() : null;
+  const proxy = name === "restart" || name === "undo-recovery" ? await startCoreProxy() : null;
   const fixtureArgs = proxy ? [...extra, "--allow-host", `127.0.0.1:${proxy.port}`, "--persist-secrets"] : extra;
   let fixture = await startFixture(fixtureArgs);
   if (proxy) {
@@ -270,11 +278,19 @@ available.search = searchJourney;
 available.update = updateJourney;
 available["runner-real"] = runnerRealJourney;
 available.app = appJourney;
+available.history = historyJourney;
+available.undo = undoJourney;
+available["undo-recovery"] = context => undoJourney({ ...context, recoverRedo: true });
+available["steer-recovery"] = steerRecoveryJourney;
+available.reasoning = reasoningJourney;
+available.claim = claimJourney;
+available["tool-status"] = toolStatusJourney;
+available["delegate-task"] = delegateTaskJourney;
 for (const lang of LOCALES) available[`locale-${lang}`] = localeJourney(lang);
 
 const results = {};
 for (const name of journeys) {
-  try { results[name] = await run(name, available[name], name === "connect" ? ["--empty"] : name === "homonym" ? ["--homonym"] : name === "tools" || name === "search" ? ["--tools"] : name === "voice" ? ["--voice"] : [], name.startsWith("locale-") ? name.slice("locale-".length) : "pt-BR"); process.stdout.write(`${name}: ${results[name].result}${results[name].missingCapability ? ` (${results[name].missingCapability.capability}: ${results[name].missingCapability.cause})` : ""}\n`); }
+  try { results[name] = await run(name, available[name], name === "connect" ? ["--empty"] : name === "homonym" ? ["--homonym"] : name === "tools" || name === "search" ? ["--tools"] : name === "voice" ? ["--voice"] : name === "delegate-task" ? ["--gateway-lane"] : name === "tool-status" ? ["--tool-status"] : [], name.startsWith("locale-") ? name.slice("locale-".length) : "pt-BR"); process.stdout.write(`${name}: ${results[name].result}${results[name].missingCapability ? ` (${results[name].missingCapability.capability}: ${results[name].missingCapability.cause})` : ""}\n`); }
   catch (error) { results[name] = { result: "failed", error: error.message.split("\n")[0] }; process.stdout.write(`${name}: FAILED ${error.message.split("\n").slice(0, 25).join("\n")}\n`); }
 }
 process.exit(Object.values(results).some((entry) => entry.result === "failed") ? 1 : Object.values(results).every((entry) => entry.result === "passed") ? 0 : 2);

@@ -985,6 +985,33 @@ export class WorkspaceService {
     return { view, before: value.before, after: value.after };
   }
 
+  /**
+   * Prepares one reviewed plan reversing the recorded writes of a conversation
+   * turn (no write here). A 409 carries conflicting paths and effects the undo
+   * cannot reverse; both are returned to the caller instead of being hidden.
+   */
+  async prepareTurnRestore(projectId: string, rootBindingId: string, input: { runIds: string[]; expectedRevision: number }, signal?: AbortSignal): Promise<TurnRestorePreparation> {
+    this.guardWrite("prepareTurnRestore");
+    const res = await this.client.fetchRaw(`/v1/workspace/projects/${encodeURIComponent(projectId)}/project-roots/${encodeURIComponent(rootBindingId)}/restore-turn`, {
+      method: "POST", body: JSON.stringify(input), ...(signal ? { signal } : {}),
+    });
+    if (res.status === 409) {
+      const body = await res.json().catch(() => ({})) as { error?: { type?: unknown; details?: { conflicts?: unknown; otherEffects?: unknown } } };
+      const code = typeof body.error?.type === "string" ? body.error.type : "turn_restore_failed_409";
+      const conflicts = Array.isArray(body.error?.details?.conflicts) ? (body.error!.details!.conflicts as unknown[]).filter(isRecord).map((c) => String(c.path)) : [];
+      return { kind: "refused", code, conflicts, otherEffects: effectsOf(body.error?.details?.otherEffects) };
+    }
+    if (!res.ok) throw new WorkspaceServiceError(await errorCode(res, `turn_restore_failed_${res.status}`), res.status);
+    const value = await res.json() as { view?: unknown; files?: unknown; otherEffects?: unknown; directories?: unknown };
+    const view = parseWorkspaceView(value.view);
+    if (view.projectId !== projectId || !view.plan || !Array.isArray(value.files)) throw new WorkspaceServiceError("workspace_invalid_response");
+    const files = (value.files as unknown[]).filter(isRecord).map((f) => ({
+      path: String(f.path), action: (["restore", "delete", "recreate"].includes(String(f.action)) ? f.action : "restore") as "restore" | "delete" | "recreate",
+      before: typeof f.before === "string" ? f.before : null, after: typeof f.after === "string" ? f.after : null,
+    }));
+    return { kind: "prepared", view, files, otherEffects: effectsOf(value.otherEffects) };
+  }
+
   // --- Consent and execution ---
 
   /**
@@ -1323,4 +1350,12 @@ export class WorkspaceService {
       return { success: false, message: `Falha: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
+}
+
+export type TurnRestorePreparation =
+  | { kind: "prepared"; view: WorkspaceView; files: Array<{ path: string; action: "restore" | "delete" | "recreate"; before: string | null; after: string | null }>; otherEffects: Array<{ runId: string; capabilityId: string }> }
+  | { kind: "refused"; code: string; conflicts: string[]; otherEffects: Array<{ runId: string; capabilityId: string }> };
+
+function effectsOf(value: unknown): Array<{ runId: string; capabilityId: string }> {
+  return Array.isArray(value) ? value.filter(isRecord).map((e) => ({ runId: String(e.runId), capabilityId: String(e.capabilityId) })) : [];
 }

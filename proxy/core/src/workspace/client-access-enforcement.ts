@@ -169,7 +169,7 @@ export function mapWorkspaceCapability(method: string, pathname: string): Client
     if (method === "GET") return "project:read";
     return "filesystem:write-plan";
   }
-  if (/^projects\/[^/]+\/project-roots\/[^/]+\/restore-file(?:\/|$)/.test(suffix)) {
+  if (/^projects\/[^/]+\/project-roots\/[^/]+\/restore-(?:file|turn)(?:\/|$)/.test(suffix)) {
     return "filesystem:write-plan";
   }
   // Project deletion is a control-plane tombstone; the handler enforces

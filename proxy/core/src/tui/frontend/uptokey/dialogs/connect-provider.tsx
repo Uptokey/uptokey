@@ -2,7 +2,7 @@
  * Provider onboarding: provider → key (masked) → models discovered from the account → connected and selected.
  * All persistence goes through the existing provider-setup service and OS vault; this dialog only drives it.
  */
-import { createMemo, onMount, Show } from "solid-js"
+import { createMemo, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { TextAttributes } from "@opentui/core"
 import { DialogSelect } from "../../vendor/opencode-tui/ui/dialog-select"
 import { DialogPrompt } from "../../vendor/opencode-tui/ui/dialog-prompt"
@@ -18,10 +18,11 @@ import { connectionText, prepareConnection, setupErrorText } from "../integratio
 
 export { setupErrorText }
 
-function Busy(props: { text: string }) {
+function Busy(props: { text: string; onDispose?: () => void }) {
   const { theme } = useTheme()
   const dialog = useDialog()
   dialog.setSize("medium")
+  onCleanup(() => props.onDispose?.())
   return (
     <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
       <text attributes={TextAttributes.BOLD} fg={theme.text}>
@@ -40,7 +41,39 @@ export function ConnectProvider(props:{providerId?:string}={}) {
 
   const choices = createMemo(() => backend.providerChoices())
 
-  async function prepare(choice: ReturnType<typeof backend.providerChoices>[number], endpoint: string | undefined): Promise<PreparedProviderSetup | null> {
+  function connectionFlow() {
+    const abort = new AbortController()
+    let generation = 0
+    let active = true
+    let committing = false
+    const cancel = () => {
+      active = false
+      // A confirmed save may already be writing the vault/configuration. Let it settle,
+      // while preventing its late result from taking over the person's next dialog.
+      if (!committing) abort.abort()
+    }
+    return {
+      signal: abort.signal,
+      active: () => active,
+      beginCommit() { committing = true },
+      handoff() { generation++ },
+      busy(text: string) {
+        const current = ++generation
+        const closed = () => { if (current === generation) cancel() }
+        dialog.replace(() => <Busy text={text} onDispose={closed} />, closed)
+      },
+      replace(view: () => JSX.Element, closed?: () => void) {
+        const current = ++generation
+        const close = () => {
+          if (current === generation) cancel()
+          closed?.()
+        }
+        dialog.replace(() => { onCleanup(close); return view() }, close)
+      },
+    }
+  }
+
+  async function prepare(choice: ReturnType<typeof backend.providerChoices>[number], endpoint: string | undefined, flow: ReturnType<typeof connectionFlow>): Promise<PreparedProviderSetup | null> {
     const setup = backend.providerSetup
     if (!setup) {
       toast.show({ variant: "error", message: ui("connect_unavailable") })
@@ -49,17 +82,20 @@ export function ConnectProvider(props:{providerId?:string}={}) {
     try {
       return await prepareConnection({
         service: setup, choice, endpoint,
-        requestKey: (error) => SecretPrompt.show(dialog, ui("connect_title", { provider: choice.label }), {
+        signal: flow.signal,
+        requestKey: (error) => { flow.handoff(); return SecretPrompt.show(dialog, ui("connect_title", { provider: choice.label }), {
           ...(error instanceof Error && error.message !== "provider_key_required" ? { error: setupErrorText(error) } : {}),
-        }),
-        requestModel: (error) => DialogPrompt.show(dialog, connectionText("manual_model"), {
+          ...(PROVIDER_SETUP_PRESETS.find((preset) => preset.id === choice.id)?.getKeyUrl ? { getKeyUrl: PROVIDER_SETUP_PRESETS.find((preset) => preset.id === choice.id)!.getKeyUrl! } : {}),
+        }) },
+        requestModel: (error) => { flow.handoff(); return DialogPrompt.show(dialog, connectionText("manual_model"), {
           placeholder: connectionText("manual_model"),
           description: () => <text fg={error ? theme.warning : theme.textMuted}>{connectionText(error ? "model_invalid" : "manual_hint")}</text>,
-        }),
-        requestEndpoint: () => DialogPrompt.show(dialog, ui("connect_endpoint"), { placeholder: PROVIDER_SETUP_PRESETS.find(preset=>preset.id===choice.id)?.endpointPlaceholder ?? "https://…/v1" }),
-        busy: () => dialog.replace(() => <Busy text={ui("connect_loading")} />),
+        }) },
+        requestEndpoint: () => { flow.handoff(); return DialogPrompt.show(dialog, ui("connect_endpoint"), { placeholder: PROVIDER_SETUP_PRESETS.find(preset=>preset.id===choice.id)?.endpointPlaceholder ?? "https://…/v1" }) },
+        busy: () => flow.busy(ui("connect_loading")),
       })
     } catch (caught) {
+      if (!flow.active()) return null
       dialog.clear()
       toast.show({ variant: "error", message: setupErrorText(caught) })
       return null
@@ -67,17 +103,22 @@ export function ConnectProvider(props:{providerId?:string}={}) {
   }
 
   async function connectBrave() {
+    const flow = connectionFlow()
     let error: string | undefined
     for (;;) {
+      flow.handoff()
       const key = await SecretPrompt.show(dialog, ui("connect_brave_title"), { ...(error ? { error } : {}) })
       if (key === null) return
-      dialog.replace(() => <Busy text={ui("connect_loading")} />)
+      flow.beginCommit()
+      flow.busy(ui("connect_loading"))
       try {
         const result = await backend.configureWebSearchKey(key.trim())
+        if (!flow.active()) return
         dialog.clear()
         toast.show({ variant: result.braveAvailable ? "success" : "warning", message: result.braveAvailable ? ui("connect_brave_done") : ui("connect_brave_unavailable") })
         return
       } catch (caught) {
+        if (!flow.active()) return
         error = ui("connect_brave_failed", { code: "web_config_failed" })
       }
     }
@@ -88,6 +129,7 @@ export function ConnectProvider(props:{providerId?:string}={}) {
       toast.show({ variant: "info", message: ui("connect_catalog_only") })
       return
     }
+    const flow = connectionFlow()
     let endpoint: string | undefined = choice.endpointUrl || undefined
     const preset = PROVIDER_SETUP_PRESETS.find(preset=>preset.id===choice.id)
     if (!endpoint && !choice.configured && !preset?.endpointRequired) {
@@ -95,12 +137,14 @@ export function ConnectProvider(props:{providerId?:string}={}) {
       if (!entered) return
       endpoint = entered.trim()
     }
-    const prepared = await prepare(choice, choice.endpointUrl ? undefined : endpoint)
+    const prepared = await prepare(choice, choice.endpointUrl ? undefined : endpoint, flow)
     if (!prepared) return
+    if (!flow.active()) { prepared.dispose(); return }
     const modelId = await new Promise<string | null>((resolve) => {
-      dialog.replace(
+      flow.replace(
         () => (
           <DialogSelect
+            virtualize
             title={ui("connect_choose_model", { provider: prepared.label })}
             placeholder={ui("connect_search")}
             footer={
@@ -116,17 +160,31 @@ export function ConnectProvider(props:{providerId?:string}={}) {
         () => resolve(null),
       )
     })
-    if (!modelId) {
+    if (!modelId || !flow.active()) {
       prepared.dispose()
       return
     }
-    dialog.replace(() => <Busy text={ui("connect_saving")} />)
+    flow.beginCommit()
+    flow.busy(ui("connect_saving"))
     try {
       const result = await prepared.commit(modelId, { acceptNotice: true })
-      await backend.finishProviderSetup(result.providerId, modelId, result.routingComboId)
+      if (!flow.active()) {
+        prepared.dispose()
+        // The connection was explicitly saved. Refresh its inventory without selecting
+        // a destination or replacing whatever the person opened while it completed.
+        if (getBackend() === backend) {
+          await backend.controller.refreshConnections()
+          backend.refreshAll()
+        }
+        return
+      }
+      const selected = await backend.finishProviderSetup(result.providerId, modelId, result.routingComboId, flow.active)
+      if (!flow.active()) return
+      if (selected === false) { dialog.clear(); return }
       dialog.clear()
       toast.show({ variant: "success", message: ui("connect_done", { provider: prepared.label, model: modelId }) })
     } catch (caught) {
+      if (!flow.active()) { prepared.dispose(); return }
       getBackend().trace("provider.commit_failed")
       prepared.dispose()
       dialog.clear()

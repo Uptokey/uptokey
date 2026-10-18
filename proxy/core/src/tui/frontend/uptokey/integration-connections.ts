@@ -112,6 +112,7 @@ export async function prepareConnection(input: {
   requestModel(error?: unknown): Promise<string | null>
   requestEndpoint(): Promise<string | null>
   busy(): void
+  signal?: AbortSignal
 }): Promise<PreparedProviderSetup | null> {
   let key: string | undefined
   let endpoint = input.endpoint
@@ -119,29 +120,33 @@ export async function prepareConnection(input: {
   let keyError: unknown
   let needsKey = !input.choice.local && !input.choice.configured
   for (;;) {
+    if (input.signal?.aborted) return null
     if (needsKey) {
       const entered = await input.requestKey(keyError)
-      if (entered === null) return null
+      if (entered === null || input.signal?.aborted) return null
       key = entered
       needsKey = false
     }
     input.busy()
     try {
-      return model === undefined
-        ? await input.service.prepare(input.choice.id, key, endpoint)
-        : await input.service.prepareManual(input.choice.id, key, endpoint, model)
+      const prepared = model === undefined
+        ? await input.service.prepare(input.choice.id, key, endpoint, input.signal)
+        : await input.service.prepareManual(input.choice.id, key, endpoint, model, input.signal)
+      if (input.signal?.aborted) { prepared.dispose(); return null }
+      return prepared
     } catch (error) {
+      if (input.signal?.aborted) return null
       const recovery = setupRecovery(error)
       if (recovery === "key") { key = undefined; keyError = error; needsKey = true; continue }
       if (recovery === "manual" || recovery === "model") {
         const entered = await input.requestModel(recovery === "model" ? error : undefined)
-        if (entered === null) return null
+        if (entered === null || input.signal?.aborted) return null
         model = entered.trim()
         continue
       }
       if (recovery === "endpoint") {
         const entered = await input.requestEndpoint()
-        if (entered === null) return null
+        if (entered === null || input.signal?.aborted) return null
         endpoint = entered.trim()
         continue
       }

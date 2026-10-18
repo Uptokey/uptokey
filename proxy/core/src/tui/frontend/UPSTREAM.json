@@ -154,8 +154,54 @@
       "file": "vendor/opencode-tui/routes/session/sidebar.tsx",
       "reason": "The active sidebar footer fallback displays the Uptokey product wordmark with the canonical package version; upstream module identifiers and MIT notices are preserved.",
       "date": "2026-10-02"
+    },
+    {
+      "file": "vendor/opencode-tui/routes/session/index.tsx",
+      "reason": "Earlier-messages paging compensates the prepended height from scrollTop (the reading position) instead of the box's screen y, waits until the new page is measured, and PageUp loads only at the real top. Found by the native history journey: the view jumped 100 messages to the start of the loaded page.",
+      "date": "2026-10-17"
+    },
+    {
+      "file": "vendor/opencode-tui/ui/dialog-select.tsx",
+      "reason": "The search field also takes focus as soon as it is created (the deferred focus is kept). Keys typed while boot kept the event loop busy were dropped in the onboarding provider list (4 of 8 compiled runs needed retyping before, 0 of 8 after).",
+      "date": "2026-10-17"
+    },
+    {
+      "file": "vendor/opencode-tui/routes/session/index.tsx",
+      "reason": "Reasoning parts now arrive from Uptokey: the reasoning body draws text before highlighting (drawUnstyledText) so it grows while the model thinks, and the Thought/Thinking/Collapse/Expand labels use tr() in ten languages.",
+      "date": "2026-10-18"
+    },
+    {
+      "file": "vendor/opencode-tui/routes/session/index.tsx",
+      "reason": "Terminal tool non-execution remains neutral and visible rather than appearing successful, including when successful tool details are collapsed.",
+      "date": "2026-10-18"
     }
   ],
   "note": "Local modifications to vendored files are appended to localModifications with file, reason and date; unmodified files must keep upstream bytes so upstream updates can be diffed.",
-  "diffReport": "UPSTREAM-DIFF.json"
+  "diffReport": "UPSTREAM-DIFF.json",
+  "reviewedDeltas": [
+    {
+      "recordedAt": "2026-10-17",
+      "basis": "UPSTREAM-DIFF.json compares the vendored files with OpenCode revision b471c2b4495747353af768fbf2e0790c9d820ce2.",
+      "changedSinceHistoricalDiff": [
+        "component/dialog-model.tsx",
+        "component/dialog-move-session.tsx",
+        "component/prompt/index.tsx",
+        "context/data.tsx",
+        "context/local.tsx",
+        "context/sync.tsx",
+        "feature-plugins/sidebar/context.tsx",
+        "routes/session/dialog-message.tsx",
+        "routes/session/index.tsx",
+        "routes/session/sidebar.tsx",
+        "routes/session/subagent-footer.tsx",
+        "ui/dialog-select.tsx",
+        "ui/dialog.tsx"
+      ],
+      "reasons": [
+        "Retention, selection caching, capability bootstrap, dialog lifetimes, translated pickers, windowed lists and action routing.",
+        "Turn undo/redo through the backend, history paging, complete copy/export, observed usage, a clickable composer destination and model capability labels."
+      ],
+      "opentuiUpgrade": "OpenTUI dependencies remain pinned; see package.json."
+    }
+  ]
 }

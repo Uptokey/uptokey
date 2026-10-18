@@ -55,6 +55,18 @@ function locationQuery(ref?: LocationRef) {
   return ref ? { directory: ref.directory, workspace: ref.workspaceID } : undefined
 }
 
+/** Keep the V2 context available without probing endpoints a canonical backend explicitly does not serve. */
+export async function bootstrapLocationDataV2(
+  capabilities: () => Promise<{ data?: { uptokey?: { schemaVersion?: number; locationDataV2?: boolean } } }>,
+  refresh: () => Promise<unknown>[],
+  active: () => boolean = () => true,
+): Promise<PromiseSettledResult<unknown>[]> {
+  let advertised: Awaited<ReturnType<typeof capabilities>> | undefined
+  try { advertised = await capabilities() } catch { /* Unknown upstream backends retain their normal bootstrap. */ }
+  if (!active() || advertised?.data?.uptokey?.schemaVersion === 1 && advertised.data.uptokey.locationDataV2 === false) return []
+  return Promise.allSettled(refresh())
+}
+
 export const { use: useData, provider: DataProvider } = createSimpleContext({
   name: "Data",
   init: () => {
@@ -73,6 +85,8 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
 
     const sdk = useSDK()
     const events = useEvent()
+    let active = true
+    onCleanup(() => { active = false })
     const [defaultLocation, setDefaultLocation] = createSignal<LocationRef>({
       directory: sdk.directory ?? process.cwd(),
     })
@@ -549,7 +563,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
     }
 
     onMount(() => {
-      void Promise.allSettled([
+      void bootstrapLocationDataV2(() => sdk.client.experimental.capabilities.get(), () => [
         result.location.refresh(),
         result.location.agent.refresh(),
         result.location.integration.refresh(),
@@ -558,7 +572,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         result.location.reference.refresh(),
         result.location.command.refresh(),
         result.location.skill.refresh(),
-      ]).then((settled) => {
+      ], () => active).then((settled) => {
         for (const failure of settled.filter((item) => item.status === "rejected"))
           console.error("Failed to refresh default location data", failure.reason)
       })

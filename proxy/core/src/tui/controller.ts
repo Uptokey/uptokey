@@ -17,10 +17,10 @@ import { EventEmitter } from "node:events";
 import { TuiFeatures } from "./features.ts";
 import { loadTaskIntegration } from "./task-integration.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { TuiClient, TuiHttpError } from "./client.ts";
+import { TuiClient, TuiHttpError, type TuiInferenceDestination } from "./client.ts";
 import { TuiStore, type Message } from "./state.ts";
-import { ConversationService, ConversationServiceError, composeHistory, type ComposedHistory, type DispatchMessage, type NativeToolExecutionContext } from "./conversations.ts";
-import { WorkspaceService, WorkspaceServiceError, type ProjectManifestEntry, type ProjectTaskView, type RuntimeProfile, type WorkspaceView } from "./workspace.ts";
+import { ConversationService, ConversationServiceError, TURN_UNDO_PREFIX, composeHistory, type ComposedHistory, type DispatchMessage, type NativeToolExecutionContext, type TurnRestoreRecord } from "./conversations.ts";
+import { WorkspaceService, WorkspaceServiceError, isSettledStatus, type ProjectManifestEntry, type ProjectTaskView, type RuntimeProfile, type WorkspaceView } from "./workspace.ts";
 import { SUBAGENT_MAX_TOKENS, TASK_TERMINAL, integrationPrompt, subagentMessages, type ChildLabel, type ChildResult, type DelegationSpec, getChildStatusText, getTaskStatusText } from "./delegation.ts";
 import { resolveProjectBinding, type BindingCandidate, type ProjectBinding } from "./project-binding.ts";
 import { ContextSet, describeReadError } from "./context-set.ts";
@@ -31,6 +31,13 @@ import { EDIT_PROTOCOL_INSTRUCTIONS } from "./edit-blocks.ts";
 import { buildRepoMap, formatRepoMap } from "./repo-map.ts";
 import { buildRunRequest, chooseVerification, interpretReport, RUNNER_SETUP_HINT, type VerificationChoice } from "./verification.ts";
 import { createStreamCoalescer } from "./stream-coalescing.ts";
+import { liveToolActivity, liveTurnItems } from "./live-activity.ts";
+import { toolResultStatus, type CompletedToolStatus } from "./tool-result-status.ts";
+import { claimsSuccess } from "./success-claim.ts";
+import { isTestCommand, passedVerificationDigest, successfulWrite } from "./verification-evidence.ts";
+import { chooseToolset, compactEditProtocol, selectToolset } from "./toolset.ts";
+import { diffLines, diffStats, splitLines } from "./line-diff.ts";
+import { outputReserve, type ContextBudget } from "./context-budget.ts";
 import { sanitizeForDisplay } from "./sanitize.ts";
 import type { TranscriptItem } from "./transcript.ts";
 import { loadConnections, providerSetupUrl, openLoopbackUrl, type ConnectionsSnapshot } from "./connections.ts";
@@ -48,6 +55,10 @@ import { nativeWebTools, nativeWebExecutor } from "./native-web-tools.ts";
 import { NATIVE_WRITE_TOOLS, nativeWriteExecutor } from "./native-write-tools.ts";
 import { NATIVE_EDIT_PROTOCOL, AUTONOMY_PROTOCOL } from "./coding-protocol.ts";
 import { nativeMcpTools, nativeMcpExecutor } from "./native-mcp-tools.ts";
+import { nativeServiceExecutor, nativeServiceTools } from "./native-service-tools.ts";
+import { PROGRESS_TOOLS, progressExecutor, todosFromResults, type TodoItem } from "./native-progress-tools.ts";
+import { QUESTION_TOOLS, questionExecutor, type QuestionInfo } from "./native-question-tools.ts";
+import { DELEGATE_TOOLS, DELEGATE_TOOL_NAME, nativeDelegateExecutor } from "./native-delegate-tools.ts";
 import { NATIVE_COMMAND_TOOLS, nativeCommandExecutor } from "./native-command-tools.ts";
 import { SHADOW_BASH_TOOLS, shadowBashExecutor, clearShadowBashSessions } from "./shadow-bash.ts";
 import { NATIVE_CODING_TOOLS, nativeCodingExecutor, type NativeDiagnosticsResult } from "./native-coding-tools.ts";
@@ -87,6 +98,10 @@ export interface ControllerView {
   autonomy: boolean;
   toolsAvailable: string[];
   steer: SteerItem[];
+  /** Task list kept by the model through update_todos (restored from the conversation's tool results). */
+  todos: TodoItem[];
+  /** A structured question from the model awaiting the person (ask_user); null when none. */
+  question: { id: string; questions: QuestionInfo[] } | null;
   proposal: ChangeProposal | null;
   approvals: BoundApprovalRequest[];
   attention: BoundRunRequest | null;
@@ -163,7 +178,7 @@ export class TuiController extends EventEmitter {
   readonly features: TuiFeatures;
   readonly view: ControllerView = {
     binding: null, bindingCandidates: null, bindingError: null, mode: "build",
-    toolsEnabled: false, autonomy: process.env.UPTOKEY_TUI_AUTONOMY === "1", toolsAvailable: [], steer: [], proposal: null, approvals: [], attention: null,
+    toolsEnabled: false, autonomy: process.env.UPTOKEY_TUI_AUTONOMY === "1", toolsAvailable: [], steer: [], todos: [], question: null, proposal: null, approvals: [], attention: null,
     lastDispatch: null, signerAvailable: false, verifyOffer: null, correction: null, busy: null,
     instructionsSource: null, manifestFiles: [], connections: null, budget: null, git: null, hooks: null, lspConsentRequest: null, lspLocations: null, skills: [], activeSkills: [], artifacts: [], tasks: [], integration: null, repoMapText: null,
   };
@@ -184,6 +199,7 @@ export class TuiController extends EventEmitter {
   private bindingHint: string | undefined;
   private bindingGeneration = 0;
   private conversationOpenGeneration = 0;
+  private modelSelectionGeneration = 0;
   private bindingAbort: AbortController | null = null;
   private readonly lifecycleAbort=new AbortController();
   private readonly options: ControllerOptions;
@@ -679,7 +695,9 @@ export class TuiController extends EventEmitter {
     }
     for (const live of this.live) if (!placed.has(live.item.id)) items.push(live.item);
     const state = this.store.state;
-    if (state.streamBuffer || state.turn === "streaming" || state.turn === "submitting") {
+    const turnLive = state.streamBuffer || state.turn === "streaming" || state.turn === "submitting";
+    if (turnLive) items.push(...liveTurnItems(state));
+    if (turnLive) {
       items.push({ kind: "assistant", id: "streaming", text: state.streamBuffer, streaming: true });
     }
     return items;
@@ -734,6 +752,44 @@ export class TuiController extends EventEmitter {
       storagePolicy: this.state.storagePolicy, processingPolicy: this.state.processingPolicy, parts, assertCurrent });
     this.preparedMediaContexts.set(media, assertCurrent);
     return media;
+  }
+
+  private questionAnswer: ((answers: string[][] | null) => void) | null = null;
+
+  /** Shows the model's questions and waits for the person; cancellation or a new question settles it as declined. */
+  askQuestion(questions: QuestionInfo[], signal?: AbortSignal): Promise<string[][] | null> {
+    this.questionAnswer?.(null);
+    return new Promise((resolve) => {
+      const id = `question-${randomUUID()}`;
+      const settle = (answers: string[][] | null) => {
+        if (this.view.question?.id !== id) return;
+        signal?.removeEventListener("abort", abort);
+        this.view.question = null;
+        this.questionAnswer = null;
+        this.changed();
+        resolve(answers);
+      };
+      const abort = () => settle(null);
+      if (signal?.aborted) return resolve(null);
+      signal?.addEventListener("abort", abort, { once: true });
+      this.view.question = { id, questions };
+      this.questionAnswer = settle;
+      this.changed();
+    });
+  }
+
+  answerQuestion(id: string, answers: unknown): boolean {
+    const pending = this.view.question;
+    if (!pending || pending.id !== id || !Array.isArray(answers) || answers.length > pending.questions.length) return false;
+    const valid = answers.map((answer) => Array.isArray(answer) ? answer.filter((item): item is string => typeof item === "string" && item.length > 0 && item.length <= 500).slice(0, 6) : []);
+    this.questionAnswer?.(valid);
+    return true;
+  }
+
+  rejectQuestion(id: string): boolean {
+    if (this.view.question?.id !== id) return false;
+    this.questionAnswer?.(null);
+    return true;
   }
 
   /** Removes a pending redirection before it is sent. */
@@ -800,6 +856,7 @@ export class TuiController extends EventEmitter {
     this.turnAbort?.abort();
     this.effectAbort?.abort();
     this.view.steer = [];
+    this.view.todos = [];
     this.view.proposal = null;
     this.view.approvals = [];
     this.view.attention = null;
@@ -830,6 +887,7 @@ export class TuiController extends EventEmitter {
         }
       }
       this.store.dispatch({ type: "messages_loaded", messages });
+      this.view.todos = todosFromResults(messages.flatMap((message) => message.toolResults ?? []));
       if (conversation.projectId && this.view.binding && conversation.projectId !== this.view.binding.projectId) {
         this.notice("warning", t('esta_conversa_pertence_a_outro'), t('leitura_e_alteracoes_usam_projeto'));
       }
@@ -858,6 +916,7 @@ export class TuiController extends EventEmitter {
     this.effectAbort = null;
     this.live = [];
     this.view.steer = [];
+    this.view.todos = [];
     this.view.proposal = null;
     this.view.verifyOffer = null;
     this.view.correction = null;
@@ -876,6 +935,7 @@ export class TuiController extends EventEmitter {
       if (this.store.state.activeConversation?.id !== conversationId) return;
       const lastBefore = this.store.state.messages.at(-1)?.id;
       this.store.dispatch({ type: "messages_loaded", messages });
+      this.view.todos = todosFromResults(messages.flatMap((message) => message.toolResults ?? []));
       // Live items anchored to optimistic ids move to the canonical tail.
       const known = new Set(messages.map((m) => m.id));
       for (const live of this.live) if (live.after && !known.has(live.after)) live.after = messages.at(-1)?.id ?? null;
@@ -885,7 +945,7 @@ export class TuiController extends EventEmitter {
 
   // ─── chat turn ─────────────────────────────────────────────────────────
 
-  private systemMessages(webTools: readonly string[] = [], mcpTools: readonly string[] = [], nativeWrite = false, destination = this.client.getSelectedDestination(), model = this.store.state.selectedModel): DispatchMessage[] {
+  private systemMessages(webTools: readonly string[] = [], mcpTools: readonly string[] = [], nativeWrite = false, destination = this.client.getSelectedDestination(), model = this.store.state.selectedModel, editProtocol?: string): DispatchMessage[] {
     const binding = this.view.binding;
     const parts = [SYSTEM_BASE()];
     const providerId = destination.providerId;
@@ -895,7 +955,9 @@ export class TuiController extends EventEmitter {
       ? t("system_provider_effective", { provider: provider.displayName, id: provider.id, model: model! })
       : t("system_provider_none"));
     const hosted = destination.hosted;
-    if (hosted) parts.push(`Use only project context supplied in this conversation${binding ? ` for ${binding.projectName}` : ""}. No file, command or web tools are available to this model. Ask for missing context; never claim to have read, changed or tested files without an actual result.`);
+    // A hosted model without declared tool support stays a text model and is told so.
+    const hostedTools = hosted ? this.hostedModels.find((item) => item.modelId === model)?.toolCalls === true : false;
+    if (hosted && !hostedTools) parts.push(`Use only project context supplied in this conversation${binding ? ` for ${binding.projectName}` : ""}. No file, command or web tools are available to this model. Ask for missing context; never claim to have read, changed or tested files without an actual result.`);
     else if (binding) parts.push(t("system_project_bound", { projectName: binding.projectName, rootPath: binding.rootPath, accessMode: binding.accessMode === "read_only" ? t("system_access_read_only") : t("system_access_read_write"), tools: PROJECT_READ_TOOLS.map(tool => tool.function.name).join(", "), toolsStatus: this.view.toolsEnabled ? t("system_tools_enabled") : t("system_tools_disabled") }));
     else parts.push(t("system_project_unbound"));
     if (this.view.manifestFiles.length) {
@@ -906,7 +968,7 @@ export class TuiController extends EventEmitter {
     if (mcpTools.length) parts.push(t("system_mcp_tools", { tools: mcpTools.join(", ") }));
     if (binding && this.view.toolsEnabled && this.signer && !hosted) parts.push(t("system_execute_command"));
     if (this.view.repoMapText) parts.push(this.view.repoMapText);
-    parts.push(this.view.mode !== "build" ? t("system_plan_mode") : hosted ? "Propose edits using the relative file path followed by SEARCH/REPLACE blocks:\npath/to/file\n<<<<<<< SEARCH\nexact supplied current content\n=======\nreplacement\n>>>>>>> REPLACE\nFor a new file, SEARCH is empty. Proposed edits are reviewed and applied by Uptokey, not by you. Never claim they were applied before an actual result." : nativeWrite ? NATIVE_EDIT_PROTOCOL : t("system_edit_protocol"));
+    parts.push(this.view.mode !== "build" ? t("system_plan_mode") : hosted ? "Propose edits using the relative file path followed by SEARCH/REPLACE blocks:\npath/to/file\n<<<<<<< SEARCH\nexact supplied current content\n=======\nreplacement\n>>>>>>> REPLACE\nFor a new file, SEARCH is empty. Proposed edits are reviewed and applied by Uptokey, not by you. Never claim they were applied before an actual result." : nativeWrite ? (editProtocol ?? NATIVE_EDIT_PROTOCOL) : t("system_edit_protocol"));
     if (nativeWrite && this.view.autonomy) parts.push(AUTONOMY_PROTOCOL);
     const out: DispatchMessage[] = [{ role: "system", content: parts.join("\n\n") }];
     if (this.instructions) out.push({ role: "system", content: this.instructions });
@@ -1034,6 +1096,9 @@ export class TuiController extends EventEmitter {
     this.view.verifyOffer = null;
     this.store.dispatch({ type: "turn_changed", turn: "submitting" });
     const coalescer = createStreamCoalescer({ leading: true, onFlush: (event) => { if (event.type === "text") { this.store.dispatch({ type: "stream_delta", text: event.data }); this.emit("delta", event.data); } } });
+    // The model's reasoning is shown while it streams (coalesced like the answer); it is not part of the answer text.
+    const thinking = createStreamCoalescer({ leading: true, onFlush: (event) => { if (event.type === "text") this.store.dispatch({ type: "stream_reasoning", text: event.data }); } });
+    const toolActivity = liveToolActivity((event) => this.store.dispatch(event));
     let conversationId: string | null = null;
     let userMessageId: string | null = null;
     let storedBefore = -1;
@@ -1051,7 +1116,8 @@ export class TuiController extends EventEmitter {
       if (options.steer) options.steer.state = "submitted";
       this.store.dispatch({ type: "turn_changed", turn: "streaming" });
       const binding = this.view.binding;
-      const useReadTools = binding && this.view.toolsEnabled && !destination.hosted;
+      // Hosted models use the same local, governed tools only when the broker declares tool support for them.
+      const useReadTools = binding && this.view.toolsEnabled && (!destination.hosted || this.hostedModels.find((item) => item.modelId === model)?.toolCalls === true);
       const sign = this.signer;
       const webTools = useReadTools && sign && expectedProcessingPolicy === "external_allowed"
         ? await nativeWebTools(this.client, abort.signal).catch(error => { abort.signal.throwIfAborted(); if (errorCode(error) !== "tui_transport_unavailable") this.notice("warning", t("ctl_web_unavailable", { reason: errorText(error) })); return []; }) : [];
@@ -1086,27 +1152,90 @@ export class TuiController extends EventEmitter {
         diagnostics: (paths, signal, context) => this.nativeDiagnostics(paths, signal, context),
         onWritten: (paths) => { for (const path of paths) if (!this.view.manifestFiles.includes(path)) this.view.manifestFiles.push(path); this.changed(); },
       }) : null;
-      const tools = [...PROJECT_READ_TOOLS, ...(writeTool ? NATIVE_WRITE_TOOLS : []), ...(codingTool ? NATIVE_CODING_TOOLS : []), ...webTools, ...mcpToolsList, ...(commandTool ? NATIVE_COMMAND_TOOLS : []), ...(shadowBashTool ? SHADOW_BASH_TOOLS : [])];
+      // Connected MCP services (ready, external processing allowed): each call is a W5 plan with its own receipt.
+      const services = useReadTools && sign && expectedProcessingPolicy === "external_allowed"
+        ? await nativeServiceTools(this.client, abort.signal).catch(error => { abort.signal.throwIfAborted(); if (errorCode(error) !== "tui_transport_unavailable") this.notice("warning", t("ctl_mcp_unavailable", { reason: errorText(error) })); return { tools: [], bindings: new Map() }; })
+        : { tools: [], bindings: new Map() };
+      const serviceTool = services.tools.length && sign && binding ? nativeServiceExecutor({ client: this.client, workspace: this.workspace, conversations: this.conversations, bindings: services.bindings,
+        projectId: binding.projectId, model, sign, stillBound, confirm: (title, body, signal) => this.approve(title, body, signal) }) : null;
+      const progressTool = progressExecutor((todos) => { if (stillBound()) { this.view.todos = todos; this.changed(); } });
+      const questionTool = questionExecutor((questions, signal) => stillBound() ? this.askQuestion(questions, signal) : Promise.resolve(null));
+      // In-turn delegation: offered only where `/delegate` itself could run (signed W5, persistent session,
+      // external processing allowed, governed lane available), nested in this turn's binding and conversation.
+      const gateway = useReadTools && sign && binding && expectedProcessingPolicy === "external_allowed" && this.store.state.storagePolicy !== "temporary"
+        ? await this.workspace.getGatewayInfo(abort.signal).catch(() => { abort.signal.throwIfAborted(); return { available: false, model: null }; }) : null;
+      const delegateTool = gateway?.available && gateway.model && sign && binding ? nativeDelegateExecutor({ workspace: this.workspace, conversations: this.conversations,
+        projectId: binding.projectId, rootBindingId: binding.rootBindingId, model, sign, stillBound, client: this.client, gatewayModel: gateway.model,
+        files: () => this.view.manifestFiles, contextBlock: snapshot.block, confirm: (title, body, signal) => this.approve(title, body, signal),
+        onProgress: (task, labels) => {
+          if (!stillBound()) return;
+          const childLabels: ChildLabel[] = labels.map((label) => ({ label, kind: "subagent", model: gateway.model }));
+          this.taskLabels.set(task.id, childLabels);
+          this.upsertLive(this.taskItem(`task-${task.id}`, task.objective.replace(/\s+/g, " ").slice(0, 200), task, childLabels));
+        } }) : null;
+      const tools = [...PROJECT_READ_TOOLS, ...PROGRESS_TOOLS, ...QUESTION_TOOLS, ...(delegateTool ? DELEGATE_TOOLS : []), ...(writeTool ? NATIVE_WRITE_TOOLS : []), ...(codingTool ? NATIVE_CODING_TOOLS : []), ...webTools, ...mcpToolsList, ...services.tools, ...(commandTool ? NATIVE_COMMAND_TOOLS : []), ...(shadowBashTool ? SHADOW_BASH_TOOLS : [])];
       let nativeWriteApplied = false;
+      // Only a passing test on the current project snapshot can substantiate a success claim.
+      let verifiedManifestDigest: string | null = null;
       const executeWrite: import('./conversations.ts').NativeReadToolExecutor = async (call, signal, context) => {
         if (!writeTool) throw new Error('conversation_tool_unavailable');
         const result = await writeTool(call, signal, context);
-        if (result.receiptId) nativeWriteApplied = true;
+        if (successfulWrite(result)) { nativeWriteApplied = true; verifiedManifestDigest = null; }
         return result;
       };
-      if (useReadTools) this.view.toolsAvailable = tools.map(tool => tool.function.name);
-      const system = this.systemMessages(webTools.map(tool => tool.function.name), mcpToolsList.map(tool => tool.function.name), writeTool !== null, destination, model);
+      const executeRun = (run: import('./conversations.ts').NativeReadToolExecutor | null): import('./conversations.ts').NativeReadToolExecutor => async (call, signal, context) => {
+        if (!run) throw new Error('conversation_tool_unavailable');
+        const testCommand = isTestCommand(call);
+        if (testCommand) verifiedManifestDigest = null;
+        // Host tests lack the isolated runner's manifest in their report. Bind their result to an unchanged snapshot.
+        const hostSnapshot = testCommand && call.name === "shadow_bash_run" && binding
+          ? await this.workspace.getManifest(binding.projectId, binding.rootBindingId, signal).then(manifest => manifest.snapshotDigest).catch(() => null) : null;
+        const result = await run(call, signal, context);
+        if (call.name === "promote_run_outputs") {
+          if (successfulWrite(result)) { nativeWriteApplied = true; verifiedManifestDigest = null; }
+        } else if (testCommand) verifiedManifestDigest = passedVerificationDigest(call, result, hostSnapshot);
+        return result;
+      };
+      // Compact set for small local models (measured 18/10: same solves, faster, ~35% less prompt); services and MCP stay.
+      const toolset = chooseToolset({ providerKind: this.view.connections?.providers.find((provider) => provider.id === destination.providerId)?.kind, model });
+      const offered = selectToolset(tools, toolset, new Set([...mcpToolsList, ...services.tools].map(tool => tool.function.name)));
+      const offeredNames = new Set(offered.map(tool => tool.function.name));
+      if (useReadTools) this.view.toolsAvailable = [...offeredNames];
+      const system = this.systemMessages(webTools.map(tool => tool.function.name).filter(name => offeredNames.has(name)), mcpToolsList.map(tool => tool.function.name), writeTool !== null, destination, model,
+        toolset === "compact" && writeTool !== null ? compactEditProtocol(offeredNames) : undefined);
       const stream = this.conversations.sendTurn({
         conversationId, model, destination, system, expectedProcessingPolicy, userText: text,
-        ...(useReadTools ? { tools, maxToolRounds: this.view.autonomy ? 100 : 16, executeReadTool: ((call, signal, context) => NATIVE_WRITE_TOOLS.some(tool => tool.function.name === call.name) ? executeWrite(call, signal, context) : NATIVE_COMMAND_TOOLS.some(tool => tool.function.name === call.name) ? commandTool!(call, signal, context) : NATIVE_CODING_TOOLS.some(t => t.function.name === call.name) ? codingTool!(call, signal, context) : SHADOW_BASH_TOOLS.some(t => t.function.name === call.name) ? shadowBashTool!(call, signal, context) : call.name === "web_fetch" || call.name === "web_search" ? webTool!(call, signal, context) : call.name.startsWith("mcp_") ? mcpTool!(call, signal, context) : readTool!(call, signal, context)) as import("./conversations.ts").NativeReadToolExecutor } : {}),
+        ...(useReadTools ? { tools: offered, maxToolRounds: this.view.autonomy ? 100 : 16, executeReadTool: ((call, signal, context) => call.name === "update_todos" ? progressTool(call, signal, context) : call.name === "ask_user" ? questionTool(call, signal, context) : call.name === DELEGATE_TOOL_NAME && delegateTool ? delegateTool(call, signal, context) : NATIVE_WRITE_TOOLS.some(tool => tool.function.name === call.name) ? executeWrite(call, signal, context) : NATIVE_COMMAND_TOOLS.some(tool => tool.function.name === call.name) ? executeRun(commandTool)(call, signal, context) : NATIVE_CODING_TOOLS.some(t => t.function.name === call.name) ? codingTool!(call, signal, context) : SHADOW_BASH_TOOLS.some(t => t.function.name === call.name) ? executeRun(shadowBashTool)(call, signal, context) : call.name === "web_fetch" || call.name === "web_search" ? webTool!(call, signal, context) : call.name.startsWith("mcp_") ? mcpTool!(call, signal, context) : serviceTool && services.bindings.has(call.name) ? serviceTool(call, signal, context) : readTool!(call, signal, context)) as import("./conversations.ts").NativeReadToolExecutor } : {}),
         contextBlock: snapshot.block, references: snapshot.references, signal: abort.signal, ...(options.media ? { media: options.media } : {}),
         onAccepted: ({ messageId }) => { userMessageId = messageId; if (options.steer) options.steer.state = "applied"; this.changed(); },
         onDispatch: (messages, compaction) => this.recordDispatch(model, messages, compaction, snapshot.references.length),
+        ...(this.contextBudgetFor(model, destination) ? { contextBudget: this.contextBudgetFor(model, destination)! } : {}),
+        onBudget: (outcome) => {
+          if (outcome.pruned) this.notice("info", t("ctx_budget_pruned", { count: outcome.pruned }), t("ctx_budget_pruned_hint"));
+        },
+        concurrentReadTools: PROJECT_READ_TOOLS.map((tool) => tool.function.name),
+        takeSteer: () => {
+          const next = this.view.steer.find((item) => item.state === "pending");
+          if (!next) return null;
+          next.state = "submitted";
+          this.changed();
+          return { id: next.id, text: next.text };
+        },
+        onSteerDelivered: (id) => {
+          const item = this.view.steer.find((entry) => entry.id === id);
+          if (item) item.state = "applied";
+          this.view.steer = this.view.steer.filter((entry) => entry.state !== "applied");
+          this.changed();
+        },
       });
       for await (const event of stream) {
         if (abort.signal.aborted || this.store.conversationRevision !== localRevision) break;
         if (event.type === "text") coalescer.push({ type: "text", data: event.data });
+        else if (event.type === "reasoning") thinking.push({ type: "text", data: event.data });
+        else if (event.type === "tool_call") { thinking.flushNow(); toolActivity.call(event.data); }
+        else if (event.type === "tool_result") toolActivity.result(event.data);
       }
+      thinking.flushNow();
       coalescer.flushNow();
       if (this.store.conversationRevision !== localRevision) return;
       const answer = this.store.state.streamBuffer;
@@ -1115,9 +1244,11 @@ export class TuiController extends EventEmitter {
       await this.reloadMessages(conversationId);
       const sourceId = this.store.state.messages.at(-1)?.id ?? null;
       if (this.view.mode === "build" && !nativeWriteApplied) await this.proposeFrom(answer, sourceId);
+      if (nativeWriteApplied) await this.offerVerificationAfterEdits(answer, verifiedManifestDigest, localRevision).catch(() => undefined);
       void this.runHooks("post-response", answer);
     } catch (error) {
       coalescer.discard();
+      thinking.discard();
       if (this.store.conversationRevision !== revision && this.store.state.activeConversation?.id !== conversationId) return;
       const cancelled = abort.signal.aborted;
       this.store.dispatch({ type: "stream_interrupted", messageId: `partial-${randomUUID()}`, phase: cancelled ? "cancelled" : "failed" });
@@ -1914,6 +2045,14 @@ export class TuiController extends EventEmitter {
     }
   }
 
+  /** Window of the selected destination from catalog/broker metadata; unknown windows are not budgeted. */
+  private contextBudgetFor(model: string, destination: TuiInferenceDestination): ContextBudget | undefined {
+    const hosted = destination.hosted ? this.hostedModels.find((item) => item.modelId === model) : undefined;
+    const window = hosted?.contextTokens ?? this.view.connections?.models.find((m) => m.id === model)?.contextWindow ?? null;
+    if (!window || !Number.isSafeInteger(window) || window <= 0) return undefined;
+    return { window, reserveOutput: outputReserve(window, hosted?.maxOutputTokens) };
+  }
+
   /** Suggests compaction once per conversation when the last dispatch nears the model window. */
   private suggestCompaction(model: string, tokens: number | null): void {
     const id = this.store.state.activeConversation?.id;
@@ -1942,6 +2081,8 @@ export class TuiController extends EventEmitter {
 
   /** Pending redirections become the next turn(s), in order, after the current one. */
   private async drainSteer(): Promise<void> {
+    // A redirection taken at a tool boundary but not delivered (the turn ended first) is still pending.
+    for (const item of this.view.steer) if (item.state === "submitted") item.state = "pending";
     const next = this.view.steer.find((s) => s.state === "pending");
     if (!next || this.busy || this.disposed) {
       this.view.steer = this.view.steer.filter((s) => s.state === "pending");
@@ -2170,6 +2311,34 @@ export class TuiController extends EventEmitter {
     const choice = chooseVerification(this.manifestEntries, this.profiles);
     this.view.verifyOffer = choice;
     if (choice) this.notice("info", t("ctl_verify_suggest", { profile: choice.profileId, action: choice.actionId, reason: choice.reason }), t("ctl_verify_suggest_hint"));
+    this.changed();
+  }
+
+  /**
+   * After a turn whose edits were applied, the project's verification is prepared for /test. When the answer claims
+    * success without passing tests on the current snapshot, the claim is flagged as unverified.
+   */
+  private async offerVerificationAfterEdits(answer: string, verifiedManifestDigest: string | null, revision: number): Promise<void> {
+    const binding = this.view.binding;
+    let choice: VerificationChoice | null = null;
+    let currentManifestDigest: string | null = null;
+    if (binding) {
+      try {
+        if (!this.profiles.length) this.profiles = await this.workspace.getRuntimeProfiles();
+        // The edit may have created the files that identify the project kind: read the current manifest.
+        const manifest = await this.workspace.getManifest(binding.projectId, binding.rootBindingId);
+        currentManifestDigest = manifest.snapshotDigest;
+        this.manifestEntries = manifest.entries;
+        choice = chooseVerification(manifest.entries, this.profiles);
+      } catch {
+        choice = chooseVerification(this.manifestEntries, this.profiles);
+      }
+    }
+    if (this.store.conversationRevision !== revision || this.view.binding !== binding) return;
+    this.view.verifyOffer = choice;
+    if ((!verifiedManifestDigest || verifiedManifestDigest !== currentManifestDigest) && claimsSuccess(answer)) {
+      this.notice("warning", t("ctl_claim_unverified"), choice ? t("ctl_claim_unverified_hint", { profile: choice.profileId, action: choice.actionId }) : t("ctl_claim_unverified_no_profile"));
+    }
     this.changed();
   }
 
@@ -2600,7 +2769,10 @@ export class TuiController extends EventEmitter {
     if (entry.state !== "ready") this.notice("warning", `${path}: ${localizedContextError(entry.error ?? "read_failed")}.`);
   }
 
-  setModel(model: string): void { this.client.setSelectedProvider(); this.store.dispatch({ type: "model_selected", model }); }
+  setModel(model: string): void { this.modelSelectionGeneration++; this.client.setSelectedProvider(); this.store.dispatch({ type: "model_selected", model }); }
+
+  /** An explicit newer choice wins even when it chooses the same model again. */
+  get modelSelectionRevision(): number { return this.modelSelectionGeneration; }
 
   private async rememberDestination(): Promise<void> {
     const destination = this.client.getSelectedDestination();
@@ -2614,33 +2786,56 @@ export class TuiController extends EventEmitter {
   }
 
   /** Explicit model choice in the provider picker also fixes its destination. */
-  async selectProviderModel(model: string, providerId: string, routingComboId?: string): Promise<void> {
+  async selectProviderModel(model: string, providerId: string, routingComboId?: string, isCurrent: () => boolean = () => true): Promise<void> {
+    if (this.disposed || !isCurrent()) throw Error("context_changed");
+    const generation = ++this.modelSelectionGeneration;
+    const validateContext = this.captureContext();
+    let expectedModel = this.state.selectedModel;
+    let expectedDestination = this.client.getSelectedDestination();
+    let expectedPolicy = this.state.processingPolicy;
+    const check = (policy = true) => {
+      validateContext();
+      if (this.disposed || !isCurrent() || generation !== this.modelSelectionGeneration
+        || this.state.selectedModel !== expectedModel || this.client.getSelectedDestination() !== expectedDestination
+        || policy && this.state.processingPolicy !== expectedPolicy) throw Error("context_changed");
+    };
+    check();
     if (providerId === HOSTED_PROVIDER) {
       const available = this.account.view.available;
       const hosted = this.hostedModels.find(item => item.modelId === model && item.accountRef === available?.currentAccountRef && item.revision === available?.revision);
       if (!this.account.view.session?.authenticated || !hosted) throw Error("selected_model_unavailable");
       if (this.state.processingPolicy === "local_only") {
-        await this.setProcessingPolicy("external_allowed");
+        await this.setProcessingPolicy("external_allowed", check);
+        check(false);
         if ((this.state.processingPolicy as string) !== "external_allowed") throw Error("conversation_policy_update_failed");
+        expectedPolicy = "external_allowed";
       }
       // Revalidate after the policy write, which may overlap logout or account adoption.
       if (!this.account.view.session?.authenticated || this.account.view.available?.currentAccountRef !== hosted.accountRef || this.account.view.available?.revision !== hosted.revision) throw Error("account_share_conflict");
+      check();
       this.client.setHostedDestination(hosted);
       this.store.dispatch({ type: "model_selected", model });
+      expectedModel = model; expectedDestination = this.client.getSelectedDestination();
       await this.rememberDestination();
+      check();
       return;
     }
     const provider = this.view.connections?.providers.find(p => p.id === providerId);
     if (!provider?.eligible || !provider.models.includes(model)) throw new Error("selected_model_unavailable");
     if (provider?.kind !== "local" && this.store.state.processingPolicy === "local_only") {
-      await this.setProcessingPolicy("external_allowed");
+      await this.setProcessingPolicy("external_allowed", check);
+      check(false);
       if ((this.store.state.processingPolicy as string) !== "external_allowed") throw new Error("conversation_policy_update_failed");
+      expectedPolicy = "external_allowed";
     }
+    check();
     this.client.setSelectedProvider(providerId, routingComboId);
     // Publish the model only after its destination is installed. Store listeners
     // must never observe a new model paired with the previous/empty provider.
     this.store.dispatch({ type: "model_selected", model });
+    expectedModel = model; expectedDestination = this.client.getSelectedDestination();
     await this.rememberDestination();
+    check();
   }
 
   async checkHostedReceipt(requested = ""): Promise<void> {
@@ -2660,13 +2855,17 @@ export class TuiController extends EventEmitter {
    * Explicit choice of where this conversation may be processed. Recorded in
    * the canonical conversation (CAS); new conversations inherit it.
    */
-  async setProcessingPolicy(policy: "local_only" | "external_allowed"): Promise<void> {
+  async setProcessingPolicy(policy: "local_only" | "external_allowed", assertCurrent?: () => void): Promise<void> {
+    assertCurrent?.();
     if(policy==='local_only'){this.turnAbort?.abort();this.features.cancel();}
     const active = this.store.state.activeConversation;
     if(!active||policy==='local_only')this.store.dispatch({ type: "processing_policy_changed", processingPolicy: policy });
     if (!active) { await this.rememberDestination(); this.notice("info", policy === "external_allowed" ? t("ctl_new_external") : t("ctl_new_local")); return; }
     try {
       const conversation = await this.conversations.getConversation(active.id);
+      // A provider picker may have closed while its CAS revision was loading.
+      // Revalidate before admitting a policy write; committed writes stay intact.
+      assertCurrent?.();
       const response=await this.client.fetchAuth(`/v1/workspace/conversations/${encodeURIComponent(active.id)}/update`, { method: "POST", body: JSON.stringify({ expectedRevision: conversation.revision, policy:{processingPolicy: policy} }) });
       if(!response.ok)throw new Error(`conversation_policy_${response.status}`);
       if(this.store.state.activeConversation?.id!==active.id)return;
@@ -2675,6 +2874,7 @@ export class TuiController extends EventEmitter {
       await this.rememberDestination();
       this.notice("info", policy === "external_allowed" ? t("ctl_this_external") : t("ctl_this_local"));
     } catch (error) {
+      if (errorCode(error) === "context_changed") throw error;
       this.notice("error", t("ctl_processing_failed", { reason: errorText(error) }));
     }
     this.changed();
@@ -2692,10 +2892,21 @@ export class TuiController extends EventEmitter {
     if (!conversationId || this.busy) { this.notice("info", t('nada_para_compactar_agora')); return; }
     const abort = new AbortController();
     this.turnAbort = abort;
+    const validateContext = this.captureContext(abort.signal);
+    const model = this.state.selectedModel || "auto";
+    const selectedDestination = this.client.getSelectedDestination();
+    const processingPolicy = this.state.processingPolicy;
+    const selectionRevision = this.modelSelectionGeneration;
+    const check = () => {
+      validateContext();
+      if (this.disposed || this.state.processingPolicy !== processingPolicy || (this.state.selectedModel || "auto") !== model
+        || this.client.getSelectedDestination() !== selectedDestination || this.modelSelectionGeneration !== selectionRevision) throw Error("context_changed");
+    };
     this.view.busy = operationText("compacting");
     this.changed();
     try {
       const { thread } = await this.conversations.thread(conversationId);
+      check();
       const history = composeHistory(thread, { toolMode: "text" });
       // Boundary: keep the last `keepRecent` messages verbatim and never split a tool pair.
       let boundaryIndex = thread.length - 1 - keepRecent;
@@ -2710,28 +2921,35 @@ export class TuiController extends EventEmitter {
         coveredHistory.map((m) => `### ${m.role}\n${m.content}`).join("\n\n"),
       ].join("\n");
       let summary = "";
-      let destination = this.client.getSelectedDestination();
+      let destination = selectedDestination;
       if (destination.hosted) {
         destination = Object.freeze({ ...destination, hostedRequestId: `hosted-${randomUUID()}` });
-        await this.conversations.appendAtTip(conversationId, "assistant", [{ type: "status", text: `hosted:v1 ${JSON.stringify({ requestId: destination.hostedRequestId, destination: destination.hosted, state: "pending" })}` }], destination.hostedRequestId!);
+        await this.conversations.appendAtTip(conversationId, "assistant", [{ type: "status", text: `hosted:v1 ${JSON.stringify({ requestId: destination.hostedRequestId, destination: destination.hosted, state: "pending" })}` }], destination.hostedRequestId!, undefined, check);
+        check();
       }
-      for await (const event of this.client.chatStream(this.store.state.selectedModel || "auto", [{ role: "user", content: prompt }], conversationId, this.store.state.processingPolicy, abort.signal, destination)) {
-        if (event.type === "hosted_receipt") await this.conversations.appendAtTip(conversationId, "assistant", [{ type: "status", text: `hosted:v1 ${JSON.stringify({ ...JSON.parse(event.data), destination: destination.hosted })}` }], `${destination.hostedRequestId}:result`).catch(() => undefined);
+      check();
+      for await (const event of this.client.chatStream(model, [{ role: "user", content: prompt }], conversationId, processingPolicy, abort.signal, destination)) {
+        check();
+        if (event.type === "hosted_receipt") await this.conversations.appendAtTip(conversationId, "assistant", [{ type: "status", text: `hosted:v1 ${JSON.stringify({ ...JSON.parse(event.data), destination: destination.hosted })}` }], `${destination.hostedRequestId}:result`, undefined, check).catch(() => undefined);
+        check();
         if (event.type === "text") summary += event.data;
         if (event.type === "done") break;
       }
+      check();
       summary = sanitizeForDisplay(summary).trim();
       if (!summary) { this.notice("warning", t('o_modelo_n_o_produziu_resumo_n')); return; }
       const through = covered.at(-1)!;
-      await this.conversations.appendCompaction(conversationId, { throughMessageId: through.id, covered: covered.length, summary, model: this.store.state.selectedModel || "auto" });
+      check();
+      await this.conversations.appendCompaction(conversationId, { throughMessageId: through.id, covered: covered.length, summary, model }, check);
+      check();
       void history;
       await this.reloadMessages(conversationId);
+      check();
       this.notice("info", t("ctl_compacted", { count: covered.length }));
     } catch (error) {
-      if (!abort.signal.aborted) this.notice("error", operationText("compact_failed", { reason: errorText(error) }));
+      if (!abort.signal.aborted && errorCode(error) !== "context_changed") this.notice("error", operationText("compact_failed", { reason: errorText(error) }));
     } finally {
-      if (this.turnAbort === abort) this.turnAbort = null;
-      this.view.busy = null;
+      if (this.turnAbort === abort) { this.turnAbort = null; this.view.busy = null; }
       this.changed();
     }
   }
@@ -2898,6 +3116,342 @@ export class TuiController extends EventEmitter {
     }
   }
 
+  // ─── turn undo/redo (canonical reversal) ────────────────────────────────
+
+  /** Reconcile the exact durable command; an unavailable journal never becomes a new write or a branch rollback. */
+  private async settleTurnRestore(conversationId: string, record: TurnRestoreRecord, abort: AbortController, reviewed = false, observeOnly = false): Promise<WorkspaceView> {
+    const binding = this.view.binding;
+    const revision = this.store.conversationRevision;
+    const check = () => {
+      if (this.disposed || this.store.state.activeConversation?.id !== conversationId || this.store.conversationRevision !== revision
+        || !binding || this.view.binding !== binding || binding.projectId !== record.projectId || binding.rootBindingId !== record.rootBindingId
+        || this.store.state.storagePolicy === "temporary") throw new Error("context_changed");
+    };
+    const observe = async () => {
+      // This read also reconciles an aborted/lost response. Do not reuse the cancelled write signal.
+      const view = await this.workspace.refreshPlan(record.projectId, record.planId);
+      check();
+      if (view.plan?.digest !== record.planDigest || view.run && (view.run.planId !== record.planId || view.run.requestId !== record.runRequestId)) throw new Error("run_identity_changed");
+      return view;
+    };
+    let view = await observe();
+    if (!view.run) {
+      if (observeOnly) throw new Error("turn_restore_recovery_pending");
+      abort.signal.throwIfAborted();
+      if (!this.sign) throw new Error("consent_signature_invalid");
+      // After a restart, preparation without an admitted run gets a fresh review of the same sealed plan.
+      if (!reviewed && !await this.features.confirm(t(record.kind === "undo" ? "undo_turn_title" : "redo_turn_title"),
+        [t(record.kind === "undo" ? "undo_turn_body" : "redo_turn_body"), ...record.paths, record.planId, record.planDigest].join("\n"), abort.signal)) throw new Error("user_declined");
+    }
+    const intention = await this.conversations.recoverTurnRestoreIntention(conversationId, record, check);
+    let runId = view.run?.id;
+    const cancel = () => { if (runId) void this.workspace.cancelRun(record.projectId, runId).catch(() => undefined); };
+    abort.signal.addEventListener("abort", cancel, { once: true });
+    try {
+      if (!view.run) {
+        try {
+          view = await this.workspace.approveAndStart(record.projectId, { planId: record.planId, planDigest: record.planDigest, requestId: record.runRequestId }, this.sign!, abort.signal,
+            { conversationId, requestId: intention.requestId }, async () => {
+              check();
+              const current = await this.conversations.getConversation(conversationId);
+              if (current.activeBranchId !== (record.kind === "undo" ? record.originalBranchId : record.rewindBranchId)) throw new Error("context_changed");
+              check();
+            });
+        } catch (error) {
+          // Approval/complete may already have committed. Only its exact journal identity decides what happened.
+          view = await observe();
+          if (!view.run) throw error;
+        }
+        runId = view.run?.id;
+      }
+      if (!runId) throw new WorkspaceServiceError("run_not_admitted");
+      check();
+      const link = { ...intention, runId, projectId: record.projectId, modelId: `turn-${record.kind}`, state: "unknown" };
+      try { await this.conversations.linkRun(conversationId, link); }
+      catch (error) {
+        // A lost link ACK is success only if the canonical reader confirms that exact association.
+        const linked = (await this.conversations.runs(conversationId)).find(item => item.messageId === intention.messageId && item.runId === runId && item.projectId === record.projectId && item.requestId === intention.requestId);
+        if (!linked) throw error;
+      }
+      if (!isSettledStatus(view.run!.status)) {
+        if (abort.signal.aborted) { cancel(); view = await observe(); }
+        else {
+          try { view = await this.workspace.waitForSettledRun(record.projectId, { planId: record.planId, requestId: record.runRequestId, runId }, { signal: abort.signal }); }
+          catch { view = await observe(); }
+        }
+      }
+      check();
+      if (view.run?.id !== runId || view.run.requestId !== record.runRequestId) throw new Error("run_identity_changed");
+      return view;
+    } finally { abort.signal.removeEventListener("abort", cancel); }
+  }
+
+  /** The branch changes only after confirmed file writes and a recoverable link. A lost branch ACK is read back. */
+  private async finishTurnRestore(conversationId: string, record: TurnRestoreRecord): Promise<void> {
+    const binding = this.view.binding;
+    const check = () => {
+      if (this.disposed || this.store.state.activeConversation?.id !== conversationId || this.view.binding !== binding
+        || binding?.projectId !== record.projectId || binding.rootBindingId !== record.rootBindingId) throw new Error("context_changed");
+    };
+    check();
+    const target = record.kind === "undo" ? record.rewindBranchId : record.originalBranchId;
+    const { conversation: current, thread } = await this.conversations.thread(conversationId);
+    check();
+    if (![record.originalBranchId, record.rewindBranchId].includes(current.activeBranchId)) throw new Error("context_changed");
+    if (current.activeBranchId !== target) {
+      const intention = thread.findIndex(message => message.id === record.messageId);
+      if (intention < 0 || thread.slice(intention + 1).some(message => !message.clientMessageId.startsWith("tui_turn_"))) throw new Error("conversation_conflict");
+      try { await this.conversations.switchBranch(conversationId, target, { revision: current.revision, activeBranchId: current.activeBranchId }); }
+      catch (error) { if ((await this.conversations.getConversation(conversationId)).activeBranchId !== target) throw error; }
+    }
+    check();
+    await this.conversations.completeTurnRestore(conversationId, record, check);
+  }
+
+  /**
+   * Undoes one conversation turn: every recorded project write of the turn is
+   * reversed by one reviewed W5 plan, then the conversation continues from the
+   * message before the turn on a new branch (the original branch is kept).
+   * Returns the turn's prompt text so the caller can restore it, or null when
+   * nothing was undone. Commands or other external effects are never claimed
+   * as reversed.
+   */
+  async undoTurn(messageId: string): Promise<{ prompt: string } | null> {
+    const conversationId = this.store.state.activeConversation?.id;
+    if (!conversationId) { this.notice("info", t("nenhuma_conversa_ativa_para_ra")); return null; }
+    const binding = this.view.binding;
+    if (this.busy || this.effectAbort || this.view.busy) { this.notice("warning", t("undo_turn_busy")); return null; }
+    const abort = new AbortController();
+    this.effectAbort = abort;
+    const itemId = `undo-${randomUUID()}`;
+    this.view.busy = operationText("restoring");
+    this.changed();
+    try {
+      const recovery = await this.conversations.turnRestoreRecords(conversationId);
+      const current = await this.conversations.getConversation(conversationId);
+      const pending = [...recovery.operations].reverse().find(record => record.kind === "undo" && record.turnMessageId === messageId
+        && [record.originalBranchId, record.rewindBranchId].includes(current.activeBranchId) && !recovery.completed.has(record.clientMessageId));
+      let retired: TurnRestoreRecord | null = null;
+      if (pending) {
+        const settled = await this.settleTurnRestore(conversationId, pending, abort);
+        const receipt = settled.receipts.find(item => item.runId === settled.run?.id && item.status === "succeeded" && item.capabilityId === "workspace.project.write");
+        if (settled.run?.status === "succeeded" && receipt) {
+          await this.finishTurnRestore(conversationId, pending);
+          await this.reloadMessages(conversationId);
+          this.notice("info", t("undo_turn_done_files", { count: pending.paths.length }), t("undo_turn_redo_hint"));
+          return { prompt: await this.conversations.turnRestorePrompt(conversationId, pending.turnMessageId) };
+        }
+        if (!settled.run || !isSettledStatus(settled.run.status) || settled.run.status === "succeeded") throw new Error("turn_restore_recovery_pending");
+        if (settled.run.status === "needs_attention") {
+          // The old sealed write must no longer be resumable before a replacement can be prepared.
+          await this.workspace.cancelRun(pending.projectId, settled.run.id);
+          const closed = await this.workspace.refreshPlan(pending.projectId, pending.planId);
+          if (closed.run?.id !== settled.run.id || closed.run.requestId !== pending.runRequestId || closed.run.status !== "cancelled") throw new Error("turn_restore_recovery_pending");
+        }
+        retired = pending;
+      }
+      const plan = await this.conversations.rewindBranchId(conversationId, messageId);
+      const first = plan.turn[0];
+      if (!first || first.role !== "user" || first.clientMessageId.startsWith("tui_")) { this.notice("warning", t("undo_turn_not_user")); return null; }
+      const prompt = first.parts.filter((part) => part.type === "text" && typeof part.text === "string").map((part) => part.text as string).join("");
+      // Previous inverse runs are bookkeeping, not new forward effects of the original turn.
+      const turnIds = new Set(plan.turn.filter(message => !message.clientMessageId.startsWith("tui_turn_")).map((m) => m.id));
+      let linked = binding ? (await this.conversations.runs(conversationId)).filter((run) => turnIds.has(run.messageId) && run.projectId === binding.projectId) : [];
+      for (const message of plan.turn) {
+        if (message.role !== "user" || !message.clientMessageId.startsWith("tui_") || message.clientMessageId.startsWith("tui_turn_") || message.clientMessageId.startsWith("tui_steer_") || linked.some(run => run.messageId === message.id)) continue;
+        // Missing forward links are not proof of no writes. Reconnect only a native intention whose plan identity
+        // was persisted before admission; the core verifies its exact outbox -> plan -> run association.
+        if (!binding || !message.clientMessageId.startsWith("tui_native_")) throw new Error("turn_restore_recovery_pending");
+        const planId = message.clientMessageId.slice("tui_native_".length);
+        const observed = await this.workspace.refreshPlan(binding.projectId, planId, abort.signal);
+        if (!observed.run || observed.run.planId !== planId) throw new Error("turn_restore_recovery_pending");
+        const intention = await this.conversations.recoverNativeIntention(conversationId, message, this.captureContext());
+        const link = { ...intention, runId: observed.run.id, projectId: binding.projectId, modelId: "turn-recovery", state: "unknown" };
+        try { await this.conversations.linkRun(conversationId, link); }
+        catch (error) {
+          const confirmed = (await this.conversations.runs(conversationId)).some(run => run.messageId === intention.messageId && run.runId === observed.run!.id && run.requestId === intention.requestId && run.projectId === binding.projectId);
+          if (!confirmed) throw error;
+        }
+        if (!isSettledStatus(observed.run.status)) await this.workspace.waitForSettledRun(binding.projectId, { planId, runId: observed.run.id, requestId: observed.run.requestId }, { signal: abort.signal });
+        linked = (await this.conversations.runs(conversationId)).filter(run => turnIds.has(run.messageId) && run.projectId === binding.projectId);
+      }
+      const order = new Map(plan.turn.map((m, index) => [m.id, index]));
+      const runIds = [...new Set(linked.sort((a, b) => (order.get(a.messageId) ?? 0) - (order.get(b.messageId) ?? 0)).map((run) => run.runId))];
+      let reversed: string[] = [];
+      let otherEffects: Array<{ capabilityId: string }> = [];
+      if (runIds.length && binding) {
+        if (!this.sign) { this.notice("error", t("restaura_o_indispon_vel_pasta_")); return null; }
+        this.view.busy = operationText("restoring");
+        this.changed();
+        const view = await this.workspace.refresh(binding.projectId, abort.signal);
+        const prepared = await this.workspace.prepareTurnRestore(binding.projectId, binding.rootBindingId, { runIds, expectedRevision: view.revision }, abort.signal);
+        otherEffects = prepared.otherEffects;
+        if (prepared.kind === "refused") {
+          if (prepared.code === "turn_restore_conflict") { this.notice("error", t("undo_turn_conflict", { paths: prepared.conflicts.join(", ") })); return null; }
+          if (prepared.code !== "turn_restore_nothing_to_restore") { this.notice("error", t("undo_turn_failed", { reason: prepared.code })); return null; }
+        } else {
+          // The new canonical preparation checked every expected hash; only now may a settled failed inverse be retired.
+          if (retired) await this.conversations.retireTurnRestore(conversationId, retired, this.captureContext());
+          const files = prepared.files.map((file) => ({ path: file.path, ...diffStats(diffLines(splitLines(file.before ?? ""), splitLines(file.after ?? ""))), status: file.action }));
+          const effects = [...new Set(otherEffects.map((e) => e.capabilityId))];
+          const body = [t("undo_turn_body"), "", ...prepared.files.map((file) => `${t(`undo_turn_action_${file.action}`)} ${file.path}`), ...(effects.length ? ["", t("undo_turn_other_effects", { effects: effects.join(", ") })] : [])].join("\n");
+          if (!await this.features.confirm(t("undo_turn_title"), body, abort.signal)) { this.notice("info", t("undo_turn_declined")); return null; }
+          const requestId = randomUUID();
+          const planned = prepared.view.plan!;
+          const intention = await this.conversations.appendTurnRestoreIntention(conversationId, t("undo_turn_intention", { paths: prepared.files.map((f) => f.path).join(", ") }), `${TURN_UNDO_PREFIX}${plan.branchId}`,
+            { kind: "undo", projectId: binding.projectId, rootBindingId: binding.rootBindingId, originalBranchId: plan.originalBranchId, rewindBranchId: plan.branchId,
+              turnMessageId: messageId, planId: planned.id, planDigest: planned.digest, runRequestId: requestId, paths: prepared.files.map(file => file.path) }, this.captureContext());
+          this.upsertLive({ kind: "change", id: itemId, title: t("undo_turn_title"), files, state: "applying" });
+          const settled = await this.settleTurnRestore(conversationId, intention, abort, true);
+          const receipt = settled.receipts.find((r) => r.runId === settled.run?.id && r.status === "succeeded" && r.capabilityId === "workspace.project.write");
+          if (settled.run?.status !== "succeeded" || !receipt) {
+            // Files were not confirmed reversed: the conversation stays on the original branch.
+            this.upsertLive({ kind: "change", id: itemId, title: t("undo_turn_title"), files, state: "failed", hint: t("ctl_restore_unconfirmed", { status: settled.run?.status ?? "?" }) });
+            await this.reloadMessages(conversationId);
+            return null;
+          }
+          this.upsertLive({ kind: "change", id: itemId, title: t("undo_turn_title"), files, state: "applied", receipt: receipt.id });
+          reversed = prepared.files.map((file) => file.path);
+          await this.finishTurnRestore(conversationId, intention);
+        }
+      }
+      // A genuine no-write turn also owns an exact tip/revision; a concurrent prompt must never be hidden.
+      if (!reversed.length) {
+        const { conversation: current, thread } = await this.conversations.thread(conversationId);
+        if (current.activeBranchId !== plan.originalBranchId || thread.at(-1)?.id !== plan.turn.at(-1)?.id) throw new Error("conversation_conflict");
+        const marker = await this.conversations.appendMessage(conversationId, "assistant", [{ type: "status", text: "turn-undo:v1" }], thread.at(-1)?.id ?? null, current.revision, `${TURN_UNDO_PREFIX}${plan.branchId}`);
+        try { await this.conversations.switchBranch(conversationId, plan.branchId, { revision: marker.revision, activeBranchId: current.activeBranchId }); }
+        catch (error) { if ((await this.conversations.getConversation(conversationId)).activeBranchId !== plan.branchId) throw error; }
+      }
+      this.live = this.live.filter((live) => live.item.id === itemId);
+      await this.reloadMessages(conversationId);
+      const effects = [...new Set(otherEffects.map((e) => e.capabilityId))];
+      this.notice("info", reversed.length ? t("undo_turn_done_files", { count: reversed.length }) : t("undo_turn_done_conversation"), effects.length ? t("undo_turn_other_effects", { effects: effects.join(", ") }) : t("undo_turn_redo_hint"));
+      return { prompt };
+    } catch (error) {
+      this.upsertLive({ kind: "change", id: itemId, title: t("undo_turn_title"), files: [], state: "failed", hint: t("undo_turn_failed", { reason: errorText(error) }) });
+      return null;
+    } finally {
+      if (this.effectAbort === abort) this.effectAbort = null;
+      this.view.busy = null;
+      this.changed();
+    }
+  }
+
+  /** Redoes the turn undone by the active rewind branch: reverses the undo's writes and returns to the original branch. */
+  async redoTurn(): Promise<boolean> {
+    const conversationId = this.store.state.activeConversation?.id;
+    if (!conversationId) { this.notice("info", t("nenhuma_conversa_ativa_para_ra")); return false; }
+    if (this.busy || this.effectAbort || this.view.busy) { this.notice("warning", t("undo_turn_busy")); return false; }
+    const abort = new AbortController();
+    this.effectAbort = abort;
+    const itemId = `redo-${randomUUID()}`;
+    this.view.busy = operationText("restoring");
+    this.changed();
+    try {
+      let { conversation, thread } = await this.conversations.thread(conversationId);
+      let recovery = await this.conversations.turnRestoreRecords(conversationId);
+      // A writing undo whose link/branch ACK was lost must be reconciled before it can be redone.
+      const pendingUndo = [...recovery.operations].reverse().find(item => item.kind === "undo" && item.originalBranchId === conversation.activeBranchId && !recovery.completed.has(item.clientMessageId));
+      if (pendingUndo) {
+        const settled = await this.settleTurnRestore(conversationId, pendingUndo, abort, false, true);
+        if (settled.run?.status !== "succeeded" || !settled.receipts.some(item => item.runId === settled.run?.id && item.status === "succeeded" && item.capabilityId === "workspace.project.write")) throw new Error("turn_restore_recovery_pending");
+        await this.finishTurnRestore(conversationId, pendingUndo);
+        ({ conversation, thread } = await this.conversations.thread(conversationId));
+        recovery = await this.conversations.turnRestoreRecords(conversationId);
+      }
+      const record = await this.conversations.turnUndoFor(conversationId, conversation.activeBranchId);
+      if (!record) {
+        // The final branch switch may have committed without its ACK/completion marker.
+        const pending = [...recovery.operations].reverse().find(item => item.kind === "redo" && item.originalBranchId === conversation.activeBranchId && !recovery.completed.has(item.clientMessageId));
+        if (!pending) { this.notice("info", t("redo_turn_none")); return false; }
+        const settled = await this.settleTurnRestore(conversationId, pending, abort, false, true);
+        if (settled.run?.status !== "succeeded" || !settled.receipts.some(item => item.runId === settled.run?.id && item.status === "succeeded" && item.capabilityId === "workspace.project.write")) throw new Error("turn_restore_recovery_pending");
+        await this.finishTurnRestore(conversationId, pending);
+        await this.reloadMessages(conversationId);
+        this.notice("info", t("redo_turn_done"));
+        return true;
+      }
+      // Messages added after the undo belong to this branch; redo would discard their context.
+      const forkPoint = /^fork_([0-9a-f-]{36})_/.exec(conversation.activeBranchId)?.[1] ?? null;
+      const ordinary = thread.filter(message => !message.clientMessageId.startsWith("tui_turn_"));
+      if (ordinary.length && ordinary.at(-1)!.id !== forkPoint) { this.notice("warning", t("redo_turn_diverged")); return false; }
+      let undoRun = (await this.conversations.runs(conversationId)).find((run) => run.messageId === record.messageId);
+      if (!undoRun && !record.noWrites) {
+        const operation = recovery.operations.find(item => item.messageId === record.messageId && item.kind === "undo");
+        if (!operation) throw new Error("turn_restore_recovery_pending");
+        const settled = await this.settleTurnRestore(conversationId, operation, abort, false, true);
+        if (settled.run?.status !== "succeeded" || !settled.receipts.some(item => item.runId === settled.run?.id && item.status === "succeeded" && item.capabilityId === "workspace.project.write")) throw new Error("turn_restore_recovery_pending");
+        undoRun = (await this.conversations.runs(conversationId)).find(item => item.messageId === record.messageId);
+        if (!undoRun) throw new Error("turn_restore_recovery_pending");
+      }
+      const binding = this.view.binding;
+      if (undoRun) {
+        if (!binding || binding.projectId !== undoRun.projectId || !this.sign) { this.notice("error", t("restaura_o_indispon_vel_pasta_")); return false; }
+        this.view.busy = operationText("restoring");
+        this.changed();
+        const pending = [...recovery.operations].reverse().find(item => item.kind === "redo" && item.rewindBranchId === conversation.activeBranchId && !recovery.completed.has(item.clientMessageId));
+        let retired: TurnRestoreRecord | null = null;
+        if (pending) {
+          const settled = await this.settleTurnRestore(conversationId, pending, abort);
+          if (settled.run?.status === "succeeded" && settled.receipts.some(item => item.runId === settled.run?.id && item.status === "succeeded" && item.capabilityId === "workspace.project.write")) {
+            await this.finishTurnRestore(conversationId, pending);
+            await this.reloadMessages(conversationId);
+            this.notice("info", t("redo_turn_done"));
+            return true;
+          }
+          if (!settled.run || !isSettledStatus(settled.run.status) || settled.run.status === "succeeded") throw new Error("turn_restore_recovery_pending");
+          if (settled.run.status === "needs_attention") {
+            await this.workspace.cancelRun(pending.projectId, settled.run.id);
+            const closed = await this.workspace.refreshPlan(pending.projectId, pending.planId);
+            if (closed.run?.id !== settled.run.id || closed.run.requestId !== pending.runRequestId || closed.run.status !== "cancelled") throw new Error("turn_restore_recovery_pending");
+          }
+          retired = pending;
+        }
+        const view = await this.workspace.refresh(binding.projectId, abort.signal);
+        const prepared = await this.workspace.prepareTurnRestore(binding.projectId, binding.rootBindingId, { runIds: [undoRun.runId], expectedRevision: view.revision }, abort.signal);
+        if (prepared.kind === "refused") { this.notice("error", prepared.code === "turn_restore_conflict" ? t("undo_turn_conflict", { paths: prepared.conflicts.join(", ") }) : t("undo_turn_failed", { reason: prepared.code })); return false; }
+        if (retired) await this.conversations.retireTurnRestore(conversationId, retired, this.captureContext());
+        const files = prepared.files.map((file) => ({ path: file.path, ...diffStats(diffLines(splitLines(file.before ?? ""), splitLines(file.after ?? ""))), status: file.action }));
+        const body = [t("redo_turn_body"), "", ...prepared.files.map((file) => `${t(`undo_turn_action_${file.action}`)} ${file.path}`)].join("\n");
+        if (!await this.features.confirm(t("redo_turn_title"), body, abort.signal)) { this.notice("info", t("undo_turn_declined")); return false; }
+        const requestId = randomUUID();
+        const planned = prepared.view.plan!;
+        const intention = await this.conversations.appendTurnRestoreIntention(conversationId, t("redo_turn_intention", { paths: prepared.files.map((f) => f.path).join(", ") }), `tui_turn_redo_${requestId}`,
+          { kind: "redo", projectId: binding.projectId, rootBindingId: binding.rootBindingId, originalBranchId: record.branchId, rewindBranchId: conversation.activeBranchId,
+            turnMessageId: record.messageId, planId: planned.id, planDigest: planned.digest, runRequestId: requestId, paths: prepared.files.map(file => file.path) }, this.captureContext());
+        this.upsertLive({ kind: "change", id: itemId, title: t("redo_turn_title"), files, state: "applying" });
+        const settled = await this.settleTurnRestore(conversationId, intention, abort, true);
+        const receipt = settled.receipts.find((r) => r.runId === settled.run?.id && r.status === "succeeded" && r.capabilityId === "workspace.project.write");
+        if (settled.run?.status !== "succeeded" || !receipt) {
+          // The rewind branch and durable command stay available until the exact outcome is confirmed.
+          this.upsertLive({ kind: "change", id: itemId, title: t("redo_turn_title"), files, state: "failed", hint: t("ctl_restore_unconfirmed", { status: settled.run?.status ?? "?" }) });
+          await this.reloadMessages(conversationId);
+          return false;
+        }
+        this.upsertLive({ kind: "change", id: itemId, title: t("redo_turn_title"), files, state: "applied", receipt: receipt.id });
+        await this.finishTurnRestore(conversationId, intention);
+      } else {
+        const latest = await this.conversations.thread(conversationId);
+        const ordinary = latest.thread.filter(message => !message.clientMessageId.startsWith("tui_turn_"));
+        if (latest.conversation.activeBranchId !== conversation.activeBranchId || ordinary.length && ordinary.at(-1)!.id !== forkPoint) throw new Error("conversation_conflict");
+        try { await this.conversations.switchBranch(conversationId, record.branchId, { revision: latest.conversation.revision, activeBranchId: latest.conversation.activeBranchId }); }
+        catch (error) { if ((await this.conversations.getConversation(conversationId)).activeBranchId !== record.branchId) throw error; }
+      }
+      this.live = this.live.filter((live) => live.item.id === itemId);
+      await this.reloadMessages(conversationId);
+      this.notice("info", t("redo_turn_done"));
+      return true;
+    } catch (error) {
+      this.upsertLive({ kind: "change", id: itemId, title: t("redo_turn_title"), files: [], state: "failed", hint: t("undo_turn_failed", { reason: errorText(error) }) });
+      return false;
+    } finally {
+      if (this.effectAbort === abort) this.effectAbort = null;
+      this.view.busy = null;
+      this.changed();
+    }
+  }
+
   setAttention(next: BoundRunRequest | null): void { this.view.attention = next; this.changed(); }
 
   /**
@@ -3052,29 +3606,27 @@ export function errorText(error: unknown): string {
 }
 type DurableToolResult = NonNullable<Message["toolResults"]>[number];
 // Cache only classification, never parsed payloads; released conversations remain collectible.
-const toolResultFailures = new WeakMap<DurableToolResult, { output: string; failed: boolean }>();
+const toolResultStatuses = new WeakMap<DurableToolResult, { output: string; status: CompletedToolStatus }>();
 
-function toolResultFailed(result: DurableToolResult): boolean {
-  const known = toolResultFailures.get(result);
-  if (known && known.output === result.output) return known.failed;
-  let failed = false;
-  try {
-    const output = JSON.parse(result.output);
-    failed = output?.status === "not_completed" || typeof output?.error === "string";
-  } catch { /* legacy textual result */ }
-  toolResultFailures.set(result, { output: result.output, failed });
-  return failed;
+function durableToolResultStatus(result: DurableToolResult): CompletedToolStatus {
+  const known = toolResultStatuses.get(result);
+  if (known && known.output === result.output) return known.status;
+  const status = toolResultStatus(result.output);
+  toolResultStatuses.set(result, { output: result.output, status });
+  return status;
 }
 
 /** Maps one canonical message to transcript items (text, tool calls/results, compaction). */
 export function messageItems(message: Message): TranscriptItem[] {
+  // The rewind marker of an undone turn carries no conversation content.
+  if (message.role === "assistant" && !message.content && message.clientMessageId?.startsWith(TURN_UNDO_PREFIX)) return [];
   if (message.compaction) return [{ kind: "compaction", id: message.id, covered: message.compaction.covered, summary: message.content }];
   if (message.role === "user") {
     const intention = message.clientMessageId?.startsWith("tui_change_") || message.clientMessageId?.startsWith("tui_verify_");
     return [{ kind: "user", id: message.id, text: message.content, ...(message.attachments?.length ? { attachments: message.attachments } : {}), ...(message.mediaAttachments?.length ? { mediaAttachments: message.mediaAttachments } : {}), ...(intention ? { steer: false } : {}) }];
   }
   if (message.role === "tool") {
-    return (message.toolResults ?? []).map((result) => ({ kind: "tool" as const, id: `${message.id}:${result.callId}`, name: operationText("tool_result"), summary: result.callId, status: "done" as const, detail: result.output, receipt: result.receiptId || null }));
+    return (message.toolResults ?? []).map((result) => ({ kind: "tool" as const, id: `${message.id}:${result.callId}`, name: operationText("tool_result"), summary: result.callId, status: durableToolResultStatus(result), detail: result.output, receipt: result.receiptId || null }));
   }
   const items: TranscriptItem[] = [];
   if (message.content || !message.toolCalls?.length) {
@@ -3082,8 +3634,11 @@ export function messageItems(message: Message): TranscriptItem[] {
   }
   for (const call of message.toolCalls ?? []) {
     const result = message.toolResults?.find(result => result.callId === call.id);
-    const failed = result ? toolResultFailed(result) : false;
-    items.push({ kind: "tool", id: `${message.id}:${call.id}`, name: call.name, summary: call.arguments.length > 120 ? `${call.arguments.slice(0, 120)}…` : call.arguments, status: failed ? "error" : result || call.result ? "done" : "pending", ...(result ? { detail: result.output, receipt: result.receiptId || null } : {}) });
+    const status = result ? durableToolResultStatus(result) : call.result !== undefined ? toolResultStatus(call.result) : "pending";
+    items.push({ kind: "tool", id: `${message.id}:${call.id}`, name: call.name, summary: call.arguments.length > 120 ? `${call.arguments.slice(0, 120)}…` : call.arguments, status, ...(result ? { detail: result.output, receipt: result.receiptId || null } : call.result !== undefined ? { detail: call.result } : {}) });
   }
+  // One measurement per canonical message: it travels with the message's first item.
+  const first = items[0];
+  if (message.usage && first && (first.kind === "assistant" || first.kind === "tool")) first.usage = message.usage;
   return items;
 }

@@ -36,9 +36,19 @@ async function mount(virtualize: boolean, count = 2000, current = "model-0000") 
   const app = await testRender(() => <Harness />, { width: 100, height: 34, kittyKeyboard: true })
   const settle = async () => { await app.flush(); await Bun.sleep(5); await app.renderOnce(); await app.flush(); await app.renderOnce() }
   await settle()
+  const dialogReadyUntil = Date.now() + 2000
+  while (!dialog) {
+    if (Date.now() >= dialogReadyUntil) throw new Error("dialog windowing fixture did not mount its dialog provider")
+    await settle()
+  }
   dialog.replace(() => <DialogSelect title="Models" virtualize={virtualize} current={current} options={options}
     ref={value => { picker = value }} onSelect={option => { selected = option.value; dialog.clear() }} />)
   await settle()
+  const pickerReadyUntil = Date.now() + 2000
+  while (!picker) {
+    if (Date.now() >= pickerReadyUntil) throw new Error("dialog windowing fixture did not mount its model picker")
+    await settle()
+  }
   const findScroll = (node: any): ScrollBoxRenderable | undefined => {
     if (node instanceof ScrollBoxRenderable) return node
     for (const child of node.getChildren()) { const match = findScroll(child); if (match) return match }

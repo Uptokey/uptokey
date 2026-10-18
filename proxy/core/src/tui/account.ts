@@ -3,8 +3,9 @@ import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import type { AccountPublicSession, AccountPublicUsage } from "../account-login-protocol.ts";
 import type { TuiClient, TuiAccountAvailable, TuiAccountChallenge, TuiAccountLogin, TuiAccountRequest } from "./client.ts";
+import type { AccountPlanState } from "./account-plan.ts";
 
-type AccountTransport = Pick<TuiClient, "getAccountSession" | "getAvailableAccounts" | "getAccountRequests" | "requestAccountAccess" | "consumeAccountAccess" | "approveAccountRequest" | "adoptAccount" | "unlinkAccount" | "startAccountLogin" | "signOutAccount" | "getAccountUsage">;
+type AccountTransport = Pick<TuiClient, "getAccountSession" | "getAvailableAccounts" | "getAccountRequests" | "requestAccountAccess" | "consumeAccountAccess" | "approveAccountRequest" | "adoptAccount" | "unlinkAccount" | "startAccountLogin" | "signOutAccount" | "getAccountUsage"> & Partial<Pick<TuiClient, "getAccountPlan">>;
 export interface AccountView {
   session: AccountPublicSession | null;
   available: TuiAccountAvailable | null;
@@ -12,6 +13,7 @@ export interface AccountView {
   challenge: TuiAccountChallenge | null;
   login: Exclude<TuiAccountLogin, { session: AccountPublicSession }> | null;
   usage: AccountPublicUsage | null;
+  plan: AccountPlanState;
   busy: boolean;
   error: string | null;
 }
@@ -33,12 +35,16 @@ export function openAccountLoginUrl(value: string): boolean {
 }
 
 export class TuiAccount extends EventEmitter {
-  readonly view: AccountView = { session: null, available: null, requests: [], challenge: null, login: null, usage: null, busy: false, error: null };
+  readonly view: AccountView = { session: null, available: null, requests: [], challenge: null, login: null, usage: null, plan: { state: "unknown" }, busy: false, error: null };
   private generation = 0;
   private disposed = false;
   private abort: AbortController | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private refreshing: Promise<void> | null = null;
+  private planAbort: AbortController | null = null;
+  private planRead: Promise<void> | null = null;
+  private planBinding: string | null = null;
+  private planRequested = false;
   private readonly now: () => number;
   private readonly interval: number;
   private readonly client: AccountTransport;
@@ -46,6 +52,13 @@ export class TuiAccount extends EventEmitter {
     super(); this.client = client; this.now = options.now ?? Date.now; this.interval = options.intervalMs ?? 2500;
   }
   private change() { if (!this.disposed) this.emit("change"); }
+  private binding(available = this.view.available): string | null {
+    return this.view.session?.authenticated && available?.currentAccountRef ? `${available.currentAccountRef}:${available.revision}` : null;
+  }
+  private clearPlan(): void {
+    this.planAbort?.abort(); this.planAbort = null; this.planRead = null; this.planBinding = null;
+    this.view.plan = { state: "unknown" };
+  }
   private error(error: unknown) {
     const code = error instanceof Error ? error.message : "";
     return /^account_[a-z_]{1,80}$/.test(code) ? code : "account_service_unavailable";
@@ -68,18 +81,50 @@ export class TuiAccount extends EventEmitter {
     if (signal.aborted || this.disposed) return;
     this.view.session = session;
     this.view.usage = session.authenticated ? this.view.usage : null;
+    if (!session.authenticated) this.clearPlan();
     if (session.authenticated) { this.view.challenge = null; this.view.login = null; }
     const available = await this.client.getAvailableAccounts(signal);
     if (signal.aborted || this.disposed) return;
     this.view.available = available;
+    if (this.planBinding && this.binding() !== this.planBinding) { this.clearPlan(); this.view.usage = null; }
     const requests = available.currentOwned ? await this.client.getAccountRequests(signal) : [];
-    if (!signal.aborted && !this.disposed) this.view.requests = requests;
+    if (!signal.aborted && !this.disposed) {
+      this.view.requests = requests;
+      if (this.planRequested && session.authenticated) void this.loadPlan();
+    }
   }
   refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
     const promise = this.perform(signal => this.read(signal));
     this.refreshing = promise;
     void promise.finally(() => { if (this.refreshing === promise) this.refreshing = null; });
+    return promise;
+  }
+  /** Only account UI/usage asks for this bounded read; startup and model selection never wait on it. */
+  loadPlan(): Promise<void> {
+    this.planRequested = true;
+    if (this.planRead) return this.planRead;
+    const binding = this.binding();
+    if (this.disposed || !binding) return Promise.resolve();
+    if (!this.client.getAccountPlan) { this.view.plan = { state: "unavailable" }; this.change(); return Promise.resolve(); }
+    const abort = new AbortController(); this.planAbort = abort; this.planBinding = binding;
+    const current = () => !this.disposed && !abort.signal.aborted && this.planAbort === abort && this.binding() === binding;
+    this.view.plan = { state: "loading" }; this.change();
+    const promise = (async () => {
+      try {
+        const before = await this.client.getAvailableAccounts(abort.signal);
+        if (!current()) return;
+        if (this.binding(before) !== binding) { this.clearPlan(); this.change(); return; }
+        const value = await this.client.getAccountPlan!(abort.signal);
+        if (!current()) return;
+        const after = await this.client.getAvailableAccounts(abort.signal);
+        if (!current()) return;
+        if (this.binding(after) !== binding) { this.clearPlan(); this.change(); return; }
+        this.view.plan = { state: "observed", value };
+      } catch { if (current()) this.view.plan = { state: "unavailable" }; }
+      finally { if (current()) { this.planRead = null; this.change(); } }
+    })();
+    this.planRead = promise;
     return promise;
   }
   requestAccess(): Promise<void> {
@@ -91,6 +136,7 @@ export class TuiAccount extends EventEmitter {
   }
   adopt(accountRef: string): Promise<void> {
     return this.perform(async signal => {
+      this.clearPlan();
       const revision = this.view.available?.revision;
       if (revision === undefined) throw new Error("account_share_conflict");
       const result = await this.client.adoptAccount(accountRef, revision, signal);
@@ -113,6 +159,7 @@ export class TuiAccount extends EventEmitter {
   }
   disconnect(): Promise<void> {
     return this.perform(async signal => {
+      this.clearPlan();
       const revision = this.view.available?.revision;
       if (revision === undefined) throw new Error("account_share_conflict");
       const result = await this.client.unlinkAccount(revision, signal);
@@ -122,18 +169,23 @@ export class TuiAccount extends EventEmitter {
   }
   logout(): Promise<void> {
     return this.perform(async signal => {
+      this.clearPlan();
       const result = await this.client.signOutAccount(signal);
       if (signal.aborted || this.disposed) return;
       this.view.session = result; this.view.usage = null; await this.read(signal);
     });
   }
   loadUsage(): Promise<void> {
+    void this.loadPlan();
     return this.perform(async signal => { const result = await this.client.getAccountUsage(signal); if (!signal.aborted && !this.disposed) this.view.usage = result; });
   }
   cancelPending(): void {
+    this.planRequested = false;
+    this.clearPlan();
     ++this.generation; this.abort?.abort(); clearTimeout(this.timer);
     this.view.challenge = null; this.view.login = null; this.view.busy = false; this.view.error = null; this.change();
   }
+  cancelPlanRead(): void { this.planRequested = false; if (this.planRead) { this.clearPlan(); this.change(); } }
   private schedule(): void {
     clearTimeout(this.timer);
     if (this.disposed || this.view.busy || !this.view.challenge && !this.view.login) return;
@@ -160,5 +212,5 @@ export class TuiAccount extends EventEmitter {
       }
     });
   }
-  dispose(): void { this.disposed = true; ++this.generation; this.abort?.abort(); clearTimeout(this.timer); this.removeAllListeners(); }
+  dispose(): void { this.disposed = true; this.clearPlan(); ++this.generation; this.abort?.abort(); clearTimeout(this.timer); this.removeAllListeners(); }
 }

@@ -20,6 +20,9 @@ export interface Conversation {
   processingPolicy?: ProcessingPolicy;
 }
 
+/** Live reasoning kept for display: the most recent characters only (a long chain stays readable and bounded). */
+export const REASONING_KEEP = 16_000;
+
 export interface StreamToolCall {
   id: string;
   name: string;
@@ -27,6 +30,17 @@ export interface StreamToolCall {
   status: "running" | "done" | "error" | "approved" | "rejected";
   result?: string;
   startedAt: number;
+}
+
+export interface MessageUsage {
+  state: "reported" | "estimated" | "unavailable";
+  input?: number;
+  output?: number;
+  cached?: number;
+  reasoning?: number;
+  /** Micro-USD; absent when the cost is not known. */
+  costMicros?: number;
+  costBasis?: "charged" | "estimate" | "local" | "free";
 }
 
 export interface Message {
@@ -41,6 +55,11 @@ export interface Message {
   cost?: number;
   /** Token counts for this message. */
   tokens?: { input: number; output: number };
+  /**
+   * Measurement recorded with this assistant message. `unavailable` is an explicit
+   * absence of data, never zero; cost basis says whether it was charged, estimated or free.
+   */
+  usage?: MessageUsage;
   /** Idempotency key recorded by the core (identifies TUI intentions on reload). */
   clientMessageId?: string;
   /** Relative paths of context references persisted with the message. */
@@ -67,7 +86,11 @@ export interface TuiState {
   activeConversation: Conversation | null;
   messages: Message[];
   streamBuffer: string;
-  /** Tool calls accumulating during the current streaming turn. */
+  /** Reasoning the model streams during the current turn (live only; the tail is kept within REASONING_KEEP). */
+  streamReasoning: string;
+  /** When the live reasoning started and when the answer or a tool call followed it (ms since epoch). */
+  streamReasoningTime: { start: number; end?: number } | null;
+  /** Tool calls of the current turn: running until their result arrives, then done, error or neutral rejected. */
   streamingToolCalls: StreamToolCall[];
   draft: string;
   models: Array<{ id: string; owned_by?: string }>;
@@ -97,6 +120,8 @@ export function createInitialState(): TuiState {
     activeConversation: null,
     messages: [],
     streamBuffer: "",
+    streamReasoning: "",
+    streamReasoningTime: null,
     streamingToolCalls: [],
     draft: "",
     models: [],
@@ -122,8 +147,9 @@ export type StateEvent =
   | { type: "messages_loaded"; messages: Message[] }
   | { type: "message_added"; message: Message }
   | { type: "stream_delta"; text: string }
+  | { type: "stream_reasoning"; text: string }
   | { type: "stream_tool_call"; toolCall: StreamToolCall }
-  | { type: "stream_tool_result"; id: string; result: string; isError: boolean }
+  | { type: "stream_tool_result"; id: string; result: string; isError: boolean; status?: "done" | "error" | "rejected" }
   | { type: "stream_complete"; messageId: string; content?: string; cost?: number; tokens?: { input: number; output: number } }
   | { type: "stream_interrupted"; messageId: string; phase: "failed" | "cancelled" }
   | { type: "draft_changed"; draft: string }
@@ -161,6 +187,8 @@ export class TuiStore extends EventEmitter {
         this.state.turn = event.turn;
         if (event.turn === "idle" || event.turn === "cancelled" || event.turn === "failed") {
           this.state.streamingToolCalls = [];
+          this.state.streamReasoning = "";
+          this.state.streamReasoningTime = null;
         }
         break;
       case "storage_policy_changed":
@@ -182,6 +210,8 @@ export class TuiStore extends EventEmitter {
         this.state.estimatedTokens = 0;
         this.state.messages = [];
         this.state.streamBuffer = "";
+        this.state.streamReasoning = "";
+        this.state.streamReasoningTime = null;
         this.state.streamingToolCalls = [];
         break;
       case "messages_loaded":
@@ -199,25 +229,31 @@ export class TuiStore extends EventEmitter {
         break;
       case "stream_delta":
         this.state.streamBuffer += event.text;
+        if (this.state.streamReasoningTime && this.state.streamReasoningTime.end === undefined) this.state.streamReasoningTime = { ...this.state.streamReasoningTime, end: Date.now() };
         break;
-      case "stream_tool_call":
-        this.state.streamingToolCalls = [
-          ...this.state.streamingToolCalls.filter((t) => t.id !== event.toolCall.id),
-          event.toolCall,
-        ];
-        this.state.turn = "waiting_tool";
-        break;
-      case "stream_tool_result": {
-        this.state.streamingToolCalls = this.state.streamingToolCalls.map((t) =>
-          t.id === event.id
-            ? { ...t, status: event.isError ? "error" : "done", result: event.result }
-            : t
-        );
-        // Check if all tool calls are resolved
-        const allDone = this.state.streamingToolCalls.every((t) => t.status !== "running");
-        if (allDone) this.state.turn = "streaming";
+      case "stream_reasoning": {
+        // A new reasoning segment after an answer or tool call (next round) reopens the timer.
+        if (!this.state.streamReasoningTime || this.state.streamReasoningTime.end !== undefined) this.state.streamReasoningTime = { start: this.state.streamReasoningTime?.start ?? Date.now() };
+        const next = this.state.streamReasoning + event.text;
+        this.state.streamReasoning = next.length > REASONING_KEEP ? next.slice(-REASONING_KEEP) : next;
         break;
       }
+      // Tool activity is shown live; the turn stays "streaming" (busy checks and undo guards key on it).
+      case "stream_tool_call": {
+        if (this.state.streamReasoningTime && this.state.streamReasoningTime.end === undefined) this.state.streamReasoningTime = { ...this.state.streamReasoningTime, end: Date.now() };
+        const index = this.state.streamingToolCalls.findIndex((t) => t.id === event.toolCall.id);
+        this.state.streamingToolCalls = index < 0
+          ? [...this.state.streamingToolCalls, event.toolCall]
+          : this.state.streamingToolCalls.map((t, position) => position === index ? { ...t, ...event.toolCall, startedAt: t.startedAt } : t);
+        break;
+      }
+      case "stream_tool_result":
+        this.state.streamingToolCalls = this.state.streamingToolCalls.map((t) =>
+          t.id === event.id
+            ? { ...t, status: event.status ?? (event.isError ? "error" : "done"), result: event.result }
+            : t
+        );
+        break;
       case "stream_interrupted": {
         if (this.state.streamBuffer) {
           this.state.messages = [...this.state.messages, {
@@ -226,6 +262,8 @@ export class TuiStore extends EventEmitter {
           }];
         }
         this.state.streamBuffer = "";
+        this.state.streamReasoning = "";
+        this.state.streamReasoningTime = null;
         this.state.streamingToolCalls = [];
         this.state.turn = event.phase;
         break;
@@ -248,6 +286,8 @@ export class TuiStore extends EventEmitter {
         };
         this.state.messages = [...this.state.messages, finalMsg];
         this.state.streamBuffer = "";
+        this.state.streamReasoning = "";
+        this.state.streamReasoningTime = null;
         this.state.streamingToolCalls = [];
         this.state.turn = "completed";
         if (event.cost) this.state.sessionCost += event.cost;

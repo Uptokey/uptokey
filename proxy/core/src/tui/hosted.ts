@@ -18,6 +18,8 @@ export interface TuiHostedDestination {
 export interface TuiHostedModel extends TuiHostedDestination {
   readonly contextTokens: number;
   readonly label: string;
+  /** The broker catalog declares that this model relays function tools; tools still execute locally under W5. */
+  readonly toolCalls: boolean;
 }
 // Presentation of existing aliases, shared with the web product vocabulary. This never creates an available model.
 const LABELS: Readonly<Record<string, string>> = {
@@ -53,17 +55,22 @@ export async function loadHostedModels(transport: HostedTransport, accountRef: s
   if (row.executionEnabled !== true) return [];
   return catalog.models.filter(model => model.price.inputMicrosPerMillion === 0 && model.price.outputMicrosPerMillion === 0)
     .map(model => Object.freeze({ ...validateHostedDestination({ accountRef, revision, modelId: model.id,
-      priceVersion: model.price.version, maxOutputTokens: Math.min(model.limits.outputTokens, 4096) }), contextTokens: model.limits.contextTokens, label: LABELS[model.id] ?? model.id }));
+      priceVersion: model.price.version, maxOutputTokens: Math.min(model.limits.outputTokens, 4096) }), contextTokens: model.limits.contextTokens, label: LABELS[model.id] ?? model.id,
+      toolCalls: (model as { toolCalls?: true }).toolCalls === true }));
 }
-export function hostedInput(destination: TuiHostedDestination, requestId: string, messages: ReadonlyArray<{ role: string; content: unknown }>) {
+type HostedDispatch = { role: string; content: unknown; tool_calls?: unknown; tool_call_id?: unknown };
+/** Text and declared tool exchanges only; media parts are refused by the contract, never dropped. */
+export function hostedInput(destination: TuiHostedDestination, requestId: string, messages: ReadonlyArray<HostedDispatch>, tools?: readonly unknown[]) {
   const target = validateHostedDestination(destination);
-  return parseHostedRequest({ requestId, model: target.modelId, messages, expectedPriceVersion: target.priceVersion, maxOutputTokens: target.maxOutputTokens });
+  const wire = messages.map((message) => ({ role: message.role, content: message.content ?? "",
+    ...(message.tool_calls !== undefined ? { tool_calls: message.tool_calls } : {}), ...(message.tool_call_id !== undefined ? { tool_call_id: message.tool_call_id } : {}) }));
+  return parseHostedRequest({ requestId, model: target.modelId, messages: wire, expectedPriceVersion: target.priceVersion, maxOutputTokens: target.maxOutputTokens, ...(tools?.length ? { tools } : {}) });
 }
 export async function sendHosted(transport: HostedTransport, destination: TuiHostedDestination, requestId: string,
-  messages: ReadonlyArray<{ role: string; content: unknown }>, processingPolicy?: string, signal?: AbortSignal) {
+  messages: ReadonlyArray<HostedDispatch>, processingPolicy?: string, signal?: AbortSignal, tools?: readonly unknown[]) {
   if (processingPolicy !== "external_allowed") throw Error("local_processing_denied");
   const target = validateHostedDestination(destination);
-  const payload = hostedInput(target, requestId, messages);
+  const payload = hostedInput(target, requestId, messages, tools);
   signal?.throwIfAborted();
   // Exactly one POST. A lost reply keeps the same durable request ID; it is never retried as another inference.
   let result: ReturnType<typeof parseHostedClientResult> = { status: "outcome_unknown", requestId };

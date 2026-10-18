@@ -8,6 +8,7 @@ import { healStreamingMarkdown } from "./markdown-heal.ts";
 import { chromeText } from "./ui-chrome.ts";
 import { getLang } from "./i18n.ts";
 import { graphemes, graphemeWidth, stringWidth, truncateCells } from "./unicode.ts";
+import type { MessageUsage } from "./state.ts";
 
 export type Tone = "user" | "assistant" | "muted" | "accent" | "success" | "warning" | "danger" | "code" | "heading" | "link" | "plain";
 
@@ -35,8 +36,10 @@ export type ToolStatus = "pending" | "running" | "done" | "error" | "rejected";
 
 export type TranscriptItem =
   | { kind: "user"; id: string; text: string; attachments?: string[]; mediaAttachments?: Array<{ kind: "image" | "audio"; artifactId: string; name?: string }>; steer?: boolean; time?: string }
-  | { kind: "assistant"; id: string; text: string; streaming?: boolean; interrupted?: "failed" | "cancelled"; label?: string }
-  | { kind: "tool"; id: string; name: string; summary: string; status: ToolStatus; detail?: string; receipt?: string | null }
+  | { kind: "assistant"; id: string; text: string; streaming?: boolean; interrupted?: "failed" | "cancelled"; label?: string; usage?: MessageUsage }
+  /** The model's reasoning during the turn in progress (live only); `done` once the answer or a tool call follows. */
+  | { kind: "reasoning"; id: string; text: string; done: boolean; startedAt?: number; endedAt?: number }
+  | { kind: "tool"; id: string; name: string; summary: string; status: ToolStatus; detail?: string; receipt?: string | null; usage?: MessageUsage }
   | { kind: "notice"; id: string; level: "info" | "warning" | "error"; text: string; hint?: string }
   | { kind: "change"; id: string; title: string; files: Array<{ path: string; added: number; removed: number; status?: string }>; state: "proposed" | "reviewing" | "approved" | "applying" | "applied" | "conflict" | "rejected" | "failed"; receipt?: string | null; hint?: string }
   | { kind: "run"; id: string; title: string; state: "preparing" | "awaiting_approval" | "running" | "passed" | "failed" | "blocked" | "cancelled"; detail?: string; receipt?: string | null }
@@ -221,10 +224,17 @@ export function renderItem(item: TranscriptItem, options: RenderOptions): Line[]
       lines.forEach((l, i) => { l.itemId = item.id; l.itemLineIndex = i; });
       return lines;
     }
+    case "reasoning": {
+      const lines: Line[] = [{ spans: [span(`◇ ${chromeText("reasoning")}`, "muted", { bold: true }), ...(item.done ? [] : [span(`  ${chromeText("responding")}`, "muted", { dim: true })])] }];
+      for (const line of sanitizeForDisplay(item.text).trim().split("\n")) lines.push(...wrapSpans([span(line, "muted", { dim: true })], width, [span("  ")], [span("  ")]));
+      lines.forEach((l, i) => { l.itemId = item.id; l.itemLineIndex = i; });
+      return lines;
+    }
     case "tool": {
       const [glyph, tone] = STATUS_GLYPH[item.status];
       const receipt = item.receipt ? `  ${chromeText("receipt", { id: item.receipt.slice(0, 8) })}` : "";
-      const head = wrapSpans([span(`${glyph} `, tone), span(item.name, "accent", { bold: true }), span(` ${sanitizeForDisplay(item.summary)}`), span(receipt, "muted", { dim: true })], width, [span("  ")], [span("    ")]);
+      const outcome = item.status === "rejected" ? ` · ${chromeText("tool_not_run")}` : "";
+      const head = wrapSpans([span(`${glyph} `, tone), span(item.name, "accent", { bold: true }), span(outcome, "muted"), span(` ${sanitizeForDisplay(item.summary)}`), span(receipt, "muted", { dim: true })], width, [span("  ")], [span("    ")]);
       const lines = item.detail ? [...head, ...detailLines(item.detail, options, 4)] : head;
       lines.forEach((l, i) => { l.itemId = item.id; l.itemLineIndex = i; });
       return lines;
@@ -303,6 +313,7 @@ function itemSignature(item: TranscriptItem): string {
   switch (item.kind) {
     case "user": return `${item.text.length}:${item.attachments?.join("|") ?? ""}:${item.steer ? 1 : 0}`;
     case "assistant": return `${item.text.length}:${item.text.slice(-32)}:${item.streaming ? 1 : 0}:${item.interrupted ?? ""}`;
+    case "reasoning": return `${item.text.length}:${item.text.slice(-32)}:${item.done ? 1 : 0}`;
     case "tool": return `${item.status}:${item.summary}:${item.detail?.length ?? 0}:${item.receipt ?? ""}`;
     case "notice": return `${item.level}:${item.text}:${item.hint ?? ""}`;
     case "change": return `${item.state}:${item.receipt ?? ""}:${item.hint ?? ""}:${item.files.map((f) => `${f.path}${f.added}${f.removed}${f.status ?? ""}`).join(",")}`;

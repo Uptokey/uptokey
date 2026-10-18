@@ -6,7 +6,23 @@ export const HOSTED_CLIENT_ERRORS=Object.freeze({account_chat_scope_changed:409,
   hosted_ledger_idempotency_conflict:409,hosted_busy:429,hosted_request_cancelled:408,hosted_admission_invalid_device:400,
   hosted_device_busy:429,hosted_sybil_limit_exceeded:429,hosted_daily_quota_exceeded:429,hosted_sponsorship_inactive:403,
   hosted_sponsorship_daily_exhausted:429,hosted_sponsorship_capacity_exhausted:503,hosted_sponsorship_policy_conflict:409,
-  hosted_sponsorship_idempotency_conflict:409,hosted_provider_request_failed:503});
+  hosted_sponsorship_idempotency_conflict:409,hosted_provider_request_failed:503,hosted_tools_unsupported:400});
+
+const TOOL_NAME=/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/,CALL_ID=/^[A-Za-z0-9_.:-]{1,200}$/;
+/** Tool calls proposed by the model; undefined when absent, null when malformed. */
+export function parseHostedToolCalls(value) {
+  if(value===undefined)return undefined;
+  if(!Array.isArray(value)||value.length<1||value.length>8)return null;
+  const ids=new Set();
+  const calls=[];
+  for(const call of value){
+    if(!call||typeof call!=="object"||Array.isArray(call)||Object.keys(call).some(key=>!["id","name","arguments"].includes(key))||
+      typeof call.id!=="string"||!CALL_ID.test(call.id)||ids.has(call.id)||typeof call.name!=="string"||!TOOL_NAME.test(call.name)||
+      typeof call.arguments!=="string"||call.arguments.length>65_536)return null;
+    ids.add(call.id);calls.push({id:call.id,name:call.name,arguments:call.arguments});
+  }
+  return calls;
+}
 
 /** Only confirmed, bounded responses may become completed results or known rejections. */
 export function parseHostedClientResult(value,httpStatus,requestId) {
@@ -20,8 +36,10 @@ export function parseHostedClientResult(value,httpStatus,requestId) {
     value.currency!=="USD"||!safeCount(value.chargedMicros,1e12)||typeof value.priceVersion!=="string"||!/^[A-Za-z0-9._-]{1,80}$/.test(value.priceVersion)||
     !safeCount(value.usage?.inputTokens,1e9)||!safeCount(value.usage?.outputTokens,1e9)||
     (value.usage.cachedInputTokens!==undefined&&!safeCount(value.usage.cachedInputTokens,value.usage.inputTokens))||
-    (value.finishReason!==undefined&&!["stop","length"].includes(value.finishReason)))return unknown;
+    (value.finishReason!==undefined&&!["stop","length","tool_calls"].includes(value.finishReason)))return unknown;
+  const toolCalls=parseHostedToolCalls(value.toolCalls);
+  if(toolCalls===null||(value.finishReason==="tool_calls")!==(toolCalls!==undefined))return unknown;
   return {status:"completed",requestId,content:value.content,currency:"USD",chargedMicros:value.chargedMicros,priceVersion:value.priceVersion,
     usage:{inputTokens:value.usage.inputTokens,outputTokens:value.usage.outputTokens,...(value.usage.cachedInputTokens!==undefined?{cachedInputTokens:value.usage.cachedInputTokens}:{})},
-    ...(value.finishReason!==undefined?{finishReason:value.finishReason}:{})};
+    ...(value.finishReason!==undefined?{finishReason:value.finishReason}:{}),...(toolCalls?{toolCalls}:{})};
 }

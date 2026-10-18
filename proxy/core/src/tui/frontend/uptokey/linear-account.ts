@@ -1,17 +1,10 @@
 import type { TuiAccount } from "../../account.ts"
-import { accountText, accountErrorText, type AccountTextKey } from "../../account-ui.ts"
+import { accountText } from "../../account-ui.ts"
+import { accountPlanPresentation, accountViewSummary } from "../../account-plan.ts"
 import { getLang } from "../../i18n.ts"
 
 export function accountSummary(account: TuiAccount): string {
-  const view = account.view
-  if (view.error) return accountErrorText(view.error)
-  if (view.challenge) return accountText("waiting", { code: view.challenge.userCode })
-  if (view.login) return accountText("browser", { code: view.login.userCode })
-  const session = view.session
-  if (!session) return accountText("loading")
-  if (!session.configured) return accountText("unavailable")
-  if (!session.authenticated) return accountText("signed_out")
-  return `${session.profile?.displayName ?? session.profile?.email ?? accountText("connected")}${session.profile?.plan ? ` · ${accountText(session.profile.plan as AccountTextKey)}` : ""}`
+  return accountViewSummary(account.view)
 }
 
 /** The screen-reader presentation uses the same account consumer and explicit approval as the fullscreen menu. */
@@ -20,7 +13,12 @@ export async function runLinearAccount(account: TuiAccount, ui: {
   choose: <T>(rows: readonly T[], label: (value: T) => string) => Promise<T | undefined>
 }): Promise<void> {
   await account.refresh()
+  await account.loadPlan()
   ui.say(`${accountText("title")}\n${accountSummary(account)}`)
+  if (account.view.session?.authenticated) {
+    for (const line of accountPlanPresentation(account.view.plan).details) ui.say(line)
+    ui.say(accountText("local_byok_free"))
+  }
   const actions: Array<{ label: string; run: () => Promise<void> | void }> = []
   const view = account.view
   if (view.challenge || view.login) actions.push({ label: accountText("cancel"), run: () => account.cancelPending() })
@@ -46,7 +44,7 @@ export async function runLinearAccount(account: TuiAccount, ui: {
       actions.push({ label: accountText("sign_out"), run: () => account.logout() })
     } else actions.push({ label: accountText("disconnect"), run: () => account.disconnect() })
   }
-  actions.push({ label: accountText("refresh"), run: () => account.refresh() })
+  actions.push({ label: accountText("refresh"), run: async () => { await account.refresh(); await account.loadPlan() } })
   if (view.error) actions.push({ label: accountText("details"), run: () => ui.say(view.error!) })
   const selected = await ui.choose(actions, item => item.label)
   if (selected) { await selected.run(); ui.say(accountSummary(account)) }

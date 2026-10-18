@@ -74,7 +74,7 @@ export interface ProjectDirectoryPage {
   readonly nextOffset: number | null;
 }
 
-export type ProjectPreflightStatus = 'create' | 'replace' | 'unchanged' | 'conflict' | 'missing' | 'blocked';
+export type ProjectPreflightStatus = 'create' | 'replace' | 'delete' | 'unchanged' | 'conflict' | 'missing' | 'blocked';
 
 export interface ProjectPreflightEntry {
   readonly path: string;
@@ -501,6 +501,16 @@ export class ProjectWriteService {
         } else {
           status = 'replace';
         }
+      } else if (op.type === 'delete') {
+        if (!exists || baseSha256 === null) {
+          status = 'missing';
+          issues.push({ path: op.path, code: 'target_missing' });
+        } else if (baseSha256 !== op.expectedSha256) {
+          status = 'conflict';
+          issues.push({ path: op.path, code: 'base_hash_mismatch' });
+        } else {
+          status = 'delete';
+        }
       } else if (op.type === 'move') {
         const fromAbs = this.rootService.resolveVerifiedPath(rootBindingId, op.fromPath!);
         if (!fs.existsSync(fromAbs)) {
@@ -599,6 +609,10 @@ export class ProjectWriteService {
             if (target.kind === 'file' && target.sha256 === desiredHash) state = 'already_present';
             else if (op.type === 'create' && target.kind === 'missing' || op.type === 'replace' && target.kind === 'file' && target.sha256 === op.expectedSha256) state = 'pending';
           }
+        } else if (op.type === 'delete') {
+          // Interrupted deletion: gone is complete; still the bound bytes is retryable.
+          if (target.kind === 'missing') state = 'already_present';
+          else if (target.kind === 'file' && target.sha256 === op.expectedSha256) state = 'pending';
         } else if (op.type === 'patch_lines') {
           // Patching the present file might apply an insertion twice. Always derive
           // the intended output from the hash-verified original preimage instead.
@@ -792,6 +806,20 @@ export class ProjectWriteService {
         }
         this.verifyOutputDigest(op, op.type === 'patch_lines' ? this.patchContent(op, fs.readFileSync(targetAbs, 'utf8')) : op.content ?? '');
         this.savePreimage(preimagesDir, op.path, targetAbs);
+      } else if (op.type === 'delete') {
+        if (!fs.existsSync(targetAbs) || !fs.lstatSync(targetAbs).isFile()) {
+          throw new ProjectWriteError(`Target file to delete does not exist: ${op.path}`, 404, { missingPath: op.path });
+        }
+        const currentSha = this.computeFileSha256(targetAbs);
+        if (currentSha !== op.expectedSha256) {
+          throw new ProjectWriteError(`Conflict: current hash does not match expected for ${op.path}`, 409, {
+            conflictPath: op.path,
+            expectedSha256: op.expectedSha256,
+            currentSha256: currentSha
+          });
+        }
+        // Deleted bytes stay recoverable through the same preimage store.
+        this.savePreimage(preimagesDir, op.path, targetAbs);
       } else if (op.type === 'move') {
         if (!op.fromPath) throw new ProjectWriteError('Move operation missing fromPath', 400);
         const fromAbs = this.rootService.resolveVerifiedPath(rootBindingId, op.fromPath);
@@ -914,6 +942,10 @@ export class ProjectWriteService {
           }
           observedHashes[op.path] = observedSha;
           intent.confirmedPaths.push(op.path);
+        } else if (op.type === 'delete') {
+          if (!fs.existsSync(targetAbs) || this.computeFileSha256(targetAbs) !== op.expectedSha256) throw new ProjectWriteError('base_hash_mismatch', 409);
+          fs.unlinkSync(targetAbs);
+          intent.confirmedPaths.push(op.path);
         } else if (op.type === 'move' && op.fromPath) {
           const fromAbs = this.rootService.resolveVerifiedPath(rootBindingId, op.fromPath);
           if (op.expectedSha256 && this.computeFileSha256(fromAbs) !== op.expectedSha256) throw new ProjectWriteError('base_hash_mismatch', 409);
@@ -1005,6 +1037,20 @@ export class ProjectWriteService {
         // Save preimage
         this.verifyOutputDigest(op, op.type === 'patch_lines' ? this.patchContent(op, fs.readFileSync(targetAbs, 'utf8')) : op.content ?? '');
         this.savePreimage(preimagesDir, op.path, targetAbs);
+      } else if (op.type === 'delete') {
+        if (!fs.existsSync(targetAbs) || !fs.lstatSync(targetAbs).isFile()) {
+          throw new ProjectWriteError(`Target file to delete does not exist: ${op.path}`, 404, { missingPath: op.path });
+        }
+        const currentSha = this.computeFileSha256(targetAbs);
+        if (currentSha !== op.expectedSha256) {
+          throw new ProjectWriteError(`Conflict: current hash does not match expected for ${op.path}`, 409, {
+            conflictPath: op.path,
+            expectedSha256: op.expectedSha256,
+            currentSha256: currentSha
+          });
+        }
+        // Deleted bytes stay recoverable through the same preimage store.
+        this.savePreimage(preimagesDir, op.path, targetAbs);
       } else if (op.type === 'move') {
         if (!op.fromPath) throw new ProjectWriteError('Move operation missing fromPath', 400);
         const fromAbs = this.rootService.resolveVerifiedPath(rootBindingId, op.fromPath);
@@ -1088,6 +1134,10 @@ export class ProjectWriteService {
         }
         observedHashes[op.path] = observedSha;
         intent.confirmedPaths.push(op.path);
+      } else if (op.type === 'delete') {
+        if (!fs.existsSync(targetAbs) || this.computeFileSha256(targetAbs) !== op.expectedSha256) throw new ProjectWriteError('base_hash_mismatch', 409);
+        fs.unlinkSync(targetAbs);
+        intent.confirmedPaths.push(op.path);
       } else if (op.type === 'move' && op.fromPath) {
         const fromAbs = this.rootService.resolveVerifiedPath(rootBindingId, op.fromPath);
         if (op.expectedSha256 && this.computeFileSha256(fromAbs) !== op.expectedSha256) throw new ProjectWriteError('base_hash_mismatch', 409);
@@ -1149,6 +1199,16 @@ export class ProjectWriteService {
         fs.writeFileSync(tempPath, bytes, { flag: 'wx' });
         fs.renameSync(tempPath, targetAbs);
         restoredPaths.push(op.path);
+      } else if (op.type === 'delete' && op.expectedSha256) {
+        // Reverse a deletion only while the path is still absent.
+        const targetAbs = this.rootService.resolveVerifiedPath(intent.rootBindingId, op.path);
+        if (fs.existsSync(targetAbs)) { skippedPaths.push(op.path); continue; }
+        let bytes: Buffer;
+        try { bytes = this.readPreimage(intent.preimagesDir, op.path, op.expectedSha256); }
+        catch { skippedPaths.push(op.path); continue; }
+        fs.mkdirSync(path.dirname(targetAbs), { recursive: true });
+        fs.writeFileSync(targetAbs, bytes, { flag: 'wx' });
+        restoredPaths.push(op.path);
       } else if (op.type === 'create') {
         const targetAbs = this.rootService.resolveVerifiedPath(intent.rootBindingId, op.path);
         if (fs.existsSync(targetAbs)) {
@@ -1204,6 +1264,95 @@ export class ProjectWriteService {
     };
     const changeSet = parseProjectChangeSet({ ...raw, digest: computeProjectChangeSetDigest(raw) });
     return { changeSet, before: current.text, after: text };
+  }
+
+  /**
+   * Preparation only. Reverses every completed write of one conversation turn as
+   * a single reviewed changeset: each path returns to its state before the
+   * turn's first write, only while its bytes still equal the turn's last write.
+   * Edits made after the turn are conflicts and are never overwritten.
+   */
+  prepareTurnRestore(projectId: string, rootBindingId: string, intents: readonly StoredWriteIntent[]) {
+    const root = this.rootService.getVerifiedRoot(rootBindingId);
+    if (root.binding.projectId !== projectId) throw new ProjectWriteError('project_root_project_mismatch', 403);
+    if (root.binding.accessMode !== 'read_write') throw new ProjectWriteError('project_root_read_only', 403);
+    type State = { kind: 'missing' } | { kind: 'file'; sha256: string; preimage?: { operationId: string; path: string } };
+    const first = new Map<string, State>();
+    const last = new Map<string, State>();
+    const directories: string[] = [];
+    const touch = (target: string, before: State, after: State) => {
+      if (!first.has(target)) first.set(target, before);
+      last.set(target, after);
+    };
+    for (const intent of intents) {
+      if (intent.rootBindingId !== rootBindingId) throw new ProjectWriteError('restore_operation_mismatch', 409);
+      if (intent.status !== 'completed' || !intent.receipt) throw new ProjectWriteError('turn_restore_write_incomplete', 409, { operationId: intent.operationId });
+      if (!/^op-[A-Za-z0-9_-]+$/.test(intent.operationId)) throw new ProjectWriteError('restore_operation_invalid', 400);
+      const observed = intent.receipt.observedHashes;
+      for (const op of intent.changeSet.operations) {
+        const preimage = { operationId: intent.operationId, path: op.path };
+        if (op.type === 'mkdir') { directories.push(op.path); continue; }
+        if (op.type === 'create') touch(op.path, { kind: 'missing' }, { kind: 'file', sha256: observed[op.path] ?? op.newSha256! });
+        else if (op.type === 'replace' || op.type === 'patch_lines') {
+          const after = observed[op.path] ?? op.newSha256;
+          if (!after) throw new ProjectWriteError('restore_preimage_unavailable', 409, { path: op.path });
+          touch(op.path, { kind: 'file', sha256: op.expectedSha256!, preimage }, { kind: 'file', sha256: after });
+        } else if (op.type === 'delete') touch(op.path, { kind: 'file', sha256: op.expectedSha256!, preimage }, { kind: 'missing' });
+        else if (op.type === 'move' && op.fromPath) {
+          const moved = observed[op.path] ?? op.newSha256 ?? op.expectedSha256;
+          if (!moved) throw new ProjectWriteError('restore_preimage_unavailable', 409, { path: op.fromPath });
+          touch(op.fromPath, { kind: 'file', sha256: moved, preimage: { operationId: intent.operationId, path: op.fromPath } }, { kind: 'missing' });
+          touch(op.path, { kind: 'missing' }, { kind: 'file', sha256: moved });
+        }
+      }
+    }
+    const same = (a: State, b: State) => a.kind === b.kind && (a.kind === 'missing' || a.sha256 === (b as { sha256: string }).sha256);
+    const conflicts: { path: string; expected: string | null; current: string | null }[] = [];
+    const operations: ProjectChangeSet['operations'][number][] = [];
+    const files: { path: string; action: 'restore' | 'delete' | 'recreate'; before: string | null; after: string | null }[] = [];
+    for (const [target, before] of first) {
+      const after = last.get(target)!;
+      if (same(before, after)) continue;
+      const absolute = this.rootService.resolveVerifiedPath(rootBindingId, target);
+      const present = fs.existsSync(absolute) && fs.lstatSync(absolute).isFile();
+      const currentSha = present ? this.computeFileSha256(absolute) : null;
+      const expected = after.kind === 'file' ? after.sha256 : null;
+      if (currentSha !== expected || (!present && fs.existsSync(absolute))) { conflicts.push({ path: target, expected, current: currentSha }); continue; }
+      const original = (): string => {
+        if (before.kind !== 'file' || !before.preimage) throw new ProjectWriteError('restore_preimage_unavailable', 409, { path: target });
+        const directory = path.join(this.stagingBaseDir, 'preimages', rootBindingId, before.preimage.operationId);
+        const bytes = this.readPreimage(directory, before.preimage.path, before.sha256);
+        const text = bytes.toString('utf8');
+        if (bytes.includes(0) || !Buffer.from(text, 'utf8').equals(bytes) || createHash('sha256').update(bytes).digest('hex') !== before.sha256) {
+          throw new ProjectWriteError('restore_preimage_integrity', 409, { path: target });
+        }
+        return text;
+      };
+      const currentText = present ? fs.readFileSync(absolute, 'utf8') : null;
+      if (before.kind === 'missing') {
+        operations.push({ type: 'delete', path: target, expectedSha256: currentSha! });
+        files.push({ path: target, action: 'delete', before: currentText, after: null });
+      } else if (!present) {
+        const text = original();
+        operations.push({ type: 'create', path: target, newSha256: before.sha256, content: text });
+        files.push({ path: target, action: 'recreate', before: null, after: text });
+      } else {
+        const text = original();
+        operations.push({ type: 'replace', path: target, expectedSha256: currentSha!, newSha256: before.sha256, content: text });
+        files.push({ path: target, action: 'restore', before: currentText, after: text });
+      }
+    }
+    if (conflicts.length) throw new ProjectWriteError('turn_restore_conflict', 409, { conflicts });
+    if (!operations.length) throw new ProjectWriteError('turn_restore_nothing_to_restore', 409);
+    // Deletions first so a moved file can return to a path freed in the same changeset.
+    operations.sort((a, b) => Number(b.type === 'delete') - Number(a.type === 'delete'));
+    const manifest = this.generateSnapshotManifest(projectId, rootBindingId);
+    const raw = {
+      id: `turn-restore-${randomUUID()}`, taskId: `turn-restore-${randomUUID()}`, revision: 1,
+      baseManifestDigest: manifest.snapshotDigest, operations
+    };
+    const changeSet = parseProjectChangeSet({ ...raw, digest: computeProjectChangeSetDigest(raw) });
+    return { changeSet, files, directories: [...new Set(directories)] };
   }
 
   private preimageName(relativePath: string): string {

@@ -29,7 +29,8 @@ export function projectHostedCatalog(value) {
       !limits.inputTokens || !limits.outputTokens ||
       (rawModel.inputReservation === "full_context"
         ? limits.inputTokens !== limits.contextTokens || limits.outputTokens >= limits.contextTokens || rawModel.contextValidation !== "provider"
-        : rawModel.inputReservation !== undefined || rawModel.contextValidation !== undefined || limits.inputTokens + limits.outputTokens > limits.contextTokens)) {
+        : rawModel.inputReservation !== undefined || rawModel.contextValidation !== undefined || limits.inputTokens + limits.outputTokens > limits.contextTokens) ||
+      (rawModel.toolCalls !== undefined && rawModel.toolCalls !== true)) {
       throw new Error("hosted_catalog_invalid");
     }
     ids.add(id);
@@ -39,6 +40,7 @@ export function projectHostedCatalog(value) {
         outputMicrosPerMillion: price.outputMicrosPerMillion, ...(cached !== undefined ? {cachedInputMicrosPerMillion: cached} : {})},
       limits: {inputTokens: limits.inputTokens, outputTokens: limits.outputTokens, contextTokens: limits.contextTokens},
       ...(rawModel.inputReservation === "full_context" ? {inputReservation: "full_context", contextValidation: "provider"} : {}),
+      ...(rawModel.toolCalls === true ? {toolCalls: true} : {}),
     };
   });
   return {models, transport: "json", admissionRequired: true,

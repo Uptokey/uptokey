@@ -45,6 +45,18 @@ export const STRINGS = {
     "zh-CN": "Enter 继续 · Esc 返回",
     ar: "Enter للمتابعة · Esc للرجوع",
   },
+  secret_get_key: {
+    "pt-BR": "Ainda sem chave? Obtenha em {url}",
+    en: "No key yet? Get one at {url}",
+    es: "¿Sin clave? Obtén una en {url}",
+    fr: "Pas encore de clé ? Obtenez-en une sur {url}",
+    de: "Noch kein Schlüssel? Hier erhältlich: {url}",
+    it: "Nessuna chiave? Ottienila su {url}",
+    ja: "キーが未取得なら {url} で取得できます",
+    ko: "키가 없나요? {url} 에서 발급받으세요",
+    "zh-CN": "还没有密钥？请在 {url} 获取",
+    ar: "ليس لديك مفتاح؟ احصل عليه من {url}",
+  },
   connect_pick_provider: {
     "pt-BR": "Conectar um provedor",
     en: "Connect a provider",

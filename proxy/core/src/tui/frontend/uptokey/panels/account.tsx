@@ -5,7 +5,8 @@ import { useTheme } from "../../vendor/opencode-tui/context/theme"
 import { getBackend } from "../backend/registry.ts"
 import { TextView } from "../dialogs/text-view.tsx"
 import { useControllerTick } from "./use-controller.ts"
-import { accountText, accountErrorText, type AccountTextKey } from "../../../account-ui.ts"
+import { accountText } from "../../../account-ui.ts"
+import { accountPlanPresentation, accountViewSummary, loadAccountPlanForView } from "../../../account-plan.ts"
 import { getLang } from "../../../i18n.ts"
 import type { TuiAccountRequest } from "../../../client.ts"
 import { useBindings } from "../../vendor/opencode-tui/keymap"
@@ -14,25 +15,17 @@ import { useBindings } from "../../vendor/opencode-tui/keymap"
 export function AccountPanel() {
   const account = getBackend().controller.account
   const dialog = useDialog(), { theme } = useTheme(), tick = useControllerTick()
-  onMount(() => { void account.refresh() })
+  const lifetime = new AbortController()
+  onMount(() => { void loadAccountPlanForView(account, lifetime.signal) })
   const state = createMemo(() => { tick(); return { ...account.view } })
   const pending = () => { tick(); return Boolean(account.view.challenge || account.view.login || account.view.busy && !account.view.session?.authenticated) }
   useBindings(() => ({ enabled: pending(), priority: 2, bindings: [
     { key: "escape", desc: accountText("cancel"), cmd: () => { account.cancelPending(); dialog.clear() } },
   ] }))
   // A true modal close cancels pending access; replacing the panel for language/details preserves its state.
-  onCleanup(() => { if (!dialog.stack.length && pending()) account.cancelPending() })
-  const summary = createMemo(() => {
-    const view = state(), session = view.session
-    if (view.challenge) return accountText("waiting", { code: view.challenge.userCode })
-    if (view.login) return accountText("browser", { code: view.login.userCode })
-    if (view.error) return accountErrorText(view.error)
-    if (!session) return accountText("loading")
-    if (!session.configured) return accountText("unavailable")
-    if (!session.authenticated) return accountText("signed_out")
-    const name = session.profile?.displayName ?? session.profile?.email ?? accountText("connected")
-    return `${name}${session.profile?.plan ? ` · ${accountText(session.profile.plan as AccountTextKey)}` : ""}`
-  })
+  onCleanup(() => { lifetime.abort(); if (!dialog.stack.length) { account.cancelPlanRead(); if (pending()) account.cancelPending() } })
+  const summary = createMemo(() => accountViewSummary(state()))
+  const planDetails = createMemo(() => state().session?.authenticated ? [...accountPlanPresentation(state().plan).details, accountText("local_byok_free")] : [])
   function approve(request: TuiAccountRequest, accountRef: string) {
     dialog.replace(() => <DialogSelect title={accountText("approve", { name: request.clientName, code: request.userCode })} titleView={<box flexDirection="column"><text fg={theme.text}>{accountText("approve", { name: request.clientName, code: request.userCode })}</text><text fg={theme.textMuted}>{accountText("consent")}</text></box>} renderFilter={false} options={[
       { title: accountText("allow"), value: "allow", onSelect: async () => { await account.approve(request, accountRef); dialog.replace(() => <AccountPanel />) } },
@@ -60,9 +53,9 @@ export function AccountPanel() {
         rows.push({ title: accountText("sign_out"), value: "sign-out", onSelect: () => { void account.logout() } })
       } else rows.push({ title: accountText("disconnect"), value: "disconnect", onSelect: () => { void account.disconnect() } })
     }
-    rows.push({ title: accountText("refresh"), value: "refresh", onSelect: () => { void account.refresh() } })
+    rows.push({ title: accountText("refresh"), value: "refresh", onSelect: () => { void loadAccountPlanForView(account, lifetime.signal) } })
     if (view.error) rows.push({ title: accountText("details"), value: "details", onSelect: () => dialog.replace(() => <TextView title={accountText("details")} text={view.error!} />) })
     return rows
   })
-  return <DialogSelect title={accountText("title")} titleView={<box flexDirection="column"><text fg={theme.text}>{accountText("title")}</text><text fg={state().session?.authenticated && !state().error ? theme.success : theme.textMuted}>{summary()}</text></box>} renderFilter={false} options={options()} />
+  return <DialogSelect title={accountText("title")} titleView={<box flexDirection="column"><text fg={theme.text}>{accountText("title")}</text><text fg={state().session?.authenticated && !state().error ? theme.success : theme.textMuted}>{summary()}</text>{planDetails().map(line => <text fg={theme.textMuted}>{line}</text>)}</box>} renderFilter={false} options={options()} />
 }

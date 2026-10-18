@@ -35,6 +35,8 @@ await writeFile(join(cwd, "README.md"), "# Projeto de teste\n\nMarcador FIXTURE_
 
 // Path of every chat request the scripted upstream received (J04 checks which provider endpoint a turn reached).
 const chatRequests = [];
+// Chats the deterministic governed lane received (delegate-task journey, --gateway-lane).
+const laneChats = [];
 const typesafeRequests = [];
 const transcriptionRequests = [];
 const LONG = Array.from({ length: 160 }, (_, index) => `LINHA_${String(index + 1).padStart(3, "0")} conteúdo da resposta longa.`).join("\n");
@@ -56,6 +58,11 @@ const upstream = createServer(async (request, response) => {
   const body = JSON.parse(Buffer.concat(chunks).toString() || "{}");
   const last = [...(body.messages ?? [])].reverse().find((message) => message.role === "user");
   const prompt = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
+  if (request.url === "/__lane") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(laneChats));
+    return;
+  }
   if (request.url === "/__requests") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(chatRequests));
@@ -88,7 +95,20 @@ const upstream = createServer(async (request, response) => {
     response.end(JSON.stringify({ model: "jev-latest", answers, usage: { input_tokens: 64, output_tokens: 4 } }));
     return;
   }
-  if (!request.url?.endsWith("/models")) chatRequests.push({ path: request.url, model: body.model ?? null, toolResult: [...(body.messages ?? [])].reverse().find((message) => message.role === "tool")?.content?.toString().slice(0, 600) ?? null });
+  if (!request.url?.endsWith("/models")) chatRequests.push({ path: request.url, model: body.model ?? null, toolResult: [...(body.messages ?? [])].reverse().find((message) => message.role === "tool")?.content?.toString().slice(0, process.argv.includes("--tool-status") ? 12000 : 600) ?? null });
+  // Comparison battery only (opt-in): chat turns go to a real local model instead of the scripted answers; the core,
+  // router, tools and approvals stay the real ones. Nothing changes when the variable is absent.
+  const relay = process.env.UPTOKEY_FIXTURE_RELAY_URL;
+  if (relay && !request.url?.endsWith("/models") && request.url?.includes("/chat/completions")) {
+    const forwarded = await fetch(new URL("/v1/chat/completions", relay), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, model: process.env.UPTOKEY_FIXTURE_RELAY_MODEL ?? body.model }),
+    }).catch((error) => ({ ok: false, status: 502, headers: new Headers(), body: null, error }));
+    response.writeHead(forwarded.status, { "content-type": forwarded.headers.get("content-type") ?? "application/json" });
+    if (forwarded.body) for await (const chunk of forwarded.body) response.write(chunk);
+    response.end();
+    return;
+  }
   if (request.url?.endsWith("/models")) {
     response.writeHead(request.headers.authorization === "Bearer fixture_key_canary_91" ? 200 : 401, { "content-type": "application/json" });
     response.end(JSON.stringify({ data: [{ id: "fixture-coder" }, { id: "fixture-small" }] }));
@@ -106,6 +126,72 @@ const upstream = createServer(async (request, response) => {
   // Only a tool result of the current turn (after the last user message) counts; earlier turns stay history.
   const lastUserIndex = (body.messages ?? []).map((message) => message.role).lastIndexOf("user");
   const toolMessage = (body.messages ?? []).slice(lastUserIndex + 1).reverse().find((message) => message.role === "tool");
+  // Opt-in status journey: real core/W5 plans and reports, with a synthetic OCI boundary below.
+  const statusCase = process.argv.includes("--tool-status") && /STATUS_TOOL_9011 (SUCCESS|DECLINE|BLOCKED|FAILED)/.exec(prompt)?.[1];
+  if (statusCase) {
+    if (!toolMessage) {
+      const call = { index: 0, id: `status-${statusCase}`, type: "function", function: { name: "execute_command", arguments: JSON.stringify({ argv: [statusCase === "BLOCKED" ? "python" : "node", `--tool-status-${statusCase.toLowerCase()}`], profile: statusCase === "BLOCKED" ? "python-app" : "node-app" }) } };
+      response.end(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [call] }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
+    } else {
+      // Keep the completed live tool visible before the canonical assistant commit replaces it.
+      await new Promise(done => setTimeout(done, 2200));
+      send(`STATUS_DONE_${statusCase}`);
+      response.end("\n\ndata: [DONE]\n\n");
+    }
+    return;
+  }
+  // Reasoning journey: the model streams its reasoning (DeepSeek-style reasoning_content and Ollama-style reasoning)
+  // slowly, then reads a file with a tool; after the result it reasons again and answers.
+  if (prompt.includes("PENSE_7744")) {
+    const think = (field, text) => response.write(`data: ${JSON.stringify({ choices: [{ delta: { [field]: text }, finish_reason: null }] })}\n\n`);
+    const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+    if (!toolMessage) {
+      for (const piece of ["Raciocinio RACIOCINIO_A_7744: ", "preciso ler o README ", "antes de responder. "]) { think("reasoning_content", piece); await pause(700); }
+      for (const piece of ["Vou usar a ferramenta ", "RACIOCINIO_B_7744."]) { think("reasoning", piece); await pause(700); }
+      await pause(1500);
+      const call = { index: 0, id: "think-read-1", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "README.md" }) } };
+      response.end(["data: " + JSON.stringify({ choices: [{ delta: { tool_calls: [call] }, finish_reason: "tool_calls" }] }), "", "data: [DONE]", "", ""].join("\n"));
+      return;
+    }
+    think("reasoning", "Li o arquivo RACIOCINIO_C_7744. ");
+    await pause(700);
+    send("Resposta final PENSAMENTO_OK_7744\n");
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 40, completion_tokens: 20, total_tokens: 60, completion_tokens_details: { reasoning_tokens: 12 } } })}\n\ndata: [DONE]\n\n`);
+    return;
+  }
+  // Delegate-task journey: the model delegates two read-only subtasks inside its turn, then integrates their answers.
+  if (prompt.includes("DELEGUE_7766") && !toolMessage && Array.isArray(body.tools) && body.tools.some((tool) => tool.function?.name === "delegate_task")) {
+    const call = { index: 0, id: "delegate-1", type: "function", function: { name: "delegate_task", arguments: JSON.stringify({ objective: "Revisar a soma", subtasks: ["conferir o sinal da soma", "sugerir um teste de regressao"] }) } };
+    response.end(["data: " + JSON.stringify({ choices: [{ delta: { tool_calls: [call] }, finish_reason: "tool_calls" }] }), "", "data: [DONE]", "", ""].join(String.fromCharCode(10)));
+    return;
+  }
+  if (prompt.includes("DELEGUE_7766") && toolMessage) {
+    send("Integrado: os filhos revisaram a soma DELEGATED_7766" + String.fromCharCode(10));
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}` + String.fromCharCode(10, 10) + "data: [DONE]" + String.fromCharCode(10, 10));
+    return;
+  }
+  // Unverified claim journey: one governed edit_file, then an answer that claims success without running anything.
+  if (prompt.includes("AFIRME_7755") && !toolMessage && Array.isArray(body.tools) && body.tools.some((tool) => tool.function?.name === "edit_file")) {
+    const call = { index: 0, id: "claim-edit-1", type: "function", function: { name: "edit_file", arguments: JSON.stringify({ path: "math.js", edits: [{ old_string: "a - b", new_string: "a + b" }] }) } };
+    response.end(["data: " + JSON.stringify({ choices: [{ delta: { tool_calls: [call] }, finish_reason: "tool_calls" }] }), "", "data: [DONE]", "", ""].join("\n"));
+    return;
+  }
+  if (prompt.includes("AFIRME_7755") && toolMessage) {
+    send("Corrigido. Os testes passam agora. CLAIM_7755\n");
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    return;
+  }
+  // Native write for the undo/redo journey: one governed edit_file, then a short confirmation after its result.
+  if (prompt.includes("EDITE_NATIVO") && !toolMessage && Array.isArray(body.tools) && body.tools.some((tool) => tool.function?.name === "edit_file")) {
+    const call = { index: 0, id: "edit-native-1", type: "function", function: { name: "edit_file", arguments: JSON.stringify({ path: "math.js", edits: [{ old_string: "a - b", new_string: "a + b" }] }) } };
+    response.end(["data: " + JSON.stringify({ choices: [{ delta: { tool_calls: [call] }, finish_reason: "tool_calls" }] }), "", "data: [DONE]", "", ""].join("\n"));
+    return;
+  }
+  if (prompt.includes("EDITE_NATIVO") && toolMessage) {
+    send("Edicao nativa concluida EDIT_DONE_6620\n");
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    return;
+  }
   if (prompt.includes("PASTA_B") && !toolMessage && Array.isArray(body.tools) && body.tools.some((tool) => tool.function?.name === "read_file")) {
     const call = { index: 0, id: "read-b-1", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "NOTAS.md" }) } };
     response.end(["data: " + JSON.stringify({ choices: [{ delta: { tool_calls: [call] }, finish_reason: "tool_calls" }] }), "", "data: [DONE]", "", ""].join("\n"));
@@ -227,6 +313,26 @@ const { createApp, ALLOWED_HOSTS } = await import("../src/app.ts");
 const options = [config, router, secrets, async () => ({ allowed: false, code: "offline_grace_expired" })];
 options[8] = empty ? loadConfig : async () => config;
 options[13] = new WorkspaceStore(secrets, join(base, "workspace"));
+if (process.argv.includes("--tool-status")) {
+  const { ProjectOciBackend } = await import("../src/workspace/project-oci.ts");
+  const statusContainers = new Map();
+  ProjectOciBackend.prototype.initialize = async () => {};
+  ProjectOciBackend.prototype.probe = async image => ({ available: Boolean(image), fingerprint: `fixture:${image}`, ...(!image ? { diagnostic: "runtime_unavailable" } : {}) });
+  ProjectOciBackend.prototype.create = async input => {
+    const id = `uptokey-project-00000000-0000-0000-0000-${String(statusContainers.size + 1).padStart(12, "0")}`;
+    statusContainers.set(id, input);
+    return id;
+  };
+  ProjectOciBackend.prototype.run = async (id, _timeout, _limit, _signal, onOutput) => {
+    const input = statusContainers.get(id);
+    const result = { stdout: Buffer.from("synthetic OCI status output"), stderr: Buffer.alloc(0), exitCode: input?.args.includes("--tool-status-failed") ? 1 : 0, limited: false };
+    await onOutput?.(result);
+    return result;
+  };
+  ProjectOciBackend.prototype.stop = async () => {};
+  ProjectOciBackend.prototype.extractFiles = async () => new Map();
+  options[32] = { nodeImage: `docker.io/library/node@sha256:${"a".repeat(64)}` };
+}
 if (process.argv.includes("--tools")) {
   // J18: the official MCP filesystem server on a separate root, and the core's own web service with DNS and transport
   // pointed at the scripted upstream (the page is served locally; no request leaves the machine).
@@ -253,6 +359,22 @@ if (process.argv.includes("--voice")) {
   await secrets.set("provider:custom", "fixture_custom_credential_00000000");
   const { startConfiguredTranscription } = await import("../src/transcription-profile.ts");
   options[27] = (await startConfiguredTranscription({ endpoint: `http://127.0.0.1:${upstreamPort}/v1/audio/transcriptions`, model: "openai/fixture-whisper" }, { config, secrets, store: options[13] })).transcription;
+}
+if (process.argv.includes("--gateway-lane")) {
+  // Deterministic governed lane (same shape as the core delegate test): children answer on the lane, recorded for the journey.
+  const { parseGatewayWireRequest } = await import("@uptokey/sync-contract/gateway");
+  const laneModel = "gateway-fixture/delegate";
+  options[15] = {
+    model: laneModel,
+    available: true,
+    prepare: async (chat) => parseGatewayWireRequest({ schemaVersion: 1, driver: "9router", driverRevision: "a".repeat(40), provider: "openai-compatible-fixture", model: laneModel, url: "https://provider.invalid/v1/chat/completions", method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(chat) }),
+    execute: async (chat) => {
+      laneChats.push(structuredClone(chat));
+      const user = String(chat.messages.at(-1)?.content ?? "");
+      const subtask = /\(\d+ \/ \d+\): ([^\n]+)/.exec(user)?.[1] ?? "?";
+      return new Response(`data: ${JSON.stringify({ model: laneModel, choices: [{ index: 0, delta: { role: "assistant", content: `Achado para ${subtask}` } }] })}` + String.fromCharCode(10, 10) + "data: [DONE]" + String.fromCharCode(10, 10), { headers: { "content-type": "text/event-stream" } });
+    },
+  };
 }
 const app = createApp(...options); await app.workspaceReady;
 const server = serve({ hostname: "127.0.0.1", port: 0, fetch: (request, env) => app.fetch(request, env) });

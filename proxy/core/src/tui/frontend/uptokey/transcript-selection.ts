@@ -38,8 +38,14 @@ type NativeScroll = NativeText & {
 }
 type Key = { name: string; ctrl?: boolean; shift?: boolean; preventDefault(): void; stopPropagation(): void }
 type SourceGetter = () => TranscriptItem
+type SelectableSource = Extract<TranscriptItem, { kind: "assistant" | "user" }>
 const transcriptSources = new WeakMap<object, SourceGetter>()
-const nativeSources = new WeakMap<object, { source: string; cursor: number; plain: string; offsets: number[] | null }>()
+type CollectionCache = {
+  sources: WeakMap<object, { raw: string; id: string; kind: string; item: SelectableSource }>
+  native: WeakMap<object, { source: string; cursor: number; plain: string; offsets: number[] | null; buffer: NativeText["textBuffer"]; view: NativeText["textBufferView"] }>
+}
+const collectionCache = (): CollectionCache => ({ sources: new WeakMap(), native: new WeakMap() })
+const firstGrapheme = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 
 /** Source registration belongs to the actual message renderable, never a global matching string. */
 export function registerTranscriptSource(target: object, source: SourceGetter): void {
@@ -65,7 +71,7 @@ export function sourceOffsets(source: string, plain: string, from = 0): number[]
   return offsets
 }
 
-function collect(root: NativeText): { items: TranscriptItem[]; leaves: Leaf[] } {
+function collect(root: NativeText, cache: CollectionCache): { items: TranscriptItem[]; leaves: Leaf[] } {
   const items: TranscriptItem[] = [], leaves: Leaf[] = []
   const visit = (node: NativeText) => {
     if (node.isDestroyed || node.visible === false) return
@@ -73,18 +79,23 @@ function collect(root: NativeText): { items: TranscriptItem[]; leaves: Leaf[] } 
     if (!getter) { for (const child of children(node)) visit(child); return }
     const registered = getter()
     if (registered.kind !== "assistant" && registered.kind !== "user") return
-    const item = { ...registered, text: selectionSource(registered)! }
+    // Source strings are immutable. A stationary selection must not sanitize and concatenate
+    // megabytes again on every renderer frame; a changed source/id still invalidates the cache.
+    const priorSource = cache.sources.get(node)
+    const cachedSource = priorSource?.raw === registered.text && priorSource.id === registered.id && priorSource.kind === registered.kind
+    const item = cachedSource ? priorSource.item : { ...registered, text: selectionSource(registered)! }
+    if (!cachedSource) cache.sources.set(node, { raw: registered.text, id: registered.id, kind: registered.kind, item })
     items.push(item)
     let cursor = 0
     const leaf = (candidate: NativeText) => {
       if (candidate.isDestroyed) return
       if (candidate.textBufferView) {
-        const previous = nativeSources.get(candidate)
-        const cached = previous?.source === item.text && previous.cursor === cursor ? previous : undefined
+        const previous = cache.native.get(candidate)
+        const cached = previous?.source === item.text && previous.cursor === cursor && previous.buffer === candidate.textBuffer && previous.view === candidate.textBufferView ? previous : undefined
         const plain = cached?.plain ?? candidate.plainText
         if (!plain) return
         const offsets = cached ? cached.offsets : sourceOffsets(item.text, plain, cursor)
-        if (!cached) nativeSources.set(candidate, { source: item.text, cursor, plain, offsets })
+        if (!cached) cache.native.set(candidate, { source: item.text, cursor, plain, offsets, buffer: candidate.textBuffer, view: candidate.textBufferView })
         if (!offsets) return
         leaves.push({ native: candidate, item, plain, offsets })
         cursor = offsets.at(-1)!
@@ -172,15 +183,19 @@ export function createTranscriptSelection(options: {
   active(): boolean
 } {
   let state: SelectionState | null = null, revision = 0, context = "", stale = false
-  let painted: NativeText[] = [], paintKey = ""
+  let painted: NativeText[] = [], paintKey: unknown[] = []
+  let cache = collectionCache()
   const scroll = () => options.renderer.root.findDescendantById?.("uptokey-transcript") as NativeScroll | undefined
   const clear = () => {
     for (const node of painted) if (!node.isDestroyed) { node.textBufferView?.resetSelection(); node.requestRender?.() }
-    painted = []; paintKey = ""; state = null; stale = false; revision++
+    painted = []; paintKey = []; state = null; stale = false; revision++
+    // Offset arrays can be much larger than the selected text. Esc/copy releases them even
+    // while the underlying transcript renderables remain mounted for the conversation.
+    cache = collectionCache()
     options.renderer.clearSelection()
     options.restoreFocus()
   }
-  const current = () => collect(options.renderer.root)
+  const current = () => collect(options.renderer.root, cache)
   const validContext = () => {
     if (state && context !== options.context()) { clear(); return false }
     return Boolean(state)
@@ -188,12 +203,13 @@ export function createTranscriptSelection(options: {
   const refresh = () => {
     if (!validContext() || options.modal() || options.renderer.getSelection()?.isDragging) return
     const { items, leaves } = current()
+    const nextPaintKey: unknown[] = [state!.anchor.itemId, state!.anchor.offset, state!.focus.itemId, state!.focus.offset, state!.keyboard, leaves.length]
+    for (const leaf of leaves) nextPaintKey.push(leaf.native, leaf.native.textBufferView, leaf.item.id, "text" in leaf.item ? leaf.item.text : undefined, leaf.native.x, leaf.native.y, leaf.native.width, leaf.native.height, leaf.plain, leaf.offsets)
+    if (paintKey.length === nextPaintKey.length && paintKey.every((value, index) => Object.is(value, nextPaintKey[index]))) return
+    paintKey = nextPaintKey
     const ranges = selectionRanges(state!, items)
     stale = !ranges
     if (!ranges) return
-    const nextPaintKey = JSON.stringify([state!.anchor, state!.focus, leaves.map(leaf => [leaf.native.id, leaf.native.x, leaf.native.y, leaf.native.width, leaf.native.height, leaf.plain])])
-    if (paintKey === nextPaintKey) return
-    paintKey = nextPaintKey
     for (const node of painted) if (!node.isDestroyed) node.textBufferView?.resetSelection()
     painted = []
     const collapsed = state!.keyboard && state!.anchor.itemId === state!.focus.itemId && state!.anchor.offset === state!.focus.offset
@@ -203,7 +219,7 @@ export function createTranscriptSelection(options: {
       if (collapsed && leaf.item.id === state!.focus.itemId && leaf.offsets[0]! <= range.from && leaf.offsets.at(-1)! >= range.from) {
         const index = leaf.offsets.findIndex(offset => offset >= range.from)
         const from = Math.min(leaf.plain.length - 1, Math.max(0, index))
-        const next = graphemes(leaf.plain.slice(from))[0]?.length ?? 1
+        const next = firstGrapheme.segment(leaf.plain.slice(from))[Symbol.iterator]().next().value?.segment.length ?? 1
         leaf.native.textBufferView!.setSelection(nativeOffset(leaf, from), nativeOffset(leaf, from + next))
         leaf.native.requestRender?.(); painted.push(leaf.native)
         continue

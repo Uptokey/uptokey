@@ -1,9 +1,9 @@
 import { createMemo, createSignal } from "solid-js"
 import { useLocal } from "../context/local"
-import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
+import { map, pipe, flatMap, entries, filter, sortBy } from "remeda"
 import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
-import { createDialogProviderOptions, DialogProvider } from "./dialog-provider"
+import { DialogProvider } from "./dialog-provider"
 import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
@@ -13,6 +13,7 @@ import { isHostedFreeModel } from "../../../uptokey/model-funding.ts"
 import { getBackend } from "../../../uptokey/backend/registry.ts"
 import { useControllerTick } from "../../../uptokey/panels/use-controller.ts"
 import { accountText } from "../../../../account-ui.ts"
+import { ConnectProvider } from "../../../uptokey/dialogs/connect-provider.tsx"
 
 export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
@@ -22,7 +23,6 @@ export function DialogModel(props: { providerID?: string }) {
   const tick = useControllerTick()
 
   const connected = useConnected()
-  const providers = createDialogProviderOptions()
 
   const showExtra = createMemo(() => connected() && !props.providerID)
   const accountAction = createMemo(() => {
@@ -53,11 +53,12 @@ export function DialogModel(props: { providerID?: string }) {
             title: info.name ?? model,
             releaseDate: info.release_date,
             description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
-              ? "(Favorite)"
+              ? `(${tr("Favorite")})`
               : undefined,
             category: connected() ? provider.name : undefined,
             hostedFree: isHostedFreeModel(info),
-            footer: isHostedFreeModel(info) ? accountText("free") : undefined,
+            // A Free model without declared tools answers in text only; the label says so before it is chosen.
+            footer: isHostedFreeModel(info) ? accountText(info.capabilities?.toolcall ? "free" : "free_text_only") : undefined,
             onSelect() {
               onSelect(provider.id, model)
             },
@@ -89,7 +90,7 @@ export function DialogModel(props: { providerID?: string }) {
             description: provider.name,
             category,
             hostedFree: isHostedFreeModel(model),
-            footer: isHostedFreeModel(model) ? accountText("free") : undefined,
+            footer: isHostedFreeModel(model) ? accountText(model.capabilities?.toolcall ? "free" : "free_text_only") : undefined,
             onSelect: () => {
               onSelect(provider.id, model.id)
             },
@@ -98,12 +99,12 @@ export function DialogModel(props: { providerID?: string }) {
       })
     }
 
-    const favoriteOptions = toOptions(favorites, "Favorites")
+    const favoriteOptions = toOptions(favorites, tr("Favorites"))
     const recentOptions = toOptions(
       recents.filter(
         (item) => !favorites.some((fav) => fav.providerID === item.providerID && fav.modelID === item.modelID),
       ),
-      "Recent",
+      tr("Recent"),
     )
 
     const sectionModels = [...favorites, ...recents]
@@ -114,14 +115,12 @@ export function DialogModel(props: { providerID?: string }) {
       : catalogOptions()
 
     const popularProviders = !connected()
-      ? pipe(
-          providers(),
-          map((option) => ({
-            ...option,
-            category: tr("Popular providers"),
-          })),
-          take(6),
-        )
+      ? getBackend().providerChoices().filter((provider) => provider.executable).slice(0, 6).map((provider) => ({
+          title: provider.label,
+          value: provider.id,
+          category: tr("Popular providers"),
+          onSelect() { dialog.replace(() => <ConnectProvider providerId={provider.id} />) },
+        }))
       : []
 
     const accountOptions = accountAction() ? [{
@@ -161,7 +160,7 @@ export function DialogModel(props: { providerID?: string }) {
 
   const title = createMemo(() => {
     const value = provider()
-    if (!value) return "Select model"
+    if (!value) return tr("Select model")
     return value.name
   })
 
@@ -187,7 +186,8 @@ export function DialogModel(props: { providerID?: string }) {
       actions={[
         {
           command: "model.dialog.provider",
-          title: connected() ? "Connect provider" : "View all providers",
+          title: tr(connected() ? "Connect provider" : "View all providers"),
+          selection: "none",
           onTrigger() {
             dialog.replace(() => <DialogProvider />)
           },
