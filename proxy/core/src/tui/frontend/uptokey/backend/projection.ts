@@ -5,7 +5,45 @@
  */
 import type { AssistantMessage, Message, Part, ToolPart, UserMessage } from "@opencode-ai/sdk/v2"
 import type { TranscriptItem } from "../../../transcript.ts"
+import type { MessageUsage } from "../../../state.ts"
 import { chromeText } from "../../../ui-chrome.ts"
+
+/**
+ * What the projected assistant message knows about its measurement. The OpenCode schema has only numbers;
+ * this marker keeps "not reported" distinct from a real zero for every Uptokey display.
+ */
+export interface UptokeyUsageMarker {
+  /** `none`: no round of this answer recorded any measurement. `partial`: some rounds did not. */
+  usage: "reported" | "estimated" | "partial" | "unavailable" | "none"
+  cost: "known" | "partial" | "unknown"
+  costBasis?: "charged" | "estimate" | "local" | "free" | "mixed"
+  /** Input tokens of the last measured request: the context actually sent. */
+  contextTokens: number | null
+}
+
+export function usageMarkerOf(message: Message): UptokeyUsageMarker | undefined {
+  return (message as { uptokey?: UptokeyUsageMarker }).uptokey
+}
+
+/** Folds the measured rounds of one visual answer; never fills a missing value with zero. */
+export function foldUsage(rounds: readonly MessageUsage[]): { tokens: AssistantMessage["tokens"]; cost: number; marker: UptokeyUsageMarker } {
+  const measured = rounds.filter((round) => round.state !== "unavailable" && (round.input !== undefined || round.output !== undefined))
+  const last = measured.at(-1)
+  const costed = rounds.filter((round) => round.costMicros !== undefined)
+  const bases = [...new Set(costed.map((round) => round.costBasis))]
+  const usage = !rounds.length ? "none" : !measured.length ? "unavailable" : measured.length < rounds.length ? "partial"
+    : measured.some((round) => round.state === "estimated") ? "estimated" : "reported"
+  return {
+    tokens: { input: last?.input ?? 0, output: last?.output ?? 0, reasoning: last?.reasoning ?? 0, cache: { read: last?.cached ?? 0, write: 0 } },
+    cost: costed.reduce((sum, round) => sum + (round.costMicros ?? 0), 0) / 1_000_000,
+    marker: {
+      usage,
+      cost: !costed.length ? "unknown" : costed.length < rounds.length ? "partial" : "known",
+      ...(bases.length === 1 && bases[0] ? { costBasis: bases[0] } : bases.length > 1 ? { costBasis: "mixed" as const } : {}),
+      contextTokens: last?.input ?? null,
+    },
+  }
+}
 
 export interface ProjectionContext {
   sessionID: string
@@ -88,11 +126,12 @@ function toolPart(item: Extract<TranscriptItem, { kind: "tool" }>, ctx: Projecti
   const tool = TOOL_ALIASES[item.name] ?? item.name
   const base = { id: partIdOf(item), sessionID: ctx.sessionID, messageID, type: "tool" as const, callID: item.id, tool }
   const input = toolInput(item.name, item.summary)
-  const metadata = { uptokeyTool: item.name, ...(item.receipt ? { receiptId: item.receipt } : {}) }
-  if (item.status === "done") {
+  const metadata = { uptokeyTool: item.name, ...(item.status === "rejected" ? { uptokeyOutcome: "not_executed" } : {}), ...(item.receipt ? { receiptId: item.receipt } : {}) }
+  // SDK "completed" means terminal. The metadata retains neutral non-execution for the renderer.
+  if (item.status === "done" || item.status === "rejected") {
     return { ...base, metadata, state: { status: "completed", input, output: item.detail ?? "", title: item.name, metadata, time: { start: started, end: started } } }
   }
-  if (item.status === "error" || item.status === "rejected") {
+  if (item.status === "error") {
     return { ...base, metadata, state: { status: "error", input, error: item.detail ?? item.status, metadata, time: { start: started, end: started } } }
   }
   return { ...base, metadata, state: { status: "running", input, title: item.name, metadata, time: { start: started } } }
@@ -160,11 +199,15 @@ function toolsBeforeAnswer(items: readonly TranscriptItem[]): TranscriptItem[] {
 export function projectTranscript(rawItems: readonly TranscriptItem[], ctx: ProjectionContext): ProjectedMessage[] {
   const items = toolsBeforeAnswer(rawItems)
   const out: ProjectedMessage[] = []
-  let assistant: { message: AssistantMessage; parts: Part[] } | undefined
+  let assistant: { message: AssistantMessage; parts: Part[]; rounds: MessageUsage[] } | undefined
   let lastUser: string | undefined
 
   const closeAssistant = (completed: boolean) => {
     if (!assistant) return
+    const folded = foldUsage(assistant.rounds)
+    assistant.message.tokens = folded.tokens
+    assistant.message.cost = folded.cost
+    ;(assistant.message as AssistantMessage & { uptokey?: UptokeyUsageMarker }).uptokey = folded.marker
     const lastPart = assistant.parts.at(-1)
     const streaming = lastPart?.type === "text" && lastPart.time?.end === undefined && assistant.message.time.completed === undefined && !completed
     if (completed && !streaming) assistant.message.time.completed = assistant.message.time.completed ?? ctx.time(assistant.message.id)
@@ -192,6 +235,7 @@ export function projectTranscript(rawItems: readonly TranscriptItem[], ctx: Proj
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       },
       parts: [],
+      rounds: [],
     }
     return assistant
   }
@@ -222,6 +266,7 @@ export function projectTranscript(rawItems: readonly TranscriptItem[], ctx: Proj
     }
 
     const current = ensureAssistant(item)
+    if ((item.kind === "assistant" || item.kind === "tool") && item.usage) current.rounds.push(item.usage)
     const started = ctx.time(current.message.id)
     const messageID = current.message.id
     if (item.kind === "assistant") {
@@ -242,6 +287,12 @@ export function projectTranscript(rawItems: readonly TranscriptItem[], ctx: Proj
     }
     if (item.kind === "tool") {
       current.parts.push(toolPart(item, ctx, messageID, started))
+      continue
+    }
+    if (item.kind === "reasoning") {
+      // Live reasoning of the turn in progress: open until the answer or a tool call follows.
+      const start = item.startedAt ?? started
+      current.parts.push({ id: partIdOf(item), sessionID: ctx.sessionID, messageID, type: "reasoning", text: item.text, time: item.done ? { start, end: item.endedAt ?? start } : { start } })
       continue
     }
     if (item.kind === "compaction") {

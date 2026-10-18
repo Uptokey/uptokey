@@ -13,6 +13,8 @@ export interface SecretPromptProps {
   title: string
   description?: () => JSX.Element
   error?: string
+  /** Official page where this provider issues keys; shown after the field, never fetched by the terminal. */
+  getKeyUrl?: string
   onConfirm: (value: string) => void
   onCancel: () => void
 }
@@ -85,6 +87,9 @@ export function SecretPrompt(props: SecretPromptProps) {
         <Show when={props.error}>
           <text fg={theme.error}>{props.error}</text>
         </Show>
+        <Show when={props.getKeyUrl}>
+          <text fg={theme.textMuted}>{ui("secret_get_key", { url: props.getKeyUrl! })}</text>
+        </Show>
       </box>
       <box paddingBottom={1}>
         <text fg={theme.textMuted}>{ui("secret_submit")}</text>
@@ -93,7 +98,7 @@ export function SecretPrompt(props: SecretPromptProps) {
   )
 }
 
-SecretPrompt.show = (dialog: DialogContext, title: string, options: Pick<SecretPromptProps, "description" | "error"> = {}) =>
+SecretPrompt.show = (dialog: DialogContext, title: string, options: Pick<SecretPromptProps, "description" | "error" | "getKeyUrl"> = {}) =>
   new Promise<string | null>((resolve) => {
     dialog.replace(
       () => <SecretPrompt title={title} {...options} onConfirm={(value) => resolve(value)} onCancel={() => dialog.clear()} />,

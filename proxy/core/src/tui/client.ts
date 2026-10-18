@@ -15,6 +15,7 @@ import { MAX_INFERENCE_REQUEST_BYTES } from "@uptokey/sync-contract/limits";
 import type { MediaDispatchPart } from "./media-input.ts";
 import { ACCOUNT_ID, ACCOUNT_MAX_RESPONSE_BYTES, ACCOUNT_MAX_CLIENT_RESPONSE_BYTES, readAccountPublicSession, readAccountPublicUsage, readAccountAvailable, readAccountAdoption, readAccountShareChallenge, readAccountShareRequests, readAccountShareApproval, type AccountPublicSession, type AccountPublicUsage, type AccountAvailable, type AccountAdoption, type AccountShareChallenge, type AccountShareRequest } from "../account-login-protocol.ts";
 import { HOSTED_PROVIDER, validateHostedDestination, loadHostedModels, hostedInput, sendHosted, getHostedReceipt, type TuiHostedDestination } from "./hosted.ts";
+import { readAccountPlan, type AccountPlan } from "./account-plan.ts";
 
 export type TuiAccountAvailable = AccountAvailable;
 export type TuiAccountMutation = AccountAdoption;
@@ -54,7 +55,16 @@ export interface TuiClientOptions {
   streamIdleTimeoutMs?: number;
   /** Optional absolute SSE lifetime after headers; 0 (default) disables this bound. */
   streamTotalTimeoutMs?: number;
+  /** Wait for a chat stream to start (a slow local model may need minutes); default STREAM_HEADERS_TIMEOUT_MS. */
+  streamHeadersTimeoutMs?: number;
 }
+
+/**
+ * A model may take minutes before its first byte (loading weights, evaluating a long prompt on CPU). The chat stream
+ * waits for that start above the core's own upstream header limit (300 s), so the core's precise error arrives
+ * instead of a client timeout; the person can cancel at any moment.
+ */
+export const STREAM_HEADERS_TIMEOUT_MS = 310_000;
 
 export interface CoreHealth {
   status: "ok" | "error";
@@ -69,8 +79,14 @@ export interface ConnectionState {
   error?: string;
 }
 
+const REASONING_FIELDS = ["reasoning_content", "reasoning", "reasoning_text"] as const;
+
 export interface StreamEvent {
-  type: "text" | "tool_call" | "tool_result" | "error" | "done" | "keepalive" | "hosted_receipt";
+  /**
+   * `usage`: provider-reported token counts (JSON); `route`: router headers for the actual destination (JSON);
+   * `reasoning`: the model's reasoning text as streamed by the provider, shown live and never sent back as answer text.
+   */
+  type: "text" | "reasoning" | "tool_call" | "tool_result" | "error" | "done" | "keepalive" | "hosted_receipt" | "usage" | "route";
   data: string;
   id?: string;
 }
@@ -83,6 +99,7 @@ export class TuiClient extends EventEmitter {
   private requestTimeoutMs: number;
   private streamIdleTimeoutMs: number;
   private streamTotalTimeoutMs: number;
+  private streamHeadersTimeoutMs: number;
   private selectedDestination: TuiInferenceDestination = Object.freeze({});
 
   constructor(options: TuiClientOptions) {
@@ -99,6 +116,8 @@ export class TuiClient extends EventEmitter {
     this.streamTotalTimeoutMs = options.streamTotalTimeoutMs ?? 0;
     if (!Number.isSafeInteger(this.streamIdleTimeoutMs) || this.streamIdleTimeoutMs < 0 || this.streamIdleTimeoutMs > 120_000
       || !Number.isSafeInteger(this.streamTotalTimeoutMs) || this.streamTotalTimeoutMs < 0 || this.streamTotalTimeoutMs > 30 * 60_000) throw new Error("tui_stream_timeout_invalid");
+    this.streamHeadersTimeoutMs = options.streamHeadersTimeoutMs ?? STREAM_HEADERS_TIMEOUT_MS;
+    if (!Number.isSafeInteger(this.streamHeadersTimeoutMs) || this.streamHeadersTimeoutMs < 1 || this.streamHeadersTimeoutMs > 30 * 60_000) throw new Error("tui_stream_timeout_invalid");
   }
 
   get authenticated(): boolean { return this.token !== undefined; }
@@ -257,12 +276,14 @@ export class TuiClient extends EventEmitter {
 
   serializeChatInput(model: string, messages: Array<{ role: string; content: string | MediaDispatchPart[] }>, destination: TuiInferenceDestination = this.selectedDestination, tools?: readonly TuiFunctionTool[]): string {
     if (destination.hosted) {
-      if (destination.providerId !== HOSTED_PROVIDER || model !== destination.hosted.modelId || tools?.length) throw Error("hosted_request_invalid");
-      return JSON.stringify(hostedInput(destination.hosted, destination.hostedRequestId ?? "hosted-preflight", messages));
+      // Declared tools are validated by the hosted contract; the broker refuses them for models without the capability.
+      if (destination.providerId !== HOSTED_PROVIDER || model !== destination.hosted.modelId) throw Error("hosted_request_invalid");
+      return JSON.stringify(hostedInput(destination.hosted, destination.hostedRequestId ?? "hosted-preflight", messages as never, tools));
     }
     if (destination.providerId !== undefined && !isProvider(destination.providerId)) throw new Error("tui_provider_invalid");
     if (destination.routingComboId !== undefined && (!destination.providerId || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(destination.routingComboId))) throw new Error("tui_routing_combo_invalid");
-    const body: Record<string, unknown> = { model, messages, stream: true };
+    // Ask for the provider's own usage frame; absence is recorded as unavailable, never as zero.
+    const body: Record<string, unknown> = { model, messages, stream: true, stream_options: { include_usage: true } };
     const media = messages.flatMap(message => Array.isArray(message.content) ? message.content : []);
     const required = [...new Set(media.flatMap(part => part.type === "image_url" ? ["image"] : part.type === "input_audio" ? ["audio"] : []))];
     if (required.length) body.uptokey_require_input = required;
@@ -270,8 +291,9 @@ export class TuiClient extends EventEmitter {
     if (tools?.length) {
       body.tools = tools;
       body.tool_choice = "auto";
-      // Read tools run serially against the currently authorized project root.
-      body.parallel_tool_calls = false;
+      // The model may batch independent calls: pure project reads of a batch run concurrently (bounded),
+      // while writes, commands and approvals are still executed one at a time in the batch order.
+      body.parallel_tool_calls = true;
     }
     if (destination.providerId) {
       // Core intersects this exact destination with scope/privacy/quota controls,
@@ -340,6 +362,11 @@ export class TuiClient extends EventEmitter {
     return readAccountPublicUsage(await this.accountRequest("usage", undefined, signal));
   }
 
+  async getAccountPlan(signal?: AbortSignal): Promise<AccountPlan> {
+    // The local route unwraps the broker envelope and forwards its HTTP status.
+    return readAccountPlan(await this.accountRequest("control", { operation: "subscription.status", payload: {} }, signal));
+  }
+
   async requestAccountAccess(signal?: AbortSignal): Promise<TuiAccountChallenge> {
     return this.readAccountChallenge(await this.accountRequest("request", {}, signal));
   }
@@ -366,11 +393,13 @@ export class TuiClient extends EventEmitter {
     const serialized = this.serializeChatInput(model, messages, destination, tools);
     if (destination.hosted) {
       if (!destination.hostedRequestId) throw Error("hosted_request_not_recorded");
-      const result = await sendHosted(this.fetchRaw.bind(this), destination.hosted, destination.hostedRequestId, messages, processingPolicy, signal);
+      const result = await sendHosted(this.fetchRaw.bind(this), destination.hosted, destination.hostedRequestId, messages as never, processingPolicy, signal, tools);
       yield { type: "hosted_receipt", data: JSON.stringify({ requestId: result.requestId, state: result.status,
         ...(result.status === "completed" ? { chargedMicros: result.chargedMicros, priceVersion: result.priceVersion, usage: result.usage } : {}) }) };
       if (result.status !== "completed") throw Object.assign(Error(result.status === "rejected" ? result.error : `hosted_${result.status}`), { requestId: result.requestId });
       if (result.content) yield { type: "text", data: result.content };
+      // Proposed calls enter the same native loop as any provider's: executed locally, under approvals, with receipts.
+      if (result.toolCalls?.length) yield { type: "tool_call", data: JSON.stringify(result.toolCalls.map((call, index) => ({ index, id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } }))) };
       yield { type: "done", data: "" };
       return;
     }
@@ -379,7 +408,7 @@ export class TuiClient extends EventEmitter {
     if (processingPolicy) extraHeaders["x-uptokey-processing-policy"] = processingPolicy;
     const res = await this.fetch("/v1/chat/completions", {
       method: "POST", body: serialized, headers: extraHeaders, signal,
-    }, 0, this.requestTimeoutMs, true, true);
+    }, 0, this.streamHeadersTimeoutMs, true, true);
     if (!res.body || !res.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) {
       await cancelStreamWithin(res.body);
       throw new Error("stream_content_type_invalid");
@@ -387,6 +416,8 @@ export class TuiClient extends EventEmitter {
     const reader = res.body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
     const events: StreamEvent[] = [];
+    const route = routeHeaders(res.headers);
+    if (route) events.push({ type: "route", data: JSON.stringify(route) });
     let done = false;
     let parseError: Error | undefined;
     const parser = createParser({ maxBufferSize: 131_072, onError: () => { parseError = new Error("stream_invalid"); }, onEvent: ({ data }) => {
@@ -397,7 +428,13 @@ export class TuiClient extends EventEmitter {
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
         const chunk = parsed as Record<string, unknown>;
         if (chunk.error !== undefined) { parseError = new Error("stream_upstream_error"); return; }
-        const delta = (chunk.choices as Array<{ delta?: { content?: unknown; tool_calls?: unknown } }> | undefined)?.[0]?.delta;
+        const usage = reportedUsage(chunk.usage ?? (chunk.x_groq as { usage?: unknown } | undefined)?.usage);
+        if (usage) events.push({ type: "usage", data: JSON.stringify(usage) });
+        const delta = (chunk.choices as Array<{ delta?: { content?: unknown; tool_calls?: unknown } & Record<string, unknown> }> | undefined)?.[0]?.delta;
+        // Providers name the reasoning stream differently (DeepSeek/vLLM reasoning_content, Ollama/OpenRouter
+        // reasoning, others reasoning_text); a non-string value is a structured variant and is not shown.
+        const reasoning = delta ? REASONING_FIELDS.map((field) => delta[field]).find((value): value is string => typeof value === "string" && value.length > 0) : undefined;
+        if (reasoning) events.push({ type: "reasoning", data: reasoning });
         if (delta?.content != null) {
           if (typeof delta.content !== "string") throw new Error();
           if (delta.content) events.push({ type: "text", data: delta.content, ...(typeof chunk.id === "string" ? { id: chunk.id } : {}) });
@@ -673,4 +710,33 @@ function retainRequestLifetime(response: Response, signal: AbortSignal, clear: (
     },
   });
   return new Response(stream, { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
+/** Provider-reported counts only; malformed or missing fields stay absent instead of becoming zero. */
+export function reportedUsage(raw: unknown): { prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number; reasoning_tokens?: number } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const count = (input: unknown) => typeof input === "number" && Number.isSafeInteger(input) && input >= 0 ? input : undefined;
+  const prompt = (value.prompt_tokens_details ?? {}) as Record<string, unknown>;
+  const completion = (value.completion_tokens_details ?? {}) as Record<string, unknown>;
+  const out = {
+    prompt_tokens: count(value.prompt_tokens), completion_tokens: count(value.completion_tokens),
+    cached_tokens: count(value.cached_tokens) ?? count(prompt?.cached_tokens), reasoning_tokens: count(value.reasoning_tokens) ?? count(completion?.reasoning_tokens),
+  };
+  const entries = Object.entries(out).filter(([, v]) => v !== undefined);
+  return entries.length ? Object.fromEntries(entries) as ReturnType<typeof reportedUsage> : null;
+}
+
+/** Route actually used for a reply, as reported by the router headers (public identifiers only). */
+export function routeHeaders(headers: Headers): { provider?: string; model?: string; costClass?: string; costEstimateMicros?: string; fallback?: true } | null {
+  const text = (value: string | null) => value && value.length <= 200 && /^[ -~]+$/.test(value) ? value : undefined;
+  const provider = text(headers.get("x-uptokey-provider")), model = text(headers.get("x-uptokey-model"));
+  const costClass = headers.get("x-uptokey-cost-class"), micros = headers.get("x-uptokey-cost-estimate-micros");
+  const route = {
+    ...(provider ? { provider } : {}), ...(model ? { model } : {}),
+    ...(costClass && ["local", "free_documented", "priced", "unknown"].includes(costClass) ? { costClass } : {}),
+    ...(micros && /^[0-9]{1,20}$/.test(micros) ? { costEstimateMicros: micros } : {}),
+    ...(headers.get("x-uptokey-fallback") === "true" ? { fallback: true as const } : {}),
+  };
+  return Object.keys(route).length ? route : null;
 }

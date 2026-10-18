@@ -86,7 +86,8 @@ export interface ProjectPatchChunk {
   readonly newLines: readonly string[];
 }
 
-export type ProjectChangeOperationType = 'mkdir' | 'create' | 'replace' | 'move' | 'patch_lines';
+/** `delete` removes one file whose current bytes match `expectedSha256`; the writer keeps a preimage. */
+export type ProjectChangeOperationType = 'mkdir' | 'create' | 'replace' | 'move' | 'patch_lines' | 'delete';
 
 export interface ProjectChangeOperation {
   readonly type: ProjectChangeOperationType;

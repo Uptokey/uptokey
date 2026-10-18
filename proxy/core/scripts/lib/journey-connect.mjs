@@ -11,7 +11,14 @@ export async function connectJourney({ term, checks, capture }) {
   capture("1. onboarding automatico");
   checks.providerListShown = true;
   await term.send("ovh");
-  await term.until(() => term.screen().includes("OVHcloud AI Endpoints"), "filter did not show OVHcloud");
+  // The search field takes focus one tick after it is drawn (upstream dialog); keys typed while boot keeps the event loop
+  // busy can land before that. Retype once and record it, so the observation stays visible instead of hidden.
+  const filtered = await term.until(() => term.screen().includes("OVHcloud AI Endpoints"), "filter did not show OVHcloud", 4000).then(() => true, () => false);
+  if (!filtered) {
+    checks.filterRetyped = true;
+    await term.send("ovh");
+    await term.until(() => term.screen().includes("OVHcloud AI Endpoints"), "filter did not show OVHcloud");
+  }
   capture("2. filtro por provedor");
   await term.send(ENTER);
   await term.until(() => /Conectar OVHcloud|Connect OVHcloud/i.test(term.screen()), "key prompt did not open");

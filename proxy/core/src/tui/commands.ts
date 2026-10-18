@@ -138,7 +138,7 @@ export const COMMANDS: CommandSpec[] = [
   { id: "features.microphone", get title() { return t("command_features_microphone"); }, group: "Conversa", slash: ["mic", "microfone", "ditar"], unavailable: needsProject, run: ({controller}) => controller.features.microphone() },
   { id: "features.voice.setup", get title() { return t("command_features_voice_setup"); }, group: "Conversa", slash: ["voice-setup", "voz-config"], get arg() { return chromeText("arg_model"); }, run: ({controller},arg) => controller.features.voiceSetup(arg) },
   { id: "features.voice", get title() { return t("command_features_voice"); }, group: "Conversa", slash: ["voice", "voz"], unavailable: needsProject, run: ({controller}) => controller.features.startVoice() },
-  { id: "features.comparisons", get title() { return t("command_features_comparisons"); }, group: "Modelos", slash: ["comparisons", "comparacoes"], get arg() { return "[id] [cancelar]"; }, unavailable: needsProject, run: ({controller},arg) => {const [id,action]=arg.trim().split(/\s+/);return controller.features.comparisons(id||undefined,action==='cancelar');} },
+  { id: "features.comparisons", get title() { return t("command_features_comparisons"); }, group: "Modelos", slash: ["comparisons", "comparacoes"], get arg() { return chromeText("arg_comparisons"); }, unavailable: needsProject, run: ({controller},arg) => {const [id,action]=arg.trim().split(/\s+/);return controller.features.comparisons(id||undefined,action==='cancel'||action==='cancelar');} },
   { id: "features.transcription.setup", get title() { return t("command_features_transcription_setup"); }, group: "Projeto", slash: ["transcription", "transcricao"], get arg() { return chromeText("arg_model_endpoint"); }, run: ({controller},arg) => controller.features.transcriptionSetup(arg) },
   { id: "features.transcribe", get title() { return t("command_features_transcribe"); }, group: "Projeto", slash: ["transcribe", "transcrever"], get arg() { return chromeText("arg_file"); }, unavailable: needsProject, run: ({controller},path) => path.trim()?controller.features.transcribe(path.trim()):controller.notice("info",t('uso_transcrever_caminho_do_aud')) },
   { id: "features.rag", get title() { return t("command_features_rag"); }, group: "Contexto", slash: ["rag"], get arg() { return chromeText("arg_question"); }, unavailable: needsProject, run: ({controller},query) => query.trim()?controller.features.rag(query):controller.notice("info",t('uso_rag_pergunta_sobre_os_arqu')) },
@@ -156,13 +156,16 @@ export const COMMANDS: CommandSpec[] = [
   { id: "chat.sessions", get title() { return t("command_chat_sessions"); }, group: "Conversa", slash: ["sessions", "sessoes", "retomar"], keys: "Ctrl+S", run: ({ ui, controller }) => { void controller.refreshConversationList(); ui.openPanel("sessions"); } },
   { id: "chat.search", get title() { return t("command_chat_search"); }, group: "Conversa", slash: ["search", "buscar"], run: ({ ui }) => ui.openPanel("search") },
   { id: "chat.fork", get title() { return t("command_chat_fork"); }, group: "Conversa", slash: ["fork", "ramificar"], unavailable: needsConversation, run: ({ controller }) => controller.fork() },
-  { id: "chat.undo", get title() { return t("command_chat_undo"); }, group: "Conversa", slash: ["undo", "desfazer"], unavailable: needsConversation, run: ({ controller }) => {
-    if (controller.view.proposal) {
-      controller.rejectProposal();
-    } else {
-      controller.notice("info", t('desfazer_info'));
-    }
+  { id: "chat.undo", get title() { return t("command_chat_undo"); }, group: "Conversa", slash: ["undo", "desfazer"], unavailable: needsConversation, run: async ({ controller, ui }) => {
+    // A pending, unapplied proposal is discarded first; otherwise the last turn is reversed for real.
+    if (controller.view.proposal) return controller.rejectProposal();
+    // Intentions recorded by approvals (clientMessageId "tui_*") belong to the turn; its start is the person's prompt.
+    const last = [...controller.state.messages].reverse().find((message) => message.role === "user" && !message.clientMessageId?.startsWith("tui_"));
+    if (!last) return controller.notice("info", t("undo_turn_not_user"));
+    const undone = await controller.undoTurn(last.id);
+    if (undone?.prompt) ui.setDraft(undone.prompt);
   } },
+  { id: "chat.redo", get title() { return t("command_chat_redo"); }, group: "Conversa", slash: ["redo", "refazer"], unavailable: needsConversation, run: ({ controller }) => controller.redoTurn() },
   { id: "chat.branches", get title() { return t("command_chat_branches"); }, group: "Conversa", slash: ["branches", "ramos"], unavailable: needsConversation, run: ({ ui }) => ui.openPanel("branches") },
   { id: "chat.compact", get title() { return t("command_chat_compact"); }, group: "Conversa", slash: ["compact", "compactar"], unavailable: needsConversation, run: ({ controller }) => controller.compact() },
   { id: "chat.correct", get title() { return t("command_chat_correct"); }, group: "Código", slash: ["fix", "corrigir"], keys: "Ctrl+F", unavailable: ({ controller }) => controller.view.correction ? null : t("error_chat_correct_nenhuma_falha_pa"), run: ({ controller }) => controller.requestCorrection() },

@@ -1815,7 +1815,8 @@ function assertStoredProjectWriteReceipt(value: unknown, intent: StoredWriteInte
   }
 
   const hashes = record(receipt.observedHashes);
-  const fileOperations = operations.filter(op => op.type !== "mkdir");
+  // A deletion leaves no bytes to observe; its proof is the confirmed path plus the bound preimage.
+  const fileOperations = operations.filter(op => op.type !== "mkdir" && op.type !== "delete");
   const filePaths = new Set(fileOperations.map(op => op.path));
   if (!hashes || Object.keys(hashes).length !== filePaths.size ||
       Object.entries(hashes).some(([path, hash]) => !filePaths.has(path) || typeof hash !== "string" || !/^[a-f0-9]{64}$/.test(hash)) ||

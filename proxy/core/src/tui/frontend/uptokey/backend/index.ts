@@ -35,6 +35,10 @@ import type { PromptInfo } from '../prompt-info.ts'
 import { connectionText } from '../integration-connections.ts'
 import { terminalText } from '../integration-terminal.ts'
 import { HOSTED_PROVIDER } from '../../../hosted.ts'
+import { parseConversation } from '@uptokey/sync-contract/conversation'
+import { localizedDiagnostic, safeDiagnosticCode } from '../../../operation-ui.ts'
+import { historyPage } from '../history.ts'
+import { PendingSteerStore } from './pending-steer.ts'
 
 /** Title the core gives a conversation created without one (workspace/conversations.ts::createConversation). */
 const DEFAULT_CORE_TITLE = "Nova conversa"
@@ -85,6 +89,12 @@ const AGENTS: Agent[] = [
   { name: "plan", description: "Plans without effects on the project.", mode: "primary", native: true, permission: [], options: {} },
 ]
 
+/** Compatibility capabilities describe real canonical consumers, never synthetic SDK endpoints. */
+const SDK_CAPABILITIES = Object.freeze({
+  backgroundSubagents: false,
+  uptokey: Object.freeze({ schemaVersion: 1, sessionApi: 'canonical-v1', locationDataV2: false, publicSessionSharing: false, historyPaging: true }),
+})
+
 function ok<T>(data: T) {
   return Promise.resolve({ data, error: undefined as undefined })
 }
@@ -114,6 +124,8 @@ export class UptokeyBackend {
   private shownSession = ""
   /** > 0 while the frontend itself is creating a conversation: it navigates by the returned id, not by event. */
   private creating = 0
+  private emittedTodos = "[]"
+  private emittedQuestion: { id: string; sessionID: string } | null = null
   private readonly changeSync = new CoalescedSync(() => this.sync())
   private readonly handleControllerChange = () => this.changeSync.request()
   private readonly handleModelsChanged = () => this.refreshAll()
@@ -134,11 +146,13 @@ export class UptokeyBackend {
   private readonly approvalInFlight = new Set<string>()
   private readonly approvalRequestIds = new Map<string, string>()
   private readonly recoveredDrafts = new Map<string, PromptInfo>()
+  private readonly pendingSteer: PendingSteerStore
   private modelInputs = new Map<string, {image:boolean;audio:boolean;toolcall:boolean}>()
 
   constructor(private readonly options: BackendOptions) {
     this.directory = options.cwd
     this.mirror = new SessionMirror("")
+    this.pendingSteer = new PendingSteerStore(options.state)
     this.pathIndex = new PathIndex(options.controller.workspace)
     this.ready = options.controller.start().then(() => this.refreshModelInputs()).catch(() => undefined)
     this.client = this.createClient()
@@ -274,15 +288,40 @@ export class UptokeyBackend {
   }
 
   /** After a committed setup: reload what the core observes, select the new destination and refresh the frontend lists. */
-  async finishProviderSetup(providerId: string, modelId: string, routingComboId: string) {
+  async finishProviderSetup(providerId: string, modelId: string, routingComboId: string, isCurrent: () => boolean = () => true): Promise<boolean> {
     const controller = this.options.controller
+    const conversationId = controller.state.activeConversation?.id
+    const revision = controller.store.conversationRevision
+    const binding = controller.view.binding
+    const storage = controller.state.storagePolicy
+    const policy = controller.state.processingPolicy
+    const previousDestination = controller.client.getSelectedDestination()
+    const previousModel = controller.state.selectedModel
+    const previousSelection = controller.modelSelectionRevision
+    const sameContext = () => !this.disposed && isCurrent() && controller.state.activeConversation?.id === conversationId
+      && controller.store.conversationRevision === revision && controller.view.binding === binding && controller.state.storagePolicy === storage
+    const unchanged = () => sameContext() && controller.state.processingPolicy === policy && controller.client.getSelectedDestination() === previousDestination
+      && controller.state.selectedModel === previousModel && controller.modelSelectionRevision === previousSelection
+    if (!unchanged()) return false
     await controller.refreshConnections()
-    await controller.selectProviderModel(modelId, providerId, routingComboId)
+    if (!unchanged()) return false
+    const selected = controller.selectProviderModel(modelId, providerId, routingComboId, sameContext)
+    const selectionRevision = controller.modelSelectionRevision
+    try { await selected } catch (error) {
+      if (error instanceof Error && error.message === 'context_changed') return false
+      throw error
+    }
+    const selectedDestination = controller.client.getSelectedDestination()
+    const stillSelected = () => sameContext() && controller.modelSelectionRevision === selectionRevision
+      && controller.state.selectedModel === modelId && controller.client.getSelectedDestination() === selectedDestination
+    if (!stillSelected()) return false
     await this.refreshModelInputs()
+    if (!stillSelected()) return false
     this.refreshAll()
     // The new provider is in the window's list only after this refresh: announce the choice again for it.
     this.followedModel = controller.state.selectedModel
     this.emit({ type: "uptokey.model.follow", properties: this.destination() } as never)
+    return true
   }
 
   // ─── state derived from the controller ───────────────────────────────
@@ -365,7 +404,8 @@ export class UptokeyBackend {
         interleaved: false,
       },
       cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-      limit: { context: view?.contextWindow ?? 128_000, output: 8_192 },
+      // Unknown limits stay 0 (unknown) for every consumer; no generic window is invented.
+      limit: { context: view?.contextWindow ?? 0, output: 0 },
       status: "active",
       options: {},
       headers: {},
@@ -390,7 +430,7 @@ export class UptokeyBackend {
     if (!models.length) return undefined
     return { id: HOSTED_PROVIDER, name: "Uptokey", source: "api", env: [], options: {}, models: Object.fromEntries(models.map(item => {
       const model: Model = { id: item.modelId, providerID: HOSTED_PROVIDER, api: { id: item.modelId, url: "", npm: "uptokey" }, name: item.label,
-        capabilities: { temperature: false, reasoning: false, attachment: false, toolcall: false,
+        capabilities: { temperature: false, reasoning: false, attachment: false, toolcall: item.toolCalls === true,
           input: { text: true, audio: false, image: false, video: false, pdf: false }, output: { text: true, audio: false, image: false, video: false, pdf: false }, interleaved: false },
         cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: item.contextTokens, output: item.maxOutputTokens },
         status: "active", options: { uptokeyFunding: "hosted-free" }, headers: {}, release_date: "" }
@@ -451,6 +491,19 @@ export class UptokeyBackend {
       trace("model.follow", { selected, frontend: this.frontendModel ?? null })
       if (selected !== this.frontendModel) this.emit({ type: "uptokey.model.follow", properties: this.destination() } as never)
     }
+    // A question from the model (ask_user) uses the terminal's question prompt; its end is announced once.
+    const question = controller.view.question ?? null
+    if (this.activeId && question?.id !== this.emittedQuestion?.id) {
+      if (this.emittedQuestion) this.emit({ type: "question.replied", properties: { sessionID: this.emittedQuestion.sessionID, requestID: this.emittedQuestion.id } } as never)
+      this.emittedQuestion = question ? { id: question.id, sessionID: this.activeId } : null
+      if (question) this.emit({ type: "question.asked", properties: { id: question.id, sessionID: this.activeId, questions: question.questions } } as never)
+    }
+    // The model's task list (update_todos) appears in the sidebar as soon as it changes.
+    const todos = JSON.stringify(controller.view.todos ?? [])
+    if (this.activeId && todos !== this.emittedTodos) {
+      this.emittedTodos = todos
+      this.emit({ type: "todo.updated", properties: { sessionID: this.activeId, todos: JSON.parse(todos) } } as never)
+    }
     // Autonomy or mode changed by a command (/autonomy, /plan): the agent shown in the prompt (Tab) follows it.
     const agent = controller.view.mode === "plan" ? "plan" : controller.view.autonomy ? "autonomous" : "build"
     if (agent !== this.followedAgent) {
@@ -488,6 +541,13 @@ export class UptokeyBackend {
       this.shownSession = active ?? ""
       trace("navigate", { to: active ?? null })
       this.emit({ type: "uptokey.session.navigate", properties: { sessionID: active ?? null } })
+    }
+    // Redirections typed during a turn survive the loss of the process; after a crash they return to the composer.
+    const queued = (controller.view.steer ?? []).filter((item) => item.state !== "applied").map((item) => item.text)
+    const restored = this.pendingSteer.update(active, queued, this.temporary)
+    if (active && restored?.length) {
+      this.recoverDraft(active, { input: restored.join("\n\n"), parts: [] })
+      this.emit({ type: "tui.toast.show", properties: { message: ui("steer_restored"), variant: "info", duration: 5000 } } as never)
     }
     if (!active) {
       // A decision raised outside a conversation (e.g. /depurar typed on the home screen asks to confirm the debug
@@ -879,6 +939,21 @@ export class UptokeyBackend {
       await self.ready
       return fn()
     }
+    // SDK errors must be visible even to older consumers which do not inspect
+    // `error`. A failed or uncertain write is never converted into success or retried.
+    const verified = async <T>(fn: () => Promise<T>, options?: { throwOnError?: boolean }) => {
+      try {
+        await self.ready
+        if (self.disposed) throw Error('context_changed')
+        return { data: await fn(), error: undefined }
+      } catch (cause) {
+        const code = safeDiagnosticCode(cause instanceof Error ? cause.message : cause)
+        const error = { name: 'UptokeyActionError', data: { message: code } }
+        if (options?.throwOnError) throw Object.assign(Error(code), error)
+        self.emit({ type: 'tui.toast.show', properties: { variant: 'error', message: localizedDiagnostic(code) } })
+        return { data: undefined, error }
+      }
+    }
     const known = {
       global: {
         async upgrade() {
@@ -895,7 +970,7 @@ export class UptokeyBackend {
             const providers = self.connectedProviders()
             return { data: { providers, default: self.defaults(providers) }, error: undefined }
           }),
-        get: () => gate(() => ({ data: {}, error: undefined })),
+        get: () => gate(() => ({ data: { share: SDK_CAPABILITIES.uptokey.publicSessionSharing ? 'manual' : 'disabled' }, error: undefined })),
       },
       provider: {
         list: () =>
@@ -910,12 +985,15 @@ export class UptokeyBackend {
         auth: () => ok({}),
       },
       experimental: {
-        capabilities: { get: () => ok({ backgroundSubagents: false }) },
+        capabilities: { get: () => ok(SDK_CAPABILITIES) },
         console: { get: () => ok({ consoleManagedProviders: [], switchableOrgCount: 0 }) },
         resource: { list: () => ok({}) },
       },
       app: {
         agents: () => ok(AGENTS),
+        skills: () => gate(() => ok(controller.view.skills.map(skill => ({
+          name: skill.name, description: skill.description, location: skill.origin, content: skill.content,
+        })))),
       },
       path: {
         get: () =>
@@ -953,8 +1031,17 @@ export class UptokeyBackend {
             ),
           ),
       },
+      question: {
+        reply: (params: { requestID: string; answers: unknown }) => ok(controller.answerQuestion(params?.requestID, params?.answers)),
+        reject: (params: { requestID: string }) => ok(controller.rejectQuestion(params?.requestID)),
+        list: () => ok(controller.view.question && self.activeId ? [{ id: controller.view.question.id, sessionID: self.activeId, questions: controller.view.question.questions }] : []),
+      },
       lsp: { status: () => ok([]) },
-      mcp: { status: () => ok({}) },
+      // The governed filesystem server is the MCP consumer wired to the coding loop: report its real state.
+      mcp: { status: () => gate(async () => {
+        const catalog = await controller.workspace.getFilesystemCatalog?.().catch(() => null)
+        return ok(catalog ? { filesystem: catalog.available ? { status: "connected" as const } : { status: "disabled" as const } } : {})
+      }) },
       formatter: { status: () => ok([]) },
       vcs: {
         get: () => gate(() => ({ data: controller.view.git ? { branch: (controller.view.git as { branch?: string }).branch } : undefined, error: undefined })),
@@ -980,7 +1067,11 @@ export class UptokeyBackend {
         },
       },
       session: {
-        list: () => gate(() => ({ data: self.sessions(), error: undefined })),
+        // Conversations created by another client of the same core (web, editor, API) appear when the list is opened.
+        list: () => gate(async () => {
+          await controller.refreshConversationList()
+          return { data: self.sessions(), error: undefined }
+        }),
         status: () => ok({}),
         async get(params: { sessionID: string }) {
           await self.ready
@@ -989,14 +1080,73 @@ export class UptokeyBackend {
           if (!state || state.id !== params.sessionID) return fail("NotFoundError", "conversation_not_found")
           return { data: self.sessionInfo(state.id, state.title, state.updatedAt), error: undefined }
         },
-        async messages(params: { sessionID: string; limit?: number }) {
+        async messages(params: { sessionID: string; limit?: number; before?: string }) {
           await self.ready
-          await self.openSession(params.sessionID)
-          const projected = self.projection()
-          return { data: projected.slice(-(params.limit ?? 100)), error: undefined }
+          if (self.disposed || self.activeId !== params.sessionID) return fail('UptokeyActionError', 'context_changed')
+          try { return historyPage(self.projection(), params.before, params.limit) }
+          catch { return fail('UptokeyActionError', 'conversation_history_cursor_changed') }
         },
-        todo: () => ok([]),
+        async history(params: { sessionID: string }) {
+          await self.ready
+          if (self.disposed || self.activeId !== params.sessionID) return fail('UptokeyActionError', 'context_changed')
+          return { data: self.projection(), error: undefined, meta: { more: false } }
+        },
+        // The task list the model keeps with update_todos; no list means none was recorded.
+        todo: (params: { sessionID: string }) => ok(params?.sessionID === self.activeId ? controller.view.todos.map(todo => ({ ...todo })) : []),
         diff: () => ok([]),
+        update: (params: { sessionID: string; title: string }, options?: { throwOnError?: boolean }) => verified(async () => {
+          if (!params || typeof params.sessionID !== 'string' || !params.sessionID || typeof params.title !== 'string') throw Error('conversation_invalid')
+          const title = params.title.trim()
+          if ([...title].length < 1 || [...title].length > 160) throw Error('conversation_invalid')
+          const active = controller.state.activeConversation?.id
+          const revision = controller.store.conversationRevision
+          const binding = controller.view.binding
+          const storage = controller.state.storagePolicy
+          const processing = controller.state.processingPolicy
+          const assertCurrent = () => {
+            if (self.disposed) throw Error('context_changed')
+            if (active !== params.sessionID) return
+            if (controller.busy || controller.view.busy || controller.view.approvals.length) throw Error('conversation_busy')
+            if (controller.state.activeConversation?.id !== active || controller.store.conversationRevision !== revision
+              || controller.view.binding !== binding || controller.state.storagePolicy !== storage || controller.state.processingPolicy !== processing) throw Error('context_changed')
+          }
+          assertCurrent()
+          const current = await controller.conversations.getConversation(params.sessionID)
+          assertCurrent()
+          const response = await controller.client.fetchRaw(`/v1/workspace/conversations/${encodeURIComponent(params.sessionID)}/update`, {
+            method: 'POST', body: JSON.stringify({ expectedRevision: current.revision, title }),
+          })
+          if (!response.ok) throw Error(response.status === 409 ? 'conversation_conflict' : response.status === 401 || response.status === 403 ? 'scope_denied' : 'conversation_update_unconfirmed')
+          const committed = parseConversation(await response.json())
+          if (committed.id !== params.sessionID || committed.title !== title || committed.revision !== current.revision + 1
+            || committed.storagePolicy !== current.storagePolicy || committed.processingPolicy !== current.processingPolicy) throw Error('conversation_update_unconfirmed')
+          // A navigation during the acknowledged write does not redirect its result into another session.
+          if (controller.state.activeConversation?.id === params.sessionID && controller.store.conversationRevision === revision) {
+            controller.state.activeConversation.title = committed.title
+          }
+          await controller.refreshConversationList()
+          const info = { ...self.sessionInfo(committed.id, committed.title, committed.updatedAt), projectID: committed.projectId ?? 'global' }
+          self.emit({ type: 'session.updated', properties: { sessionID: committed.id, info } })
+          return info
+        }, options),
+        summarize: (params: { sessionID: string; providerID: string; modelID: string }, options?: { throwOnError?: boolean }) => verified(async () => {
+          if (!params || controller.state.activeConversation?.id !== params.sessionID) throw Error('context_changed')
+          if (controller.busy || controller.view.busy || controller.view.approvals.length) throw Error('conversation_busy')
+          const destination = controller.client.getSelectedDestination()
+          if (destination.providerId !== params.providerID || controller.state.selectedModel !== params.modelID) throw Error('conversation_identity_mismatch')
+          const revision = controller.store.conversationRevision
+          const binding = controller.view.binding
+          const storage = controller.state.storagePolicy
+          const processing = controller.state.processingPolicy
+          const before = new Set(controller.state.messages.filter(message => message.compaction).map(message => message.id))
+          await controller.compact()
+          if (self.disposed || controller.state.activeConversation?.id !== params.sessionID || controller.store.conversationRevision !== revision
+            || controller.view.binding !== binding || controller.state.storagePolicy !== storage || controller.state.processingPolicy !== processing
+            || controller.client.getSelectedDestination() !== destination || controller.state.selectedModel !== params.modelID) throw Error('context_changed')
+          if (!controller.state.messages.some(message => message.compaction && !before.has(message.id))) throw Error('conversation_compaction_not_completed')
+          self.sync()
+          return true
+        }, options),
         async create(params: { model?: { providerID: string; id: string } }) {
           await self.ready
           if (params.model) await self.selectDestination(params.model.providerID, params.model.id).catch(() => undefined)
@@ -1083,6 +1233,23 @@ export class UptokeyBackend {
         async delete(params: { sessionID: string }) {
           await controller.deleteConversation(params.sessionID)
           return { data: true, error: undefined }
+        },
+        /** Real turn reversal: recorded writes are reversed by a reviewed plan, then the conversation rewinds. */
+        async revert(params: { sessionID: string; messageID: string }) {
+          await self.ready
+          await self.openSession(params.sessionID)
+          const undone = await controller.undoTurn(params.messageID.replace(/^msg_/, ""))
+          const active = controller.state.activeConversation
+          if (!undone || !active) return fail("UnknownError", "turn_not_undone")
+          return { data: self.sessionInfo(active.id, active.title, active.updatedAt), error: undefined }
+        },
+        async unrevert(params: { sessionID: string }) {
+          await self.ready
+          await self.openSession(params.sessionID)
+          const redone = await controller.redoTurn()
+          const active = controller.state.activeConversation
+          if (!redone || !active) return fail("UnknownError", "turn_not_redone")
+          return { data: self.sessionInfo(active.id, active.title, active.updatedAt), error: undefined }
         },
         async fork(params: { sessionID: string; messageID?: string }) {
           await self.ready

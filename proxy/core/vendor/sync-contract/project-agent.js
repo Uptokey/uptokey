@@ -277,14 +277,16 @@ export function parseProjectChangeSet(input) {
     for (const k of Object.keys(op)) {
       if (!validOpKeys.includes(k)) invalid();
     }
-    if (!['mkdir', 'create', 'replace', 'move', 'patch_lines'].includes(op.type)) invalid();
+    if (!['mkdir', 'create', 'replace', 'move', 'patch_lines', 'delete'].includes(op.type)) invalid();
     if (!isSafeRelativePath(op.path)) invalid();
 
     if (op.type === 'move') {
       if (!isSafeRelativePath(op.fromPath) || op.fromPath === op.path) invalid();
     } else if (op.fromPath !== undefined) invalid();
 
-    if (op.type === 'replace' || op.type === 'patch_lines') {
+    // A deletion is bound to the exact bytes it removes; it never carries content.
+    if (op.type === 'delete' && (op.content !== undefined || op.newSha256 !== undefined || op.patches !== undefined)) invalid();
+    if (op.type === 'replace' || op.type === 'patch_lines' || op.type === 'delete') {
       if (!digest(op.expectedSha256)) invalid();
     } else if (op.expectedSha256 !== undefined && !digest(op.expectedSha256)) invalid();
 

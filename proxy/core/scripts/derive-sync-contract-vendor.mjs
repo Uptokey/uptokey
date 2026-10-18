@@ -10,7 +10,7 @@
  *   node scripts/derive-sync-contract-vendor.mjs --write    # copy source → vendor, remove orphans
  *   options: --source <dir> --vendor <dir> --json
  */
-import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync, rmSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync, rmSync, statSync, renameSync } from 'node:fs';
 import { join, dirname, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -57,7 +57,11 @@ export function deriveVendor(sourceDir, vendorDir) {
     const target = join(vendorDir, item.file);
     if (item.kind === 'orphan') { rmSync(target); continue; }
     mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, readFileSync(join(sourceDir, item.file)));
+    // Replace the directory entry instead of writing through it: vendor files may
+    // share an inode (hardlink) with preserved evidence copies elsewhere.
+    const staged = `${target}.derive-${process.pid}.tmp`;
+    writeFileSync(staged, readFileSync(join(sourceDir, item.file)), { flag: 'wx' });
+    renameSync(staged, target);
   }
   return before;
 }

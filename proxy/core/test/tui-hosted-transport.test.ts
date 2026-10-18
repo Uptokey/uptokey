@@ -78,7 +78,7 @@ test("one inference per request; unknown, pending, duplicate, wrong account and 
   }
 });
 
-test("actual loopback client uses the account broker once, leaves selection free of inference, preserves BYOK and refuses tools", async () => {
+test("actual loopback client uses the account broker once, leaves selection free of inference, preserves BYOK and validates declared tools", async () => {
   const requests: Array<{ path: string; authorization: string | undefined; body: any }> = [];
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
@@ -93,7 +93,10 @@ test("actual loopback client uses the account broker once, leaves selection free
     client.setHostedDestination(target); assert.equal(requests.length, 0);
     assert.equal(client.getSelectedDestination().providerId, HOSTED_PROVIDER);
     const destination = { ...client.getSelectedDestination(), hostedRequestId: "one" };
-    assert.throws(() => client.serializeChatInput(target.modelId, messages, destination, [{ type: "function", function: { name: "fake", parameters: {} } }]), /hosted_request_invalid/);
+    // Declared tools are a contract-validated part of the hosted request (the broker refuses them for models
+    // without the capability); a malformed declaration never reaches the network.
+    assert.throws(() => client.serializeChatInput(target.modelId, messages, destination, [{ type: "function", function: { name: "bad name", parameters: {} } }]), /hosted_request_invalid/);
+    assert.deepEqual(JSON.parse(client.serializeChatInput(target.modelId, messages, destination, [{ type: "function", function: { name: "fake", parameters: {} } }])).tools, [{ type: "function", function: { name: "fake", parameters: {} } }]);
     const events = []; for await (const event of client.chatStream(target.modelId, messages, "conversation", "external_allowed", undefined, destination)) events.push(event);
     assert.deepEqual(events.map(event => event.type), ["hosted_receipt", "text", "done"]);
     assert.equal(events[1]?.data, "synthetic answer"); assert.equal(requests.length, 1);

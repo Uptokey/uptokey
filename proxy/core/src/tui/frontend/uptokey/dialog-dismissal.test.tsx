@@ -58,6 +58,11 @@ async function mount() {
   const app = await testRender(() => <Harness />, { width: 100, height: 32, kittyKeyboard: true })
   const settle = async () => { await app.flush(); await Bun.sleep(5); await app.flush(); await app.renderOnce() }
   await settle()
+  const readyUntil = Date.now() + 2000
+  while (!dialog || !composer || !source) {
+    if (Date.now() >= readyUntil) throw new Error("dialog dismissal fixture did not mount its composer and selectable source")
+    await settle()
+  }
   return {
     app, dialog, composer, calls, copied, open, settle, picker: () => picker, leakedDismissals: () => leakedDismissals,
     selectSource() {

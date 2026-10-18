@@ -26,32 +26,33 @@ export interface DelegationSpec {
 }
 
 /**
- * `/delegar objetivo | subtarefa 1 | subtarefa 2 [--verificar] [--modelo m1,m2]`.
+ * `/delegate objective | subtask 1 | subtask 2 [--verify] [--model m1,m2]`
+ * (`--verificar` and `--modelo` remain accepted aliases).
  */
 export function parseDelegation(arg: string): DelegationSpec | { error: string } {
   const verify = /(^|\s)--verificar\b|(^|\s)--verify\b/.test(arg);
-  const modelMatch = arg.match(/(^|\s)--modelo\s+([^\s]+)/);
+  const modelMatch = arg.match(/(^|\s)--(?:modelo|model)\s+([^\s]+)/);
   const models = modelMatch ? modelMatch[2]!.split(",").map(s => s.trim()).filter(Boolean) : [];
   
   const text = arg
     .replace(/(^|\s)--(verificar|verify)\b/g, " ")
-    .replace(/(^|\s)--modelo\s+[^\s]+/g, " ")
+    .replace(/(^|\s)--(?:modelo|model)\s+[^\s]+/g, " ")
     .trim();
     
-  if (!text) return { error: "Informe o objetivo: /delegar objetivo | subtarefa 1 | subtarefa 2 [--verificar] [--modelo m1,m2]" };
+  if (!text) return { error: t("delegation_err_usage") };
   const lines = text.split(/\r?\n/);
   const bullets = lines.slice(1).filter((l) => /^\s*[-*]\s+\S/.test(l)).map((l) => l.replace(/^\s*[-*]\s+/, "").trim());
   const head = [lines[0]!, ...lines.slice(1).filter((l) => !/^\s*[-*]\s+\S/.test(l))].join(" ").trim();
   const parts = head.split("|").map((p) => p.trim()).filter(Boolean);
   const objective = parts[0] ?? "";
   const subtasks = [...parts.slice(1), ...bullets];
-  if (!objective) return { error: "Objetivo vazio." };
-  if (objective.length > MAX_TEXT || subtasks.some((s) => s.length > MAX_TEXT)) return { error: `Objetivo e subtarefas têm até ${MAX_TEXT} caracteres.` };
-  if (subtasks.length > MAX_SUBTASKS) return { error: `No máximo ${MAX_SUBTASKS} subtarefas por delegação.` };
+  if (!objective) return { error: t("delegation_err_empty") };
+  if (objective.length > MAX_TEXT || subtasks.some((s) => s.length > MAX_TEXT)) return { error: t("delegation_err_too_long", { max: MAX_TEXT }) };
+  if (subtasks.length > MAX_SUBTASKS) return { error: t("delegation_err_too_many", { max: MAX_SUBTASKS }) };
   
   const finalTasks = subtasks.length ? subtasks : [objective];
   if (models.length > 1 && models.length !== finalTasks.length) {
-    return { error: `Descritivo de modelos inválido: ${models.length} modelos para ${finalTasks.length} subtarefas. Forneça 1 modelo (aplicado a todos) ou exatamente 1 modelo por subtarefa.` };
+    return { error: t("delegation_err_models", { models: models.length, tasks: finalTasks.length }) };
   }
   
   const finalSubtasks = finalTasks.map((t, i) => ({

@@ -37,15 +37,15 @@ export interface ProviderSetupPreset {
 
 const LABELS: Record<string, string> = { deepseek: "DeepSeek", mistral: "Mistral", cerebras: "Cerebras", together: "Together AI", anthropic: "Anthropic", openrouter: "OpenRouter" };
 export const PROVIDER_SETUP_PRESETS: readonly ProviderSetupPreset[] = Object.freeze([
-  { id: "groq", label: "Groq", endpointUrl: "https://api.groq.com/openai/v1/chat/completions", protocol: "openai", local: false },
+  { id: "groq", label: "Groq", endpointUrl: "https://api.groq.com/openai/v1/chat/completions", protocol: "openai", local: false, getKeyUrl: "https://console.groq.com/keys" },
   { id: "gemini", label: "Google Gemini", endpointUrl: "https://generativelanguage.googleapis.com/v1beta/models", protocol: "gemini", local: false, documentationUrl: "https://ai.google.dev/gemini-api/docs/api-key", getKeyUrl: "https://aistudio.google.com/apikey", get notice() { return providerNoticeText("gemini"); } },
   ...Object.entries(NAMED_EXPERIMENTAL_DEFAULTS).map(([id, preset]) => ({ id, label: LABELS[id]!, endpointUrl: preset.endpointUrl,
     protocol: id === "anthropic" ? "anthropic" as const : "openai" as const, local: false,
     get notice() { return providerNoticeText(id); } })),
   { id: "custom-ovhcloud", label: "OVHcloud AI Endpoints", endpointUrl: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions", protocol: "openai", local: false },
-  { id: "custom-openai", label: "OpenAI", endpointUrl: "https://api.openai.com/v1/chat/completions", protocol: "openai", local: false },
-  { id: "custom-xai", label: "xAI", endpointUrl: "https://api.x.ai/v1/chat/completions", protocol: "openai", local: false },
-  { id: "custom-huggingface", label: "Hugging Face", endpointUrl: "https://router.huggingface.co/v1/chat/completions", protocol: "openai", local: false },
+  { id: "custom-openai", label: "OpenAI", endpointUrl: "https://api.openai.com/v1/chat/completions", protocol: "openai", local: false, getKeyUrl: "https://platform.openai.com/api-keys" },
+  { id: "custom-xai", label: "xAI", endpointUrl: "https://api.x.ai/v1/chat/completions", protocol: "openai", local: false, getKeyUrl: "https://console.x.ai" },
+  { id: "custom-huggingface", label: "Hugging Face", endpointUrl: "https://router.huggingface.co/v1/chat/completions", protocol: "openai", local: false, getKeyUrl: "https://huggingface.co/settings/tokens" },
   { id: "custom-nvidia", label: "NVIDIA NIM", endpointUrl: "https://integrate.api.nvidia.com/v1/chat/completions", protocol: "openai", local: false },
   ...PROVIDER_SETUP_CATALOG_PRESETS,
   { id: "ollama", label: "Ollama", endpointUrl: "http://127.0.0.1:11434/v1/chat/completions", protocol: "openai", local: true },

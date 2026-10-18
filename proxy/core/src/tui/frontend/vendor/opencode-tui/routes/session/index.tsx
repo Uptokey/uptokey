@@ -81,6 +81,7 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { UptokeyToolView } from "../../../../uptokey/views/tool-views.tsx" // UPTOKEY MODIFICATION (see UPSTREAM.json)
+import { chromeText } from "../../../../../ui-chrome.ts"
 import { LocationProvider } from "../../context/location"
 import { tr } from "../../../../uptokey/tr.ts"
 import { registerTranscriptSource } from "../../../../uptokey/transcript-selection.ts"
@@ -360,6 +361,22 @@ export function Session() {
   const keymap = useOpencodeKeymap()
   const dialog = useDialog()
   const renderer = useRenderer()
+  // Older pages are loaded on request; the reading position is kept by compensating the prepended height.
+  const frame = () => new Promise<void>((resolve) => setTimeout(resolve, 16))
+  const olderHistory = async (all = false) => {
+    const sessionID = route.sessionID
+    if (!sessionID || !sync.session.message.more(sessionID)) return
+    // scrollTop is the reading position inside the box; scroll.y is the box's place on screen.
+    const height = scroll?.scrollHeight ?? 0
+    const top = scroll?.scrollTop ?? 0
+    do await sync.session.message.loadMore(sessionID)
+    while (all && route.sessionID === sessionID && sync.session.message.more(sessionID))
+    if (route.sessionID !== sessionID || !scroll) return
+    renderer.requestRender()
+    // Layout of the prepended page may take more than one frame; wait until its height is measured.
+    for (let index = 0; index < 30 && scroll.scrollHeight === height; index++) await frame()
+    if (!all) scroll.scrollTop = top + Math.max(0, scroll.scrollHeight - height)
+  }
 
   event.on("session.status", (evt) => {
     if (evt.properties.sessionID !== route.sessionID) return
@@ -626,15 +643,15 @@ export function Session() {
         if (status?.type !== "idle") await sdk.client.session.abort({ sessionID: route.sessionID }).catch(() => {})
         const message = messagesBeforeRevert().findLast((item) => item.role === "user")
         if (!message) return
-        void sdk.client.session
-          .revert({
-            sessionID: route.sessionID,
-            messageID: message.id,
-          })
-          .then(() => {
-            toBottom()
-          })
-        const parts = sync.data.part[message.id]
+        const parts = sync.data.part[message.id] ?? []
+        dialog.clear()
+        // The prompt returns only after the backend confirms the turn was undone.
+        const result = await sdk.client.session.revert({
+          sessionID: route.sessionID,
+          messageID: message.id,
+        })
+        if (result.error) return
+        toBottom()
         prompt?.set(
           parts.reduce(
             (agg, part) => {
@@ -647,33 +664,22 @@ export function Session() {
             { input: "", parts: [] as PromptInfo["parts"] },
           ),
         )
-        dialog.clear()
       },
     },
     {
       title: tr("Redo"),
       value: "session.redo",
       category: tr("Session"),
-      enabled: !!session()?.revert?.messageID,
       slash: {
         name: "redo",
       },
-      run: () => {
+      // The undone turn lives on its original branch; the backend reports when nothing can be redone.
+      run: async () => {
         dialog.clear()
-        const messageID = session()?.revert?.messageID
-        if (!messageID) return
-        const message = messages().find((x) => x.role === "user" && x.id > messageID)
-        if (!message) {
-          void sdk.client.session.unrevert({
-            sessionID: route.sessionID,
-          })
-          prompt?.set({ input: "", parts: [] })
-          return
-        }
-        void sdk.client.session.revert({
+        const result = await sdk.client.session.unrevert({
           sessionID: route.sessionID,
-          messageID: message.id,
         })
+        if (!result.error) toBottom()
       },
     },
     {
@@ -714,8 +720,8 @@ export function Session() {
     {
       title: (() => {
         const next = nextThinkingMode(thinkingMode())
-        if (next === "hide") return "Collapse thinking"
-        return "Expand thinking"
+        if (next === "hide") return tr("Collapse thinking")
+        return tr("Expand thinking")
       })(),
       value: "session.toggle.thinking",
       category: tr("Session"),
@@ -763,6 +769,7 @@ export function Session() {
       run: () => {
         scroll.scrollBy(-scroll.height / 2)
         dialog.clear()
+        if (scroll.scrollTop <= 0) void olderHistory()
       },
     },
     {
@@ -820,9 +827,10 @@ export function Session() {
       value: "session.first",
       category: tr("Session"),
       hidden: true,
-      run: () => {
-        scroll.scrollTo(0)
+      run: async () => {
         dialog.clear()
+        await olderHistory(true)
+        scroll.scrollTo(0)
       },
     },
     {
@@ -930,10 +938,10 @@ export function Session() {
         try {
           const sessionData = session()
           if (!sessionData) return
-          const sessionMessages = messages()
+          const complete = await sync.session.message.all(sessionData.id)
           const transcript = formatTranscript(
             sessionData,
-            sessionMessages.map((msg) => ({ info: msg, parts: sync.data.part[msg.id] ?? [] })),
+            complete,
             {
               thinking: showThinking(),
               toolDetails: showDetails(),
@@ -961,7 +969,7 @@ export function Session() {
           assertFrontendExportAllowed()
           const sessionData = session()
           if (!sessionData) return
-          const sessionMessages = messages()
+          const complete = await sync.session.message.all(sessionData.id)
 
           const defaultFilename = `session-${sessionData.id.slice(0, 8)}.md`
 
@@ -979,7 +987,7 @@ export function Session() {
 
           const transcript = formatTranscript(
             sessionData,
-            sessionMessages.map((msg) => ({ info: msg, parts: sync.data.part[msg.id] ?? [] })),
+            complete,
             {
               thinking: options.thinking,
               toolDetails: options.toolDetails,
@@ -1206,7 +1214,11 @@ export function Session() {
                 flexGrow={1}
                 scrollAcceleration={scrollAcceleration()}
               >
-                <box height={1} />
+                <Show when={sync.session.message.more(route.sessionID)} fallback={<box height={1} />}>
+                  <text fg={theme.textMuted} onMouseUp={() => void olderHistory()}>
+                    {sync.session.message.loading(route.sessionID) ? tr("Loading earlier messages…") : tr("↑ Earlier messages — click or PageUp to load")}
+                  </text>
+                </Show>
                 <For each={messages()}>
                   {(message, index) => (
                     <Switch>
@@ -1645,7 +1657,8 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
           <box paddingLeft={inMinimal() ? 2 : 0} marginTop={1}>
             <code
               filetype="markdown"
-              drawUnstyledText={false}
+              // Uptokey: reasoning grows while the model thinks; text not yet highlighted is drawn instead of hidden.
+              drawUnstyledText={true}
               streaming={true}
               syntaxStyle={syntax()}
               content={summary().body}
@@ -1673,16 +1686,16 @@ function ReasoningHeader(props: {
       ? RGBA.fromValues(theme.warning.r, theme.warning.g, theme.warning.b, theme.thinkingOpacity)
       : theme.warning
   const completed = () => {
-    if (props.encrypted) return `Thought${props.duration ? ` · ${props.duration}` : ""}`
+    if (props.encrypted) return `${tr("Thought")}${props.duration ? ` · ${props.duration}` : ""}`
     const detail = [props.title, props.duration].filter(Boolean).join(" · ")
-    return `${props.toggleable ? (props.open ? "- " : "+ ") : ""}Thought${detail ? `: ${detail}` : ""}`
+    return `${props.toggleable ? (props.open ? "- " : "+ ") : ""}${tr("Thought")}${detail ? `: ${detail}` : ""}`
   }
 
   return (
     <Switch>
       <Match when={!props.done}>
         <box flexDirection="row">
-          <Spinner color={fg()}>{props.title ? "Thinking: " + props.title : tr("Thinking")}</Spinner>
+          <Spinner color={fg()}>{props.title ? `${tr("Thinking")}: ${props.title}` : tr("Thinking")}</Spinner>
         </box>
       </Match>
       <Match when={true}>
@@ -1722,9 +1735,11 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
 function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMessage }) {
   const ctx = use()
   const display = createMemo(() => toolDisplay(props.part.tool))
+  const notExecuted = createMemo(() => props.part.state.status !== "pending" && props.part.state.metadata?.uptokeyOutcome === "not_executed")
 
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
+    if (notExecuted()) return false
     if (ctx.showDetails()) return false
     if (props.part.state.status !== "completed") return false
     return true
@@ -1751,6 +1766,11 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   return (
     <Show when={!shouldHide()}>
       <Switch>
+        <Match when={notExecuted()}>
+          <InlineTool icon="⊘" pending="" complete={true} part={props.part}>
+            {props.part.tool} · {chromeText("tool_not_run")}
+          </InlineTool>
+        </Match>
         <Match when={display() === "bash"}>
           <Shell {...toolprops} />
         </Match>

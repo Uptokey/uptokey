@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
 import { testRender, useKeyboard, useRenderer } from "@opentui/solid"
+import { InputRenderable } from "@opentui/core"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -21,9 +22,10 @@ import { ToastProvider } from "../vendor/opencode-tui/ui/toast"
 import { DialogProvider, useDialog, type DialogContext } from "../vendor/opencode-tui/ui/dialog"
 import { DialogModel } from "../vendor/opencode-tui/component/dialog-model"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../vendor/opencode-tui/keymap"
-import { setBackend } from "./backend/registry.ts"
+import { getBackend, setBackend } from "./backend/registry.ts"
 import { accountText } from "../../account-ui.ts"
 import { getLang, setLang, type Lang } from "../../i18n.ts"
+import { tr } from "./tr.ts"
 
 type Choice = { providerID: string; modelID: string }
 const choice = (modelID: string, providerID = "connected") => ({ providerID, modelID })
@@ -57,6 +59,7 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
     async retryHostedModels() { retries++ },
   }
   setBackend({ directory: root, controller, client: {}, subscribe: () => () => {},
+    providerChoices: () => [],
     emit: (event: unknown) => events.push(event),
     onChange: (handler: () => void) => { changes.add(handler); return () => changes.delete(handler) },
   } as never)
@@ -89,10 +92,25 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
     local, app, original, root, events, account, controller, retries: () => retries,
     catalogReads: () => catalogReads,
     changeSubscribers: () => changes.size,
-    async openModels() { dialog.replace(() => <DialogModel />); await app.flush(); await app.renderOnce() },
+    async openModels() {
+      dialog.replace(() => <DialogModel />)
+      const focusedUntil = Date.now() + 2000
+      for (;;) {
+        await app.flush(); await app.renderOnce()
+        const focused = app.renderer.currentFocusedRenderable
+        if (focused instanceof InputRenderable && !focused.isDestroyed && focused.traits.status === "FILTER") return
+        if (Date.now() >= focusedUntil) throw new Error("model picker fixture did not focus its filter input")
+        await Bun.sleep(1)
+      }
+    },
+    filterValue() {
+      const focused = app.renderer.currentFocusedRenderable
+      return focused instanceof InputRenderable ? focused.value : undefined
+    },
     dialog: () => dialog,
     async accountChanged() { for (const handler of changes) handler(); await Bun.sleep(160); await app.flush(); await app.renderOnce() },
     available(items: Choice[]) { setData("provider", providerList(items)) },
+    disconnectedProviders(items: { id: string; name: string }[]) { setData("provider_next", "all", items as never) },
     updateModel(model: Choice, update: { name?: string; status?: string; options?: Record<string, string> }) {
       const index = data.provider.findIndex(provider => provider.id === model.providerID)
       if (index >= 0) setData("provider", index, "models", model.modelID, update)
@@ -325,6 +343,66 @@ test("Free model labels and the optional sign-in entry are localized in all ten 
       h.account.view.session.authenticated = true
       h.available([a, free])
     }
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})
+
+test("the complete model dialog chrome uses the selected language while model identifiers remain unchanged", async () => {
+  const previous = getLang()
+  const labels: [Lang, string, string, string, string][] = [
+    ["en", "Select model", "Favorites", "Recent", "Connect provider"],
+    ["pt-BR", "Selecionar modelo", "Favoritos", "Recentes", "Conectar provedor"],
+    ["es", "Seleccionar modelo", "Favoritos", "Recientes", "Conectar proveedor"],
+    ["fr", "Choisir un modèle", "Favoris", "Récents", "Connecter un fournisseur"],
+    ["de", "Modell auswählen", "Favoriten", "Zuletzt verwendet", "Anbieter verbinden"],
+    ["it", "Seleziona modello", "Preferiti", "Recenti", "Collega provider"],
+    ["ja", "モデルを選択", "お気に入り", "最近使用", "プロバイダーを接続"],
+    ["ko", "모델 선택", "즐겨찾기", "최근 사용", "제공업체 연결"],
+    ["zh-CN", "选择模型", "收藏", "最近使用", "连接提供商"],
+    ["ar", "اختيار نموذج", "المفضلة", "المستخدمة مؤخرًا", "ربط مزوّد"],
+  ]
+  try {
+    for (const [lang, title, favorites, recent, connect] of labels) {
+      setLang(lang)
+      const h = await mount([c], [a, b, c], a, [b])
+      try {
+        await h.openModels()
+        const frame = h.app.captureCharFrame()
+        for (const label of [title, favorites, recent, connect, "model-a", "model-b", "model-c"]) {
+          expect(frame).toContain(label)
+        }
+        if (lang !== "en") {
+          const lines = frame.split("\n").map(line => line.trim())
+          for (const source of ["Select model", "Favorites", "Recent"]) expect(lines).not.toContain(source)
+          expect(frame).not.toContain("Connect provider ctrl+a")
+        }
+        await h.app.mockInput.typeText("model-b"); await h.app.flush(); await h.app.renderOnce()
+        expect(h.filterValue()).toBe("model-b")
+        expect(h.app.captureCharFrame()).toContain(`(${tr("Favorite")})`)
+        if (lang !== "en") expect(h.app.captureCharFrame()).not.toContain("(Favorite)")
+        h.available([])
+        await h.openModels()
+        expect(h.app.captureCharFrame()).toContain(tr("View all providers"))
+        if (lang !== "en") expect(h.app.captureCharFrame()).not.toContain("View all providers")
+      } finally { h.app.renderer.destroy() }
+    }
+  } finally { setLang(previous) }
+})
+
+test("a popular provider from an empty model catalog uses masked canonical key entry", async () => {
+  const previous = getLang(); setLang("en")
+  const h = await mount([], [])
+  const provider = { id: "synthetic-cloud", label: "Synthetic Cloud", local: false, configured: false, executable: true, endpointUrl: "https://example.test/v1" }
+  Object.assign(getBackend(), { providerChoices: () => [provider], providerSetup: {} })
+  h.disconnectedProviders([{ id: provider.id, name: provider.label }])
+  try {
+    await h.openModels(); await Bun.sleep(5); await h.app.flush()
+    expect(h.app.captureCharFrame()).toContain(provider.label)
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    await h.app.mockInput.typeText("synthetic-not-a-real-key"); await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).not.toContain("synthetic-not-a-real-key")
+    expect(h.app.captureCharFrame()).toContain("••")
+    h.app.mockInput.pressEscape(); await h.app.flush()
+    expect(h.dialog().stack).toHaveLength(0)
   } finally { h.app.renderer.destroy(); setLang(previous) }
 })
 

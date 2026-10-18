@@ -39,14 +39,16 @@ export interface DialogSelectProps<T> {
   renderFilter?: boolean
   locked?: boolean
   preserveSelection?: boolean
-  actions?: {
+  actions?: ({
     command: string
     title: string
     side?: "left" | "right"
     hidden?: boolean
     disabled?: boolean | ((option: DialogSelectOption<T> | undefined) => boolean)
-    onTrigger: (option: DialogSelectOption<T>) => void
-  }[]
+  } & (
+    | { selection: "none"; onTrigger: () => void }
+    | { selection?: "required"; onTrigger: (option: DialogSelectOption<T>) => void }
+  ))[]
   footerHints?: {
     title: string
     label: string
@@ -144,17 +146,6 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       .filter((item) => item.label),
     ...(props.footerHints ?? []),
   ])
-  const actionItems = createMemo(() =>
-    visibleActions()
-      .filter(isActionItem)
-      .filter((item) => !isActionDisabled(item)),
-  )
-
-  createEffect(() => {
-    const index = focusedAction()
-    if (index !== undefined && index >= actionItems().length) setFocusedAction(undefined)
-  })
-
   const filtered = createMemo(() => {
     if (props.skipFilter || props.renderFilter === false) return props.options.filter((x) => x.disabled !== true)
     const needle = store.filter.toLowerCase()
@@ -188,6 +179,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   const flatten = createMemo(() => props.flat && store.filter.length > 0)
 
   const grouped = createMemo<[string, DialogSelectOption<T>[]][]>(() => {
+    if (filtered().length === 0) return []
     if (flatten()) return [["", filtered()]]
     const result = pipe(
       filtered(),
@@ -275,6 +267,18 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   })
 
   const selected = createMemo(() => flat()[store.selected])
+  // Commands may already be registered by the app, so this memo can run immediately.
+  // Initialize its selection dependency before evaluating enabled footer actions.
+  const actionItems = createMemo(() =>
+    visibleActions()
+      .filter(isActionItem)
+      .filter((item) => !isActionDisabled(item)),
+  )
+
+  createEffect(() => {
+    const index = focusedAction()
+    if (index !== undefined && index >= actionItems().length) setFocusedAction(undefined)
+  })
 
   createEffect(
     on(
@@ -527,12 +531,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           title: item.title,
           category: tr("Dialog"),
           run() {
-            if (props.locked) return
-            if (isActionDisabled(item)) return
-            setStore("input", "keyboard")
-            const option = selected()
-            if (!option) return
-            item.onTrigger(option)
+            runAction(item)
           },
         })),
       ],
@@ -594,9 +593,17 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   const right = createMemo(() => visibleActions().filter((item) => item.side === "right"))
 
   function triggerAction(item: VisibleAction | undefined) {
+    if (item && isActionItem(item)) runAction(item)
+  }
+
+  function runAction(item: Action) {
     if (props.locked) return
-    if (!item || !isActionItem(item) || isActionDisabled(item)) return
+    if (isActionDisabled(item)) return
     setStore("input", "keyboard")
+    if (item.selection === "none") {
+      item.onTrigger()
+      return
+    }
     const option = selected()
     if (!option) return
     item.onTrigger(option)
@@ -607,6 +614,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   }
 
   function isActionDisabled(item: Action) {
+    if (item.selection !== "none" && !selected()) return true
     return typeof item.disabled === "function" ? item.disabled(selected()) : item.disabled
   }
 
@@ -677,6 +685,8 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
               ref={(r) => {
                 input = r
                 input.traits = { status: "FILTER" }
+                // Focus now as well: keys typed while boot keeps the event loop busy would otherwise be dropped.
+                try { input.focus() } catch {}
                 setTimeout(() => {
                   if (!input) return
                   if (input.isDestroyed) return

@@ -34,7 +34,7 @@ export async function isLocalWorkflowRequest(path: string, body: unknown, readPl
   if (!match) return false;
   const [, project, operation] = match;
   if (/^project-agent\/(?:preflight|plans|run-promotions)$/.test(operation!)) return true;
-  if (/^project-roots\/[A-Za-z0-9][A-Za-z0-9_-]{0,99}\/restore-file$/.test(operation!)) return true;
+  if (/^project-roots\/[A-Za-z0-9][A-Za-z0-9_-]{0,99}\/restore-(?:file|turn)$/.test(operation!)) return true;
   if (operation === 'project-agent/run-plans') return isDataRecord(body) && isLocalRunnerRequest(body.request);
   if (!['consent/challenge', 'consent/complete', 'runs/start'].includes(operation!)) return false;
   try {

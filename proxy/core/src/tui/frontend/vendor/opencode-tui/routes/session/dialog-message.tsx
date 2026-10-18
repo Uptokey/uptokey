@@ -27,17 +27,19 @@ export function DialogMessage(props: {
           title: tr("Revert"),
           value: "session.revert",
           description: tr("undo messages and file changes"),
-          onSelect: (dialog) => {
+          onSelect: async (dialog) => {
             const msg = message()
             if (!msg) return
-
-            void sdk.client.session.revert({
+            // The prompt returns only after the backend confirms the turn was undone.
+            const parts = sync.data.part[msg.id] ?? []
+            dialog.clear()
+            const result = await sdk.client.session.revert({
               sessionID: props.sessionID,
               messageID: msg.id,
             })
+            if (result.error) return
 
             if (props.setPrompt) {
-              const parts = sync.data.part[msg.id]
               const promptInfo = parts.reduce(
                 (agg, part) => {
                   if (part.type === "text") {
@@ -50,8 +52,6 @@ export function DialogMessage(props: {
               )
               props.setPrompt(promptInfo)
             }
-
-            dialog.clear()
           },
         },
         {

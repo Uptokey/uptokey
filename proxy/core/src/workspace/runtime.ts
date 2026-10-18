@@ -66,7 +66,7 @@ import {
   type ProjectChangeSet
 } from '@uptokey/sync-contract/project-agent';
 import { ProjectRootService, isProtectedProjectPath } from './project-root-service.ts';
-import { ProjectWriteService } from './project-write-service.ts';
+import { ProjectWriteError, ProjectWriteService } from './project-write-service.ts';
 import { ProjectPreviewService } from './project-preview-service.ts';
 import { ProjectRunnerService } from './project-runner-service.ts';
 import { ProjectAgentCoordinator } from './project-agent.ts';
@@ -77,7 +77,7 @@ import { WorkflowExecutor, type EffectRequest, type EffectOutcome } from './exec
 import type { AccessGateDecision } from './policy.ts';
 import { normalizeUsage, isNotSent, isPolicyDenial } from './receipts.ts';
 import { UsageValueEngine, OFFICIAL_REFERENCE_TARIFFS } from './usage-value.ts';
-import type { WorkspaceStore } from './store.ts';
+import type { StoredWriteIntent, WorkspaceStore } from './store.ts';
 import type { WorkspaceTelemetryOutbox } from './telemetry-outbox.ts';
 import {ProtocolStreams} from './protocol-streams.ts';
 import {WorkspaceApiInstruments, type ApiInstrumentsOptions, type LearnedApiRecipe} from './api-instruments.ts';
@@ -619,6 +619,48 @@ export class WorkspaceRuntime {
       objective: `Restaurar ${input.relativePath} antes da operação ${input.operationId}`
     }, signal);
     return { view, relativePath: input.relativePath, operationId: input.operationId, before: prepared.before, after: prepared.after };
+  }
+
+  /**
+   * Prepares one reviewed W5 plan reversing the project writes of the given runs
+   * (one conversation turn, in execution order). Never writes project files and
+   * never claims to reverse effects other than these recorded writes.
+   */
+  async restoreProjectTurn(principal: string, projectId: string, rootBindingId: string, input: unknown, signal?: AbortSignal) {
+    if (!isDataRecord(input) || !Array.isArray(input.runIds) || !input.runIds.length || input.runIds.length > 200
+      || input.runIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id))
+      || !Number.isSafeInteger(input.expectedRevision)) throw new WorkspaceError('invalid_request');
+    const runIds = [...new Set(input.runIds as string[])];
+    const project = await this.store.getProject(principal, projectId);
+    if (project.ownerPrincipalId !== principal) throw new WorkspaceError('project_missing', 404);
+    await this.projectRoot.ensureRootLoaded(rootBindingId, this.store, principal, projectId);
+    const bundle = await this.store.getBundle(principal, projectId);
+    const intents: StoredWriteIntent[] = [];
+    const otherEffects: { runId: string; capabilityId: string }[] = [];
+    for (const runId of runIds) {
+      const record = bundle.runs.find(item => item.run.id === runId);
+      if (!record || record.run.principalId !== principal) throw new WorkspaceError('run_not_found', 404);
+      const plan = bundle.plans.find(item => item.id === record.run.planId);
+      for (const step of plan?.steps ?? []) {
+        if (step.capabilityId !== PROJECT_WRITE_CAPABILITY.id) { otherEffects.push({ runId, capabilityId: step.capabilityId }); continue; }
+        const operationId = `op-${sha(JSON.stringify([principal, projectId, runId, step.id]))}`;
+        const intent = bundle.writeIntents?.find(item => item.operationId === operationId);
+        if (intent) intents.push(intent);
+      }
+    }
+    if (!intents.length) throw new WorkspaceError('turn_restore_nothing_to_restore', 409, { otherEffects });
+    let prepared: ReturnType<ProjectWriteService['prepareTurnRestore']>;
+    try { prepared = this.projectWrite.prepareTurnRestore(projectId, rootBindingId, intents); }
+    catch (error) {
+      if (error instanceof ProjectWriteError && error.status === 409) throw new WorkspaceError(error.message, 409, { ...(isDataRecord(error.details) ? error.details : {}), otherEffects });
+      throw error;
+    }
+    signal?.throwIfAborted();
+    const view = await this.createProjectTaskPlan(principal, projectId, {
+      expectedRevision: input.expectedRevision, rootBindingId, changeSet: prepared.changeSet,
+      objective: `Undo turn writes (${runIds.length} run${runIds.length === 1 ? '' : 's'})`
+    }, signal);
+    return { view, runIds, files: prepared.files, directories: prepared.directories, otherEffects };
   }
 
   /** Read-only diff of a proposed changeSet. Applying it still requires plan + consent. */

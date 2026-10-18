@@ -3,7 +3,7 @@
  * Provides status, diff, staging, and commit operations via git CLI.
  * Runs in the project root directory.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -87,8 +87,27 @@ export class GitService {
   /** Get diff of working directory or staged changes. */
   async diff(staged = false): Promise<string> {
     const args = staged ? ["diff", "--staged"] : ["diff"];
-    const { stdout } = await exec("git", args, { cwd: this.cwd, timeout: 10000, maxBuffer: MAX_BUFFER });
-    return stdout;
+    // A very large working tree must not fail the read: keep the first MAX_BUFFER bytes and say so.
+    return new Promise<string>((resolve, reject) => {
+      const child = spawn("git", args, { cwd: this.cwd, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+      const chunks: Buffer[] = [];
+      let size = 0, truncated = false;
+      const timer = setTimeout(() => { child.kill(); reject(new Error("git_diff_timeout")); }, 10_000);
+      child.stdout.on("data", (chunk: Buffer) => {
+        if (truncated) return;
+        const room = MAX_BUFFER - size;
+        chunks.push(chunk.length > room ? chunk.subarray(0, room) : chunk);
+        size += Math.min(chunk.length, room);
+        if (chunk.length >= room) { truncated = true; child.kill(); }
+      });
+      child.on("error", (error) => { clearTimeout(timer); reject(error); });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (!truncated && code !== 0) return reject(new Error(`git_diff_failed_${code}`));
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve(truncated ? `${text}\n… [diff truncated at ${MAX_BUFFER} bytes]\n` : text);
+      });
+    });
   }
 
   /** Stage files. */
