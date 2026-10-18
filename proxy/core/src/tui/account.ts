@@ -93,6 +93,11 @@ export class TuiAccount extends EventEmitter {
       try { await action(operation.signal); if (operation.current()) this.retryAt = 0; }
       catch (error) { if (operation.current()) {
         this.view.error = this.error(error);
+        const status = Number((error as { status?: unknown })?.status);
+        if (status === 401 || status === 403 || /^account_(?:challenge_expired|session_expired|session_revoked|reauthentication_required|share_denied)$/.test(this.view.error)) {
+          this.view.login = null; this.view.challenge = null;
+          this.view.session = null; this.view.available = null; this.view.usage = null; this.clearPlan();
+        }
         if (this.view.error === "account_rate_limited") this.retryAt = this.now() + Math.max(this.interval, Number((error as { retryAfterMs?: number }).retryAfterMs) || 10_000);
       } }
       finally { if (operation.current()) { this.active = null; this.activeKind = null; this.view.busy = false; this.change(); this.schedule(); } }
@@ -110,17 +115,27 @@ export class TuiAccount extends EventEmitter {
       throw error;
     }
     if (signal.aborted || this.disposed) return;
-    this.view.session = session;
-    this.view.usage = session.authenticated ? this.view.usage : null;
-    if (!session.authenticated) this.clearPlan();
-    if (session.authenticated) { this.view.challenge = null; this.view.login = null; }
+    // A verified loss of authority takes effect even when the following
+    // optional account projection is temporarily unavailable.
+    if (!session.authenticated) {
+      this.view.session = session; this.view.available = null; this.view.requests = []; this.view.usage = null; this.clearPlan();
+      if (this.view.login && session.state === "signed_out") {
+        this.view.login = null;
+        throw new Error("account_reauthentication_required");
+      }
+    }
     const available = await this.client.getAvailableAccounts(signal);
     if (signal.aborted || this.disposed) return;
-    this.view.available = available;
-    if (this.planBinding && this.binding() !== this.planBinding) { this.clearPlan(); this.view.usage = null; }
     const requests = available.currentOwned ? await this.client.getAccountRequests(signal) : [];
     if (!signal.aborted && !this.disposed) {
+      // Status alone is not a usable account. Keep the existing challenge while
+      // a transient projection failure is retried, and publish one coherent view.
+      this.view.session = session; this.view.available = available;
+      this.view.usage = session.authenticated ? this.view.usage : null;
+      if (!session.authenticated) this.clearPlan();
+      if (this.planBinding && this.binding() !== this.planBinding) { this.clearPlan(); this.view.usage = null; }
       this.view.requests = requests;
+      if (session.authenticated) { this.view.challenge = null; this.view.login = null; }
       if (this.planRequested && session.authenticated) void this.loadPlan();
     }
   }

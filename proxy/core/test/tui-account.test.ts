@@ -244,7 +244,7 @@ test("pending browser status remains neutral across HTTP 409 and connects after 
     } else if (request.url === "/local/account/status") {
       statuses++; response.statusCode = approved ? 200 : 409;
       response.end(JSON.stringify(approved ? connected : { error: { type: "account_challenge_pending" } }));
-    } else if (request.url === "/local/account/available") response.end(JSON.stringify({ ...noAccounts(), revision: 1, currentAccountRef: ref, currentOwned: false }));
+    } else if (request.url === "/local/account/available") response.end(JSON.stringify({ revision: 1, currentAccountRef: ref, currentOwned: false, accounts: [{ accountRef: ref, owned: false, expiresAt: Date.now() + 60_000, session: connected }] }));
     else { response.statusCode = 500; response.end("{}"); }
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening"); t.after(() => { server.closeAllConnections(); server.close(); });
@@ -262,4 +262,71 @@ test("account polling stays below the local twenty-per-minute limit and preserve
   server.listen(0, "127.0.0.1"); await once(server, "listening"); t.after(() => { server.closeAllConnections(); server.close(); });
   const client = new TuiClient({ baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, token: "synthetic" }); t.after(() => client.destroy());
   await assert.rejects(client.getAccountSession(), error => error instanceof Error && error.message === "account_rate_limited" && (error as Error & { retryAfterMs: number }).retryAfterMs === 27_000);
+});
+
+test("approved login retries incomplete account projections without another login or manual Refresh", async t => {
+  for (const stage of ["available", "requests"] as const) {
+    const f = fixture(); t.after(() => f.account.dispose());
+    await f.account.refresh(); await f.account.login(() => true);
+    const pending = f.account.view.login; assert.ok(pending);
+    f.state(connected, { revision: 7, currentAccountRef: ref, currentOwned: true, accounts: [{ accountRef: ref, owned: true, expiresAt: Date.now() + 60_000, session: connected }] });
+    let rejected = false;
+    const rejectFirst = <T>(original: () => Promise<T>) => async (): Promise<T> => {
+      if (!rejected) { rejected = true; throw Object.assign(Error(stage === "available" ? "account_rate_limited" : "account_service_unavailable"), { retryAfterMs: 5 }); }
+      return original();
+    };
+    if (stage === "available") f.client.getAvailableAccounts = rejectFirst(f.client.getAvailableAccounts);
+    else f.client.getAccountRequests = rejectFirst(f.client.getAccountRequests);
+    await waitUntil(() => rejected && !f.account.view.busy && f.account.view.error !== null);
+    assert.equal(f.account.view.login, pending, "partial success must retain its bounded recovery challenge");
+    assert.equal(f.account.view.session?.authenticated, false, "status cannot publish an unbound connected account");
+    await waitUntil(() => !f.account.view.busy && f.account.view.available?.revision === 7);
+    assert.equal(f.account.view.session?.authenticated, true); assert.equal(f.account.view.login, null); assert.equal(f.account.view.error, null);
+    assert.equal(f.calls.filter(call => call === "login").length, 1);
+    const count = f.calls.length; await delay(20); assert.equal(f.calls.length, count, "recovered accounts stop polling");
+    f.account.dispose();
+  }
+});
+
+test("cancellation during an approved projection never publishes its late account", async t => {
+  const f = fixture(); t.after(() => f.account.dispose()); await f.account.refresh(); await f.account.login(() => true);
+  f.state(connected);
+  let finish!: (value: TuiAccountAvailable) => void;
+  f.client.getAvailableAccounts = () => new Promise(resolve => { finish = resolve; });
+  await waitUntil(() => Boolean(finish)); f.account.cancelPending(); finish(noAccounts());
+  await delay(20); assert.notEqual(f.account.view.session?.authenticated, true); assert.equal(f.account.view.login, null);
+  const count = f.calls.length; await delay(20); assert.equal(f.calls.length, count);
+});
+
+test("authorization denial, revocation and an exhausted native challenge stop automatic recovery", async t => {
+  for (const failure of [Object.assign(Error("account_service_unavailable"), { status: 401 }), Object.assign(Error("account_service_unavailable"), { status: 403 }), Error("account_session_revoked"), Error("account_challenge_expired")]) {
+    const f = fixture(); t.after(() => f.account.dispose()); await f.account.login(() => true);
+    f.client.getAccountSession = async () => { f.calls.push("denied"); throw failure; };
+    await waitUntil(() => f.account.view.error !== null && !f.account.view.busy);
+    assert.equal(f.account.view.login, null); assert.equal(f.account.view.available, null); assert.equal(f.account.view.session, null);
+    const count = f.calls.length; await delay(20); assert.equal(f.calls.length, count, "terminal denial cannot poll forever");
+    f.account.dispose();
+  }
+  const f = fixture(); t.after(() => f.account.dispose()); await f.account.login(() => true);
+  await waitUntil(() => f.account.view.error === "account_reauthentication_required");
+  assert.equal(f.account.view.login, null);
+});
+
+test("account transport preserves terminal HTTP status without exposing response details", async t => {
+  let status = 401;
+  const server = createServer((_request, response) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify({ error: { type: "local_auth_invalid", detail: "not-public" } })); });
+  server.listen(0, "127.0.0.1"); await once(server, "listening"); t.after(() => { server.closeAllConnections(); server.close(); });
+  const client = new TuiClient({ baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, token: "synthetic" }); t.after(() => client.destroy());
+  for (status of [401, 403]) await assert.rejects(client.getAvailableAccounts(), error => error instanceof Error && error.message === "account_service_unavailable" && (error as Error & { status: number }).status === status && !error.message.includes("not-public"));
+});
+
+test("verified sign-out clears previous account authority even when its projection is rate limited", async t => {
+  const f = fixture(); t.after(() => f.account.dispose());
+  f.state(connected, { revision: 3, currentAccountRef: ref, currentOwned: false, accounts: [{ accountRef: ref, owned: false, expiresAt: Date.now() + 60_000, session: connected }] });
+  await f.account.refresh(); await f.account.loadUsage(); assert.equal(f.account.view.session?.authenticated, true);
+  f.state(signedOut); f.client.getAvailableAccounts = async () => { throw Error("account_rate_limited"); };
+  await f.account.refresh();
+  assert.equal(f.account.view.session?.authenticated, false); assert.equal(f.account.view.available, null);
+  assert.deepEqual(f.account.view.requests, []); assert.equal(f.account.view.usage, null); assert.equal(f.account.view.plan.state, "unknown");
+  assert.equal(f.account.view.login, null); assert.equal(f.account.view.error, "account_rate_limited");
 });
