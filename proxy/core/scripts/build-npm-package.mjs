@@ -113,6 +113,8 @@ export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROO
       `UPTOKEY_BUILD_VERSION=${JSON.stringify(buildVersion)}`,
       "--define",
       'UPTOKEY_DISTRIBUTION_CHANNEL="npm"',
+      "--define",
+      'UPTOKEY_REPO_MAP_WORKER_PATH="./tui/repo-map-worker.js"',
       `--metafile=${metafile}`,
       ...bundlerExternals.filter(arg => entry !== "src/workspace-context-helper.ts" || arg !== "--external=eventsource-parser")
     ],

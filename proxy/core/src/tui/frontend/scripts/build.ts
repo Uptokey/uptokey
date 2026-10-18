@@ -26,6 +26,7 @@ const compile = process.argv.includes("--compile")
 const metafilePath = flag("--metafile") ? path.resolve(flag("--metafile")!) : undefined
 const version = (await Bun.file(path.join(root, "../../../package.json")).json()).version as string
 const distributionDefine = {
+  UPTOKEY_REPO_MAP_WORKER_PATH: JSON.stringify("./repo-map-worker.js"),
   UPTOKEY_DISTRIBUTION_CHANNEL: JSON.stringify(process.argv.includes("--portable") ? "npm" : "native"),
   UPTOKEY_BUILD_VERSION: JSON.stringify(version),
 }
@@ -68,7 +69,7 @@ if (process.argv.includes("--linear")) {
     minify: process.argv.includes("--minify"),
     metafile: metafilePath !== undefined,
     naming: { entry: "[name].js" },
-    entrypoints: flag("--entry") ? [entry] : ["./uptokey/linear-entry.ts"],
+    entrypoints: [flag("--entry") ? entry : "./uptokey/linear-entry.ts", "../repo-map-worker.ts"],
   })
   if (!result.success) {
     for (const log of result.logs) console.error(log)
@@ -97,8 +98,8 @@ if (compile) {
     splitting: true,
     compile: { autoloadBunfig: false, autoloadDotenv: false, autoloadTsconfig: true, autoloadPackageJson: true, outfile: path.join(outdir, exe) },
     files: { [workerName]: worker },
-    entrypoints: [entry, workerName],
-    define: { ...define, OTUI_TREE_SITTER_WORKER_PATH: JSON.stringify(bunfsRoot + workerName) },
+    entrypoints: [entry, workerName, "../repo-map-worker.ts"],
+    define: { ...define, OTUI_TREE_SITTER_WORKER_PATH: JSON.stringify(bunfsRoot + workerName), UPTOKEY_REPO_MAP_WORKER_PATH: JSON.stringify(bunfsRoot + "repo-map-worker.ts") },
   })
   if (!result.success) {
     for (const log of result.logs) console.error(log)
@@ -122,7 +123,7 @@ if (compile) {
     bytecode: process.argv.includes("--bytecode"),
     metafile: metafilePath !== undefined,
     naming: { entry: "[name].js", chunk: "chunk-[hash].js", asset: "[name]-[hash].[ext]" },
-    entrypoints: [entry],
+    entrypoints: [entry, "../repo-map-worker.ts"],
     define,
   })
   if (!result.success) {

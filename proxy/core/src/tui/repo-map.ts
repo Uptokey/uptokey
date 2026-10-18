@@ -3,8 +3,10 @@
  * context using the shared repository analysis service.
  */
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join, relative, extname } from "node:path";
-import { rankedRepoMap } from "../coding/repo-map-v2.ts";
+import { join, relative, extname, isAbsolute } from "node:path";
+import { Worker } from "node:worker_threads";
+
+declare const UPTOKEY_REPO_MAP_WORKER_PATH: string | undefined;
 
 export interface RepoSymbol {
   name: string;
@@ -17,6 +19,13 @@ export interface RepoMapEntry {
   path: string;
   symbols: RepoSymbol[];
   size: number;
+}
+
+export interface RepoMapOptions {
+  maxFiles?: number;
+  maxFileSize?: number;
+  ignorePatterns?: string[];
+  signal?: AbortSignal;
 }
 
 const IGNORE_DIRS = new Set([
@@ -122,14 +131,34 @@ async function buildRepoMapLegacy(
 /** Compatibility facade: the canonical map is now PageRank + symbol graph. */
 export async function buildRepoMap(
   rootPath: string,
-  options?: { maxFiles?: number; maxFileSize?: number; ignorePatterns?: string[] },
+  options: RepoMapOptions = {},
 ): Promise<RepoMapEntry[]> {
-  const ranked = await rankedRepoMap(rootPath, [], { maxFiles: options?.maxFiles, maxFileSize: options?.maxFileSize });
-  return ranked.slice(0, options?.maxFiles ?? 500).map((entry) => ({
-    path: entry.path,
-    size: entry.size,
-    symbols: entry.symbols.map((symbol) => ({ name: symbol.name, type: symbol.kind === "fn" ? "function" : symbol.kind === "class" ? "class" : symbol.kind === "method" ? "method" : symbol.kind === "type" ? "type" : symbol.kind === "const" ? "const" : "export", file: entry.path, line: 0 })),
-  }));
+  options.signal?.throwIfAborted();
+  const workerPath = typeof UPTOKEY_REPO_MAP_WORKER_PATH === "string"
+    ? UPTOKEY_REPO_MAP_WORKER_PATH : "./repo-map-worker.ts";
+  const worker = new Worker(isAbsolute(workerPath) ? workerPath : new URL(workerPath, import.meta.url), {
+    workerData: { rootPath, options: { maxFiles: options.maxFiles, maxFileSize: options.maxFileSize, ignorePatterns: options.ignorePatterns } },
+  });
+  try {
+    return await new Promise<RepoMapEntry[]>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error, entries?: RepoMapEntry[]) => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener("abort", abort);
+        if (error) reject(error); else resolve(entries!);
+      };
+      const abort = () => finish(options.signal?.reason instanceof Error ? options.signal.reason : new DOMException("Aborted", "AbortError"));
+      worker.once("message", (message: { entries?: RepoMapEntry[]; error?: string }) => {
+        if (message.error || !Array.isArray(message.entries)) finish(new Error("repo_map_worker_failed"));
+        else finish(undefined, message.entries);
+      });
+      worker.once("error", error => finish(error instanceof Error ? error : new Error("repo_map_worker_failed")));
+      worker.once("exit", () => finish(new Error("repo_map_worker_closed")));
+      options.signal?.addEventListener("abort", abort, { once: true });
+      if (options.signal?.aborted) abort();
+    });
+  } finally { await worker.terminate(); }
 }
 
 /**

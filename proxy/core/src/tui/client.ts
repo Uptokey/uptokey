@@ -315,6 +315,11 @@ export class TuiClient extends EventEmitter {
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12_000)]) : AbortSignal.timeout(12_000),
     });
     const parsed = await readBoundedJson(response, ["available", "requests"].includes(path) ? ACCOUNT_MAX_CLIENT_RESPONSE_BYTES : ACCOUNT_MAX_RESPONSE_BYTES);
+    if (response.status === 429) {
+      const retry = response.headers.get("retry-after") ?? "";
+      const wait = /^\d+$/.test(retry) ? Number(retry) * 1_000 : Date.parse(retry) - Date.now();
+      throw Object.assign(new Error("account_rate_limited"), { retryAfterMs: Number.isFinite(wait) ? Math.min(60_000, Math.max(1_000, wait)) : 10_000 });
+    }
     if (!parsed.ok || !parsed.value || typeof parsed.value !== "object" || Array.isArray(parsed.value)) throw new Error("account_response_invalid");
     const row = parsed.value as Record<string, unknown>;
     if (!response.ok) {

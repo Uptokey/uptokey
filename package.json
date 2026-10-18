@@ -1,6 +1,6 @@
 {
   "name": "uptokey-public-source",
-  "version": "0.1.0-beta.17",
+  "version": "0.1.0-beta.18",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "engines": {
@@ -9,7 +9,7 @@
   "scripts": {
     "build": "npm --prefix proxy/core run build",
     "build:tui": "npm --prefix proxy/core run build:tui -- --portable",
-    "test": "node --experimental-strip-types --test test/public-source.test.mjs proxy/core/test/tui-revert-diff-security.test.ts proxy/core/test/tui-frontend-echo-benchmark.test.ts proxy/core/test/tui-hosted-transport.test.ts proxy/core/test/tui-hosted-workflow.test.ts proxy/core/test/tui-stream-performance.test.ts proxy/core/test/tui-brand-theme-contrast.test.ts proxy/core/test/tui-service-start.test.ts proxy/core/test/tui-service-upgrade.test.ts proxy/core/test/tui-node-startup.test.ts proxy/core/test/tui-bootstrap-service-boundary.test.ts && node proxy/core/scripts/test-isolated.mjs tui-history-retention.test.ts tui-tool-result-status.test.ts tui-verification-evidence.test.ts tui-claim-verify.test.ts tui-success-claim.test.ts tui-turn-undo.test.ts tui-native-command.test.ts tui-live-activity.test.ts tui-account-plan.test.ts",
+    "test": "node --experimental-strip-types --test test/public-source.test.mjs proxy/core/test/tui-revert-diff-security.test.ts proxy/core/test/tui-frontend-echo-benchmark.test.ts proxy/core/test/tui-hosted-transport.test.ts proxy/core/test/tui-hosted-workflow.test.ts proxy/core/test/tui-stream-performance.test.ts proxy/core/test/tui-brand-theme-contrast.test.ts proxy/core/test/tui-service-start.test.ts proxy/core/test/tui-service-upgrade.test.ts proxy/core/test/tui-node-startup.test.ts proxy/core/test/tui-bootstrap-service-boundary.test.ts && node proxy/core/scripts/test-isolated.mjs tui-history-retention.test.ts tui-tool-result-status.test.ts tui-verification-evidence.test.ts tui-claim-verify.test.ts tui-success-claim.test.ts tui-turn-undo.test.ts tui-native-command.test.ts tui-live-activity.test.ts tui-account-plan.test.ts tui-account.test.ts tui-repo-map-worker.test.ts coding-symbol-index.test.ts coding-repo-map-pagerank.test.ts beta-frontend-package.test.mjs beta-portable-package.test.mjs",
     "typecheck": "npm --prefix proxy/core run typecheck:core",
     "verify": "node scripts/verify-public-source.mjs"
   },
