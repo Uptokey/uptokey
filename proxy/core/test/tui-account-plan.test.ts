@@ -3,6 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { serve } from '@hono/node-server';
 import { setTimeout as delay } from 'node:timers/promises';
 import { TuiClient, type TuiAccountAvailable } from '../src/tui/client.ts';
 import { TuiAccount } from '../src/tui/account.ts';
@@ -11,6 +13,11 @@ import { accountText } from '../src/tui/account-ui.ts';
 import { setLang, type Lang } from '../src/tui/i18n.ts';
 import { accountSummary, runLinearAccount } from '../src/tui/frontend/uptokey/linear-account.ts';
 import type { AccountPublicSession } from '../src/account-login-protocol.ts';
+import { createApp, ensureLocalToken, EXPECTED_HOST } from '../src/app.ts';
+import { MemorySecretStore } from '../src/secret-store.ts';
+import { defaultConfig } from '../src/config.ts';
+import { memoryConnectionStorage } from '../src/connection-profiles.ts';
+import { BrowserSessionService } from '../src/workspace/browser-session.ts';
 
 const now = Date.parse('2026-10-18T12:00:00.000Z');
 const nativeRef = 'acc_' + 'a'.repeat(64);
@@ -141,17 +148,46 @@ test('linear account uses the shared observed plan and monthly allowance, with n
 
 test('loopback client requests only readonly subscription.status and rejects malformed/unavailable responses', async t => {
   const requests: Array<{ path: string; method: string; body: unknown; auth: string }> = [];
-  let response: unknown = { status: 200, body: { ...payload(), offer: null, privateField: 'strip' } };
+  let response: unknown = { ...payload(), offer: null, privateField: 'strip' }, status = 200;
   const server = createServer((request, reply) => {
     let body = ''; request.on('data', chunk => { body += chunk; }); request.on('end', () => {
       requests.push({ path: request.url!, method: request.method!, body: JSON.parse(body), auth: String(request.headers.authorization) });
-      reply.setHeader('content-type', 'application/json'); reply.end(JSON.stringify(response));
+      reply.statusCode = status; reply.setHeader('content-type', 'application/json'); reply.end(JSON.stringify(response));
     });
   }); server.listen(0, '127.0.0.1'); await once(server, 'listening'); t.after(() => { server.closeAllConnections(); server.close(); });
   const client = new TuiClient({ baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, token: 'synthetic' }); t.after(() => client.destroy());
   assert.deepEqual(await client.getAccountPlan(), payload());
-  response = { status: 503, body: {} }; await assert.rejects(client.getAccountPlan(), /account_subscription_unavailable/);
-  response = { status: 200, body: { subscription: { status: 'active' } } }; await assert.rejects(client.getAccountPlan(), /account_response_invalid/);
+  status = 503; response = { error: { type: 'account_service_unavailable' } }; await assert.rejects(client.getAccountPlan(), /account_service_unavailable/);
+  status = 200; response = { subscription: { status: 'active' } }; await assert.rejects(client.getAccountPlan(), /account_response_invalid/);
   assert.equal(requests.length, 3);
   for (const row of requests) assert.deepEqual(row, { path: '/local/account/control', method: 'POST', auth: 'Bearer synthetic', body: { operation: 'subscription.status', payload: {} } });
+});
+
+test('TuiClient consumes the actual App control route that unwraps broker status/body, including HTTP failure', async t => {
+  const previous = process.env.UPTOKEY_ACCOUNT_SERVICE_ORIGIN;
+  process.env.UPTOKEY_ACCOUNT_SERVICE_ORIGIN = 'http://localhost:3000';
+  t.after(() => { if (previous === undefined) delete process.env.UPTOKEY_ACCOUNT_SERVICE_ORIGIN; else process.env.UPTOKEY_ACCOUNT_SERVICE_ORIGIN = previous; });
+  let status = 200, value = payload('none');
+  const controlRequests: unknown[] = [], id = randomUUID(), secrets = new MemorySecretStore();
+  await ensureLocalToken(secrets);
+  const params: Parameters<typeof createApp> = [structuredClone(defaultConfig), { connectionMetrics: () => ({ providers: [] }), invalidateProviderCache: async () => {}, dispatch: async () => { throw Error('inference_forbidden'); } } as never, secrets, async () => ({ allowed: true })];
+  params[26] = { profiles: memoryConnectionStorage(), fetchImpl: async (input, init) => {
+    const action = String(input).split('/').at(-1), proof = JSON.parse(String(init?.body));
+    if (action === 'challenge') return Response.json({ id, expiresAt: Date.now() + 60_000 });
+    if (action === 'poll' || action === 'status') return Response.json({ ...connected, expiresAt: Date.now() + 600_000 });
+    assert.equal(action, 'control'); controlRequests.push(proof.request);
+    return Response.json({ status, body: status === 200 ? value : { error: { type: 'account_service_unavailable' } } });
+  } };
+  const app = createApp(...params); t.after(() => app.closeWorkspace()); await app.workspaceReady;
+  const service = new BrowserSessionService(secrets), pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }), challenge = service.challenge(pair.publicKey.export({ format: 'jwk' }));
+  const session = await service.complete(challenge.challengeId, sign('sha256', Buffer.from(challenge.nonce), { key: pair.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url'));
+  // Only the test listener remaps Host; the real App route, authentication, account service and HTTP body are intact.
+  const server = serve({ port: 0, hostname: '127.0.0.1', fetch: request => { const headers = new Headers(request.headers); headers.set('host', EXPECTED_HOST); return app.fetch(new Request(request, { headers })); } });
+  await once(server, 'listening'); t.after(() => { if ('closeAllConnections' in server) server.closeAllConnections(); server.close(); });
+  const client = new TuiClient({ baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, token: session.token }); t.after(() => client.destroy());
+  await client.startAccountLogin(); assert.equal((await client.getAccountSession()).authenticated, true);
+  assert.deepEqual(await client.getAccountPlan(), value);
+  value = payload('active'); assert.deepEqual(await client.getAccountPlan(), value);
+  status = 503; await assert.rejects(client.getAccountPlan(), /account_service_unavailable/);
+  assert.deepEqual(controlRequests, Array.from({ length: 3 }, () => ({ operation: 'subscription.status', payload: {} })));
 });

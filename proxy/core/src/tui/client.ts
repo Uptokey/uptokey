@@ -363,9 +363,8 @@ export class TuiClient extends EventEmitter {
   }
 
   async getAccountPlan(signal?: AbortSignal): Promise<AccountPlan> {
-    const row = await this.accountRequest("control", { operation: "subscription.status", payload: {} }, signal);
-    if (!Number.isSafeInteger(row.status) || Number(row.status) < 200 || Number(row.status) >= 300) throw new Error("account_subscription_unavailable");
-    return readAccountPlan(row.body);
+    // The local route unwraps the broker envelope and forwards its HTTP status.
+    return readAccountPlan(await this.accountRequest("control", { operation: "subscription.status", payload: {} }, signal));
   }
 
   async requestAccountAccess(signal?: AbortSignal): Promise<TuiAccountChallenge> {

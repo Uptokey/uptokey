@@ -1,6 +1,6 @@
 {
   "schema": "uptokey-public-source-v2",
-  "generatedAtUtc": "2026-10-18T18:10:14.6148241Z",
+  "generatedAtUtc": "2026-10-18T18:24:52.8372208Z",
   "sourceCommit": "859fd4a5bfe952bb03cc54086c51034c122ba23c",
   "sourceWorkingTree": "dirty",
   "files": [
@@ -2959,8 +2959,8 @@
     {
       "Source": "proxy/core/src/tui/client.ts",
       "Destination": "proxy/core/src/tui/client.ts",
-      "SourceSha256": "ba8f8d4473cb4f570d16b40574ae1080b08a1fe927e2ceb3b34f47cb33e99f95",
-      "Sha256": "ba8f8d4473cb4f570d16b40574ae1080b08a1fe927e2ceb3b34f47cb33e99f95"
+      "SourceSha256": "934dc375661dfdc108e2423b7bec9cbb9c5ef1b76cd69697c1005fa189af89b0",
+      "Sha256": "934dc375661dfdc108e2423b7bec9cbb9c5ef1b76cd69697c1005fa189af89b0"
     },
     {
       "Source": "proxy/core/src/tui/clipboard.ts",
@@ -6727,8 +6727,8 @@
     {
       "Source": "proxy/core/test/tui-account-plan.test.ts",
       "Destination": "proxy/core/test/tui-account-plan.test.ts",
-      "SourceSha256": "958ec280ce6b88434846e0145dd043722ef464c07cc34f34141a9d807c209503",
-      "Sha256": "958ec280ce6b88434846e0145dd043722ef464c07cc34f34141a9d807c209503"
+      "SourceSha256": "9bc7b1b42cb32d1e666e30494b1ac2cc5fc90065cd2ce5bede83c43bf9c482d5",
+      "Sha256": "9bc7b1b42cb32d1e666e30494b1ac2cc5fc90065cd2ce5bede83c43bf9c482d5"
     },
     {
       "Source": "proxy/core/test/tui-bootstrap-service-boundary.test.ts",
