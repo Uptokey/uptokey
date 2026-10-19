@@ -174,6 +174,31 @@ test("verified catalog supplies seven Free models dynamically, after own connect
   assert.deepEqual(Object.keys((await f.backend.client.config.providers()).data.providers.at(-1).models), ids("changed-by-server", 2));
 });
 
+test("Uptokey exposes the seven verified model names and sources as distinct selectable destinations", async t => {
+  const f = await fixture(t, { own: true });
+  const modelIds = ["google-gemini-3-5-flash-lite", "google-gemini-3-8-flash", "uptokey-free-fast", "uptokey-free", "uptokey-free-reasoning", "uptokey-free-code", "uptokey-free-ovh-reasoning"];
+  const supplied = catalog(modelIds);
+  for (const model of supplied.models) model.price.version = model.id.startsWith("google-") ? "uptokey-beta-free-2026-10-09" : "free-beta-v1";
+  f.catalog(supplied); await f.controller.refreshHostedModels(true);
+  const providers = (await f.backend.client.config.providers()).data.providers, hosted = providers.at(-1);
+  assert.equal(hosted.id, HOSTED_PROVIDER); assert.equal(hosted.name, "Uptokey");
+  assert.deepEqual(Object.keys(hosted.models), modelIds);
+  assert.equal(hosted.models[modelIds[0]!].name, "Gemini 3.5 Flash-Lite · Google");
+  assert.equal(hosted.models[modelIds[4]!].name, "GPT-OSS 120B · Cloudflare");
+  assert.equal(hosted.models[modelIds[6]!].name, "GPT-OSS 120B · OVHcloud");
+  assert.equal(new Set(Object.values(hosted.models).map((model: any) => model.name)).size, 7);
+  assert.ok(Object.values(hosted.models).every((model: any) => model.name !== "Free" && model.options.uptokeyFunding === "hosted-free"));
+  for (const id of modelIds) {
+    await f.controller.selectProviderModel(id, HOSTED_PROVIDER);
+    const destination = f.controller.client.getSelectedDestination();
+    assert.equal(destination.providerId, HOSTED_PROVIDER);
+    assert.equal(destination.hosted?.modelId, id);
+    assert.equal(destination.hosted?.priceVersion, supplied.models.find(model => model.id === id)!.price.version);
+    assert.equal(f.controller.state.selectedModel, id);
+  }
+  assert.equal(f.calls.filter(call => call.body?.operation === "chat").length, 0);
+});
+
 test("first use selects eligible Free only when no model or processing policy was chosen", async t => {
   const f = await fixture(t); await f.settled();
   assert.equal(f.controller.state.selectedModel, ids()[0]);

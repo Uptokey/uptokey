@@ -25,7 +25,7 @@ test("rendered account panel requests/adopts once, returns focus and exposes rea
   const root = await mkdtemp(join(parent, "tui-account-render-")); await writeFile(join(root, "kv.json"), "{}")
   const calls: string[] = [], ref = "synthetic-account-reference-01"
   let authenticated = false, approved = false, delayedConsumption = false
-  let observedPlan: "none" | "active" = "none", delayedStatus = false
+  let observedPlan: "none" | "active" = "none", delayedStatus = false, usageFails = false
   let finishConsumption: (() => void) | undefined
   let finishStatus: (() => void) | undefined
   const signedOut = { configured: true, authenticated: false, loginAvailable: true, state: "signed_out" as const }
@@ -41,7 +41,7 @@ test("rendered account panel requests/adopts once, returns focus and exposes rea
     unlinkAccount: async () => { calls.push("unlink"); authenticated = false; return { revision: 2, session: signedOut } },
     startAccountLogin: async () => { calls.push("login"); return { session } },
     signOutAccount: async () => signedOut,
-    getAccountUsage: async () => { calls.push("usage"); return { state: "observed", verifiedAt: new Date().toISOString(), currency: "USD", unit: "micro_usd", availableMicros: 2_000_000, reservedMicros: 0, spentMicros: 0 } },
+    getAccountUsage: async () => { calls.push("usage"); if (usageFails) throw Error("private-upstream-detail"); return { state: "observed", verifiedAt: new Date().toISOString(), currency: "USD", unit: "micro_usd", availableMicros: 2_000_000, reservedMicros: 0, spentMicros: 0 } },
     getAccountPlan: async () => {
       calls.push("subscription.status")
       return { accountRef: "account_" + "b".repeat(64), subscription: { status: observedPlan, cancelAtPeriodEnd: false, currentPeriodEnd: observedPlan === "none" ? null : new Date(Date.now() + 86_400_000).toISOString() }, allowance: observedPlan === "none" ? null : { limitMicros: 3_000_000, usedMicros: 500_000, reservedMicros: 250_000, periodStart: new Date(Date.now() - 86_400_000).toISOString(), periodEnd: new Date(Date.now() + 86_400_000).toISOString() } }
@@ -78,6 +78,12 @@ test("rendered account panel requests/adopts once, returns focus and exposes rea
     observedPlan = "active"; await account.loadPlan()
     await waitFrame(frame => frame.includes("Fixture") && frame.includes("Plus") && frame.includes("$2.25") && frame.includes("$3.00"))
     expect(app.captureCharFrame()).toContain("Local/BYOK always free")
+    const planReadsBeforeCredits = calls.filter(value => value === "subscription.status").length
+    usageFails = true; app.mockInput.pressEnter(); await app.flush()
+    await waitFrame(frame => frame.includes("Fixture") && frame.includes("Plus") && frame.includes(accountText("usage_unavailable")))
+    expect(account.view.error).toBe(null); expect(account.view.usage).toBe(null)
+    expect(calls.filter(value => value === "subscription.status").length).toBe(planReadsBeforeCredits)
+    expect(app.captureCharFrame()).not.toContain("private-upstream-detail")
     const count = calls.filter(value => ["login", "request", "adopt", "usage", "unlink"].includes(value)).length
     for (const lang of ["pt-BR", "en", "es", "fr", "de", "it", "ja", "ko", "zh-CN", "ar"] as Lang[]) {
       setLang(lang); dialog.replace(() => <AccountPanel />)
@@ -118,15 +124,15 @@ test("account starts browser sign-in first and keeps the same usable link, copy 
   const signedOut = { configured: true, authenticated: false, loginAvailable: true, state: "signed_out" as const }
   const connected = { ...signedOut, authenticated: true, state: "connected" as const, profile: { displayName: "Fixture" } }
   const ref = "acc_" + "c".repeat(64)
-  let authenticated = false, delayStatus = false, finishStatus: (() => void) | undefined
+  let authenticated = false, delayStatus = false, loginStarted = false, finishStatus: (() => void) | undefined
   const account = new TuiAccount({
-    getAccountSession: async () => { calls.push("status"); if (delayStatus) await new Promise<void>(resolve => { finishStatus = resolve }); return authenticated ? connected : signedOut },
+    getAccountSession: async () => { calls.push("status"); if (delayStatus) await new Promise<void>(resolve => { finishStatus = resolve }); return authenticated ? connected : loginStarted ? { ...signedOut, state: "connecting" } : signedOut },
     getAvailableAccounts: async () => ({ revision: authenticated ? 1 : 0, currentAccountRef: authenticated ? ref : null, currentOwned: authenticated ? true : null, accounts: [] }),
     getAccountRequests: async () => [],
     requestAccountAccess: async () => { calls.push("share"); throw Error("unexpected_local_share") },
     consumeAccountAccess: async () => {}, approveAccountRequest: async () => {},
     adoptAccount: async () => { throw Error("unexpected_adoption") }, unlinkAccount: async () => { throw Error("unexpected_unlink") },
-    startAccountLogin: async () => { calls.push("login"); return { loginUrl: url, userCode: "1234ABCD", expiresAt: Date.now() + 60_000 } },
+    startAccountLogin: async () => { loginStarted = true; calls.push("login"); return { loginUrl: url, userCode: "1234ABCD", expiresAt: Date.now() + 60_000 } },
     signOutAccount: async () => signedOut,
     getAccountUsage: async () => ({ state: "unavailable", verifiedAt: new Date().toISOString() }),
     getAccountPlan: async () => { calls.push("subscription.status"); return { accountRef: "account_" + "d".repeat(64), subscription: { status: "none", cancelAtPeriodEnd: false, currentPeriodEnd: null }, allowance: null } },

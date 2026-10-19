@@ -12,6 +12,7 @@ import { setLang, type Lang } from "../src/tui/i18n.ts";
 import { resolveSlash } from "../src/tui/commands.ts";
 import { runLinearAccount } from "../src/tui/frontend/uptokey/linear-account.ts";
 import type { AccountPublicSession } from "../src/account-login-protocol.ts";
+import { accountViewSummary } from "../src/tui/account-plan.ts";
 
 const signedOut: AccountPublicSession = { configured: true, authenticated: false, loginAvailable: true, state: "signed_out" };
 const connected: AccountPublicSession = { configured: true, authenticated: true, loginAvailable: true, state: "connected", profile: { displayName: "Fixture", plan: "free" } };
@@ -339,6 +340,7 @@ test("explicit credit reads wait for Refresh and coalesce without losing the cli
   f.client.getAccountSession = () => new Promise(resolve => { finish = resolve; });
   const refreshing = f.account.refresh(), first = f.account.loadUsage(), second = f.account.loadUsage();
   assert.equal(first, second); assert.equal(f.calls.includes("usage"), false);
+  await waitUntil(() => Boolean(finish));
   finish(connected); await Promise.all([refreshing, first]);
   assert.equal(f.calls.filter(call => call === "usage").length, 1); assert.equal(f.account.view.usage?.state, "observed");
 });
@@ -369,8 +371,53 @@ test("cancel, disposal and terminal denial discard queued credits without a late
     let finish!: (value: AccountPublicSession) => void, reject!: (error: Error) => void;
     f.client.getAccountSession = () => new Promise((resolve, fail) => { finish = resolve; reject = fail; });
     const refreshing = f.account.refresh(), credit = f.account.loadUsage();
+    await waitUntil(() => Boolean(finish));
     if (action === "cancel") f.account.cancelPending(); else if (action === "dispose") f.account.dispose();
     if (action === "denied") reject(Object.assign(Error("account_service_unavailable"), { status: 401 })); else finish(connected);
     await Promise.all([refreshing, credit]); assert.equal(f.calls.includes("usage"), false, action);
   }
+});
+
+test("credits, Refresh and plan share one transport lane without dropping Refresh or duplicate clicks", async t => {
+  const f = fixture(); t.after(() => f.account.dispose());
+  f.state(connected, { revision: 1, currentAccountRef: ref, currentOwned: false, accounts: [] });
+  let inFlight = 0, maximum = 0, finish!: () => void;
+  const traced = <T>(name: string, operation: () => Promise<T>) => async () => {
+    f.calls.push(name + ":start"); maximum = Math.max(maximum, ++inFlight);
+    try { return await operation(); } finally { --inFlight; f.calls.push(name + ":end"); }
+  };
+  const status = f.client.getAccountSession, available = f.client.getAvailableAccounts;
+  f.client.getAccountSession = traced("status", status);
+  f.client.getAvailableAccounts = traced("available", available);
+  f.client.getAccountUsage = traced("usage", async () => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    return { state: "observed", verifiedAt: new Date().toISOString(), currency: "USD", unit: "micro_usd", availableMicros: 2_000_000, reservedMicros: 0, spentMicros: 0 };
+  });
+  Object.assign(f.client, { getAccountPlan: traced("plan", async () => ({ accountRef: "account_" + "b".repeat(64), subscription: { status: "none", cancelAtPeriodEnd: false, currentPeriodEnd: null }, allowance: null })) });
+  await f.account.refresh(); f.calls.length = 0;
+  const usage = f.account.loadUsage(), refresh = f.account.refresh(), plan = f.account.loadPlan();
+  assert.equal(f.account.loadUsage(), usage); assert.equal(f.account.refresh(), refresh); assert.equal(f.account.loadPlan(), plan);
+  await waitUntil(() => Boolean(finish));
+  assert.deepEqual(f.calls, ["usage:start"]);
+  finish(); await Promise.all([usage, refresh, plan]);
+  assert.equal(maximum, 1); assert.ok(f.calls.indexOf("status:start") > f.calls.indexOf("usage:end"));
+  assert.equal(f.calls.filter(value => value === "status:start").length, 1);
+  assert.equal(f.calls.filter(value => value === "plan:start").length, 1);
+  assert.equal(f.account.view.usage?.state, "observed"); assert.equal(f.account.view.plan.state, "observed");
+});
+
+test("credit failure stays in credits and neither rereads nor conceals a confirmed Free plan", async t => {
+  const f = fixture(); t.after(() => f.account.dispose());
+  f.state(connected, { revision: 1, currentAccountRef: ref, currentOwned: false, accounts: [] });
+  let planReads = 0;
+  Object.assign(f.client, { getAccountPlan: async () => { planReads++; return { accountRef: "account_" + "b".repeat(64), subscription: { status: "none", cancelAtPeriodEnd: false, currentPeriodEnd: null }, allowance: null }; } });
+  await f.account.refresh(); await f.account.loadPlan();
+  const before = accountViewSummary(f.account.view);
+  f.client.getAccountUsage = async () => { throw Error("private-upstream-detail"); };
+  await f.account.loadUsage();
+  assert.equal(planReads, 1); assert.equal(f.account.view.plan.state, "observed");
+  assert.equal(accountViewSummary(f.account.view), before); assert.match(before, /Fixture.*Free/);
+  assert.equal(f.account.view.session?.authenticated, true); assert.equal(f.account.view.error, null);
+  assert.equal(f.account.view.usage, null); assert.equal(f.account.view.usageError, "account_service_unavailable");
+  assert.equal(f.account.view.usageLoading, false); assert.equal(f.account.view.planLoading, false);
 });

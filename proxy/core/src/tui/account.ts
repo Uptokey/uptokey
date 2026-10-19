@@ -13,7 +13,10 @@ export interface AccountView {
   challenge: TuiAccountChallenge | null;
   login: Exclude<TuiAccountLogin, { session: AccountPublicSession }> | null;
   usage: AccountPublicUsage | null;
+  usageError: string | null;
+  usageLoading: boolean;
   plan: AccountPlanState;
+  planLoading: boolean;
   busy: boolean;
   error: string | null;
 }
@@ -48,7 +51,7 @@ export async function openAccountLoginUrl(value: string, launch: BrowserLaunch =
 }
 
 export class TuiAccount extends EventEmitter {
-  readonly view: AccountView = { session: null, available: null, requests: [], challenge: null, login: null, usage: null, plan: { state: "unknown" }, busy: false, error: null };
+  readonly view: AccountView = { session: null, available: null, requests: [], challenge: null, login: null, usage: null, usageError: null, usageLoading: false, plan: { state: "unknown" }, planLoading: false, busy: false, error: null };
   private generation = 0;
   private disposed = false;
   private abort: AbortController | null = null;
@@ -63,6 +66,8 @@ export class TuiAccount extends EventEmitter {
   private planRead: Promise<void> | null = null;
   private planBinding: string | null = null;
   private planRequested = false;
+  private readTail: Promise<void> | null = null;
+  private readGeneration = 0;
   private readonly now: () => number;
   private readonly interval: number;
   private readonly client: AccountTransport;
@@ -73,9 +78,41 @@ export class TuiAccount extends EventEmitter {
   private binding(available = this.view.available): string | null {
     return this.view.session?.authenticated && available?.currentAccountRef ? `${available.currentAccountRef}:${available.revision}` : null;
   }
+  private abortPlanRead(): void {
+    this.planAbort?.abort(); this.planAbort = null; this.planRead = null; this.view.planLoading = false;
+  }
   private clearPlan(): void {
-    this.planAbort?.abort(); this.planAbort = null; this.planRead = null; this.planBinding = null;
+    this.abortPlanRead(); this.planBinding = null;
     this.view.plan = { state: "unknown" };
+  }
+  /** One transport read at a time: the core and native broker serialize this identity too. */
+  private queueRead(action: () => Promise<void>): Promise<void> {
+    const generation = this.readGeneration;
+    const current = () => !this.disposed && generation === this.readGeneration;
+    const run = async () => {
+      while (this.active) { await this.active; if (!current()) return; }
+      if (current()) await action();
+    };
+    const task = this.readTail ? this.readTail.then(run) : run();
+    const tail = task.then(() => {}, () => {}); this.readTail = tail;
+    void tail.then(() => { if (this.readTail === tail) this.readTail = null; });
+    return task;
+  }
+  private invalidateReads(): void {
+    // A cancelled transport may settle late. Its old queue must not hold the
+    // next account view hostage; generation/binding checks discard its result.
+    ++this.readGeneration; this.readTail = null; this.refreshing = null;
+    ++this.usageGeneration; this.usageRead = null; this.view.usageLoading = false;
+    this.abortPlanRead();
+  }
+  private terminal(error: unknown): boolean {
+    const status = Number((error as { status?: unknown })?.status);
+    return status === 401 || status === 403 || /^account_(?:challenge_expired|session_expired|session_revoked|reauthentication_required|share_denied)$/.test(this.error(error));
+  }
+  private loseAuthority(error: unknown): void {
+    this.view.error = this.error(error); this.view.login = null; this.view.challenge = null;
+    this.view.session = null; this.view.available = null; this.view.requests = [];
+    this.view.usage = null; this.view.usageError = null; this.clearPlan(); this.invalidateReads();
   }
   private error(error: unknown) {
     const code = error instanceof Error ? error.message : "";
@@ -83,6 +120,7 @@ export class TuiAccount extends EventEmitter {
   }
   private begin(kind: "read" | "mutation") {
     if (this.disposed || this.view.busy && (kind === "read" || this.activeKind !== "read")) return null;
+    if (kind === "mutation") this.invalidateReads();
     if (this.view.busy && this.activeKind === "read") this.refreshing = null;
     this.abort?.abort(); clearTimeout(this.timer);
     const abort = new AbortController(), generation = ++this.generation;
@@ -95,11 +133,7 @@ export class TuiAccount extends EventEmitter {
       try { await action(operation.signal); if (operation.current()) this.retryAt = 0; }
       catch (error) { if (operation.current()) {
         this.view.error = this.error(error);
-        const status = Number((error as { status?: unknown })?.status);
-        if (status === 401 || status === 403 || /^account_(?:challenge_expired|session_expired|session_revoked|reauthentication_required|share_denied)$/.test(this.view.error)) {
-          this.view.login = null; this.view.challenge = null;
-          this.view.session = null; this.view.available = null; this.view.usage = null; this.clearPlan();
-        }
+        if (this.terminal(error)) this.loseAuthority(error);
         if (this.view.error === "account_rate_limited") this.retryAt = this.now() + Math.max(this.interval, Number((error as { retryAfterMs?: number }).retryAfterMs) || 10_000);
       } }
       finally { if (operation.current()) { this.active = null; this.activeKind = null; this.view.busy = false; this.change(); this.schedule(); } }
@@ -120,7 +154,7 @@ export class TuiAccount extends EventEmitter {
     // A verified loss of authority takes effect even when the following
     // optional account projection is temporarily unavailable.
     if (!session.authenticated) {
-      this.view.session = session; this.view.available = null; this.view.requests = []; this.view.usage = null; this.clearPlan();
+      this.view.session = session; this.view.available = null; this.view.requests = []; this.view.usage = null; this.view.usageError = null; this.clearPlan();
       if (this.view.login && session.state === "signed_out") {
         this.view.login = null;
         throw new Error("account_reauthentication_required");
@@ -135,7 +169,7 @@ export class TuiAccount extends EventEmitter {
       this.view.session = session; this.view.available = available;
       this.view.usage = session.authenticated ? this.view.usage : null;
       if (!session.authenticated) this.clearPlan();
-      if (this.planBinding && this.binding() !== this.planBinding) { this.clearPlan(); this.view.usage = null; }
+      if (this.planBinding && this.binding() !== this.planBinding) { this.clearPlan(); this.view.usage = null; this.view.usageError = null; }
       this.view.requests = requests;
       if (session.authenticated) { this.view.challenge = null; this.view.login = null; }
       if (this.planRequested && session.authenticated) void this.loadPlan();
@@ -143,10 +177,7 @@ export class TuiAccount extends EventEmitter {
   }
   refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
-    const generation = this.generation;
-    const promise = this.activeKind === "mutation" && this.active
-      ? this.active.then(() => { if (!this.disposed && this.generation === generation) return this.perform(signal => this.read(signal), "read"); })
-      : this.perform(signal => this.read(signal), "read");
+    const promise = this.queueRead(() => this.perform(signal => this.read(signal), "read"));
     this.refreshing = promise;
     void promise.finally(() => { if (this.refreshing === promise) this.refreshing = null; });
     return promise;
@@ -160,8 +191,13 @@ export class TuiAccount extends EventEmitter {
     if (!this.client.getAccountPlan) { this.view.plan = { state: "unavailable" }; this.change(); return Promise.resolve(); }
     const abort = new AbortController(); this.planAbort = abort; this.planBinding = binding;
     const current = () => !this.disposed && !abort.signal.aborted && this.planAbort === abort && this.binding() === binding;
-    this.view.plan = { state: "loading" }; this.change();
-    const promise = (async () => {
+    // Keep a confirmed plan visible while rechecking this same binding. It is
+    // presentation only; every read and effect still uses the core's authority.
+    this.view.planLoading = true;
+    if (this.view.plan.state !== "observed") this.view.plan = { state: "loading" };
+    this.change();
+    const promise = this.queueRead(async () => {
+      if (!current()) return;
       try {
         const before = await this.client.getAvailableAccounts(abort.signal);
         if (!current()) return;
@@ -172,9 +208,9 @@ export class TuiAccount extends EventEmitter {
         if (!current()) return;
         if (this.binding(after) !== binding) { this.clearPlan(); this.change(); return; }
         this.view.plan = { state: "observed", value };
-      } catch { if (current()) this.view.plan = { state: "unavailable" }; }
-      finally { if (current()) { this.planRead = null; this.change(); } }
-    })();
+      } catch (error) { if (current()) { if (this.terminal(error)) this.loseAuthority(error); else this.view.plan = { state: "unavailable" }; } }
+      finally { if (current()) { this.planRead = null; this.view.planLoading = false; } this.change(); }
+    });
     this.planRead = promise;
     return promise;
   }
@@ -192,7 +228,7 @@ export class TuiAccount extends EventEmitter {
       if (revision === undefined) throw new Error("account_share_conflict");
       const result = await this.client.adoptAccount(accountRef, revision, signal);
       if (signal.aborted || this.disposed) return;
-      this.view.session = result.session; this.view.challenge = null; this.view.login = null; this.view.usage = null;
+      this.view.session = result.session; this.view.challenge = null; this.view.login = null; this.view.usage = null; this.view.usageError = null;
       await this.read(signal);
     });
   }
@@ -237,7 +273,7 @@ export class TuiAccount extends EventEmitter {
       if (revision === undefined) throw new Error("account_share_conflict");
       const result = await this.client.unlinkAccount(revision, signal);
       if (signal.aborted || this.disposed) return;
-      this.view.session = result.session; this.view.usage = null; await this.read(signal);
+      this.view.session = result.session; this.view.usage = null; this.view.usageError = null; await this.read(signal);
     });
   }
   logout(): Promise<void> {
@@ -245,27 +281,28 @@ export class TuiAccount extends EventEmitter {
       this.clearPlan();
       const result = await this.client.signOutAccount(signal);
       if (signal.aborted || this.disposed) return;
-      this.view.session = result; this.view.usage = null; await this.read(signal);
+      this.view.session = result; this.view.usage = null; this.view.usageError = null; await this.read(signal);
     });
   }
   loadUsage(): Promise<void> {
     if (this.usageRead) return this.usageRead;
     const binding = this.binding(), generation = this.usageGeneration;
     const current = () => !this.disposed && generation === this.usageGeneration && this.binding() === binding;
-    const promise = (async () => {
-      // An explicit credit read must survive an in-flight Refresh. The shared
-      // read gate otherwise returns that operation without sending this one.
-      while (this.active) {
-        await this.active;
-        if (!current()) return;
-      }
+    const promise = this.queueRead(async () => {
       if (!binding || !current()) return;
-      void this.loadPlan();
+      this.view.usageLoading = true; this.view.usageError = null; this.change();
       await this.perform(async signal => {
-        const result = await this.client.getAccountUsage(signal);
-        if (!signal.aborted && current()) this.view.usage = result;
+        try {
+          const result = await this.client.getAccountUsage(signal);
+          if (result.state === "reauthentication_required") throw Error("account_reauthentication_required");
+          if (!signal.aborted && current()) this.view.usage = result;
+        } catch (error) {
+          if (this.terminal(error)) throw error;
+          if (!signal.aborted && current()) { this.view.usage = null; this.view.usageError = this.error(error); }
+        }
       }, "read");
-    })();
+      if (current()) { this.view.usageLoading = false; this.change(); }
+    });
     this.usageRead = promise;
     void promise.finally(() => { if (this.usageRead === promise) this.usageRead = null; });
     return promise;
@@ -273,12 +310,12 @@ export class TuiAccount extends EventEmitter {
   cancelPending(): void {
     this.planRequested = false;
     this.clearPlan();
+    this.invalidateReads();
     ++this.generation; this.abort?.abort(); clearTimeout(this.timer);
-    ++this.usageGeneration; this.usageRead = null;
     this.refreshing = null; this.active = null; this.activeKind = null; this.retryAt = 0;
     this.view.challenge = null; this.view.login = null; this.view.busy = false; this.view.error = null; this.change();
   }
-  cancelPlanRead(): void { this.planRequested = false; if (this.planRead) { this.clearPlan(); this.change(); } }
+  cancelPlanRead(): void { this.planRequested = false; if (this.planRead) { this.abortPlanRead(); if (this.view.plan.state === "loading") this.view.plan = { state: "unknown" }; this.change(); } }
   private schedule(): void {
     clearTimeout(this.timer);
     if (this.disposed || this.view.busy || !this.view.challenge && !this.view.login) return;
@@ -305,5 +342,5 @@ export class TuiAccount extends EventEmitter {
       }
     }, this.view.challenge ? "mutation" : "read");
   }
-  dispose(): void { this.disposed = true; this.clearPlan(); ++this.generation; ++this.usageGeneration; this.usageRead = null; this.abort?.abort(); clearTimeout(this.timer); this.removeAllListeners(); }
+  dispose(): void { this.disposed = true; this.clearPlan(); this.invalidateReads(); ++this.generation; this.abort?.abort(); clearTimeout(this.timer); this.removeAllListeners(); }
 }

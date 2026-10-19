@@ -21,12 +21,25 @@ export interface TuiHostedModel extends TuiHostedDestination {
   /** The broker catalog declares that this model relays function tools; tools still execute locally under W5. */
   readonly toolCalls: boolean;
 }
-// Presentation of existing aliases, shared with the web product vocabulary. This never creates an available model.
-const LABELS: Readonly<Record<string, string>> = {
-  "google-gemini-3-5-flash-lite": "Gemini 3.5 Flash-Lite", "google-gemini-3-8-flash": "Gemini 3.8 Flash",
-  "uptokey-free-fast": "Uptokey Fast", "uptokey-free": "Uptokey General", "uptokey-free-reasoning": "Uptokey Reasoning",
-  "uptokey-free-code": "Uptokey Code", "uptokey-free-ovh-reasoning": "Uptokey OVH Reasoning",
+// Names for the verified legacy catalog versions. This only labels returned
+// catalog entries; an unknown ID or version keeps its exact server identity.
+const CATALOG_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "uptokey-beta-free-2026-10-09": {
+    "google-gemini-3-5-flash-lite": "Gemini 3.5 Flash-Lite · Google",
+    "google-gemini-3-8-flash": "Gemini 3.8 Flash · Google",
+  },
+  "free-beta-v1": {
+    "uptokey-free-fast": "Llama 3.2 3B · Cloudflare",
+    "uptokey-free": "GPT-OSS 20B · Cloudflare",
+    "uptokey-free-reasoning": "GPT-OSS 120B · Cloudflare",
+    "uptokey-free-code": "Qwen2.5-Coder 32B · Cloudflare",
+    "uptokey-free-ovh-reasoning": "GPT-OSS 120B · OVHcloud",
+  },
 };
+function catalogLabel(modelId: string, priceVersion: string): string {
+  const labels = Object.hasOwn(CATALOG_LABELS, priceVersion) ? CATALOG_LABELS[priceVersion] : undefined;
+  return labels && Object.hasOwn(labels, modelId) ? labels[modelId]! : modelId;
+}
 export type HostedTransport = (path: string, init: RequestInit, timeoutMs?: number) => Promise<Response>;
 export function validateHostedDestination(value: TuiHostedDestination): TuiHostedDestination {
   if (!ACCOUNT_REF.test(value.accountRef) || !Number.isSafeInteger(value.revision) || value.revision < 0 ||
@@ -55,7 +68,7 @@ export async function loadHostedModels(transport: HostedTransport, accountRef: s
   if (row.executionEnabled !== true) return [];
   return catalog.models.filter(model => model.price.inputMicrosPerMillion === 0 && model.price.outputMicrosPerMillion === 0)
     .map(model => Object.freeze({ ...validateHostedDestination({ accountRef, revision, modelId: model.id,
-      priceVersion: model.price.version, maxOutputTokens: Math.min(model.limits.outputTokens, 4096) }), contextTokens: model.limits.contextTokens, label: LABELS[model.id] ?? model.id,
+      priceVersion: model.price.version, maxOutputTokens: Math.min(model.limits.outputTokens, 4096) }), contextTokens: model.limits.contextTokens, label: catalogLabel(model.id, model.price.version),
       toolCalls: (model as { toolCalls?: true }).toolCalls === true }));
 }
 type HostedDispatch = { role: string; content: unknown; tool_calls?: unknown; tool_call_id?: unknown };
