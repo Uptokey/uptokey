@@ -40,6 +40,7 @@ export interface ModelView {
 
 export interface ConnectionItemView {
   id: string;
+  revision?: number;
   providerId: string;
   label: string;
   models: string[];
@@ -157,6 +158,7 @@ export async function loadConnections(client: TuiClient): Promise<ConnectionsSna
     const providerId = String(c.providerId ?? id);
     return {
       id,
+      ...(Number.isSafeInteger(c.revision) && Number(c.revision) >= 1 ? { revision: Number(c.revision) } : {}),
       providerId,
       label: typeof c.label === "string" ? c.label : providerId,
       models: strings(c.models),

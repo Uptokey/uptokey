@@ -13,6 +13,8 @@ import { useBindings } from "../../vendor/opencode-tui/keymap"
 import { useClipboard } from "../../vendor/opencode-tui/context/clipboard"
 import { clipboardErrorMessage } from "../../vendor/opencode-tui/clipboard"
 import { useToast } from "../../vendor/opencode-tui/ui/toast"
+import { DisconnectProvider } from "../dialogs/disconnect-provider.tsx"
+import { HOSTED_PROVIDER } from "../../../hosted.ts"
 
 /** A compact account menu; every operation is explicit and uses the core's existing authority. */
 export function AccountPanel() {
@@ -31,7 +33,7 @@ export function AccountPanel() {
   const summary = createMemo(() => accountViewSummary(state()))
   const planDetails = createMemo(() => state().session?.authenticated ? [...accountPlanPresentation(state().plan).details, accountText("local_byok_free")] : [])
   async function copyLoginLink() {
-    const url = account.view.login?.loginUrl
+    const url = account.view.connection?.loginUrl ?? account.view.login?.loginUrl
     if (!url) return
     try {
       if (!clipboard.write) throw Error("clipboard_unavailable")
@@ -67,12 +69,17 @@ export function AccountPanel() {
         rows.push({ title: accountText("share"), value: "share", onSelect: () => { void account.requestAccess() } })
       }
     } else {
+      if (view.connectionNeeded) rows.push({ title: accountText("connect_terminal"), value: "connect-terminal", onSelect: () => { void account.connectHosted() } })
+      if (view.connection) {
+        rows.push({ title: accountText("open_browser"), value: "open-connection", onSelect: () => { void account.connectHosted() } })
+        rows.push({ title: accountText("copy_link"), value: "copy-connection", onSelect: () => { void copyLoginLink() } })
+      }
       rows.push({ title: accountText("usage"), value: "usage", description: view.usageLoading ? accountText("loading") : view.usageError ? accountText("usage_unavailable") : view.usage ? view.usage.state === "observed" ? accountText("balance", { value: new Intl.NumberFormat(getLang(), { style: "currency", currency: "USD" }).format(view.usage.availableMicros! / 1_000_000) }) : accountText("usage_unavailable") : undefined, onSelect: () => { void account.loadUsage() } })
       const available = view.available
       if (available?.currentOwned) {
         for (const request of view.requests) rows.push({ title: accountText("approve", { name: request.clientName, code: request.userCode }), value: request.id, onSelect: () => approve(request, available.currentAccountRef!) })
-        rows.push({ title: accountText("sign_out"), value: "sign-out", onSelect: () => { void account.logout() } })
-      } else rows.push({ title: accountText("disconnect"), value: "disconnect", onSelect: () => { void account.disconnect() } })
+        rows.push({ title: accountText("sign_out"), value: "sign-out", onSelect: () => dialog.replace(() => <DisconnectProvider providerId={HOSTED_PROVIDER} label="Uptokey" onBack={() => dialog.replace(() => <AccountPanel />)} />) })
+      } else rows.push({ title: accountText("disconnect"), value: "disconnect", onSelect: () => dialog.replace(() => <DisconnectProvider providerId={HOSTED_PROVIDER} label="Uptokey" onBack={() => dialog.replace(() => <AccountPanel />)} />) })
     }
     rows.push({ title: accountText("refresh"), value: "refresh", description: view.busy || view.planLoading ? accountText("loading") : undefined, onSelect: () => { void loadAccountPlanForView(account, lifetime.signal) } })
     if (view.error) rows.push({ title: accountText("details"), value: "details", onSelect: () => dialog.replace(() => <TextView title={accountText("details")} text={view.error!} />) })
@@ -85,5 +92,5 @@ export function AccountPanel() {
     const first = options()[0]
     if (first) selection?.moveTo(first.value)
   }))
-  return <DialogSelect title={accountText("title")} titleView={<box flexDirection="column"><text fg={theme.text}>{accountText("title")}</text><text fg={state().session?.authenticated && !state().error ? theme.success : theme.textMuted}>{summary()}</text><Show when={state().login}>{login => <text fg={theme.primary} wrapMode="char">{login().loginUrl}</text>}</Show><Show when={state().login && state().error}><text fg={theme.textMuted}>{accountErrorText(state().error!)}</text></Show>{planDetails().map(line => <text fg={theme.textMuted}>{line}</text>)}</box>} ref={value => { selection = value }} renderFilter={false} options={options()} />
+  return <DialogSelect title={accountText("title")} titleView={<box flexDirection="column"><text fg={theme.text}>{accountText("title")}</text><text fg={state().session?.authenticated && !state().error ? theme.success : theme.textMuted}>{summary()}</text><Show when={state().login ?? state().connection}>{link => <text fg={theme.primary} wrapMode="char">{link().loginUrl}</text>}</Show><Show when={(state().login || state().connection) && state().error}><text fg={theme.textMuted}>{accountErrorText(state().error!)}</text></Show>{planDetails().map(line => <text fg={theme.textMuted}>{line}</text>)}</box>} ref={value => { selection = value }} renderFilter={false} options={options()} />
 }

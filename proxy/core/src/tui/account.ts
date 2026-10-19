@@ -2,16 +2,18 @@
 import { EventEmitter } from "node:events";
 import { spawn, type SpawnOptions } from "node:child_process";
 import type { AccountPublicSession, AccountPublicUsage } from "../account-login-protocol.ts";
-import type { TuiClient, TuiAccountAvailable, TuiAccountChallenge, TuiAccountLogin, TuiAccountRequest } from "./client.ts";
+import type { TuiClient, TuiAccountAvailable, TuiAccountChallenge, TuiAccountLogin, TuiAccountConnection, TuiAccountRequest } from "./client.ts";
 import type { AccountPlanState } from "./account-plan.ts";
 
-type AccountTransport = Pick<TuiClient, "getAccountSession" | "getAvailableAccounts" | "getAccountRequests" | "requestAccountAccess" | "consumeAccountAccess" | "approveAccountRequest" | "adoptAccount" | "unlinkAccount" | "startAccountLogin" | "signOutAccount" | "getAccountUsage"> & Partial<Pick<TuiClient, "getAccountPlan">>;
+type AccountTransport = Pick<TuiClient, "getAccountSession" | "getAvailableAccounts" | "getAccountRequests" | "requestAccountAccess" | "consumeAccountAccess" | "approveAccountRequest" | "adoptAccount" | "unlinkAccount" | "startAccountLogin" | "signOutAccount" | "getAccountUsage"> & Partial<Pick<TuiClient, "getAccountPlan" | "getAccountConnection">>;
 export interface AccountView {
   session: AccountPublicSession | null;
   available: TuiAccountAvailable | null;
   requests: TuiAccountRequest[];
   challenge: TuiAccountChallenge | null;
   login: Exclude<TuiAccountLogin, { session: AccountPublicSession }> | null;
+  connection?: TuiAccountConnection | null;
+  connectionNeeded?: boolean;
   usage: AccountPublicUsage | null;
   usageError: string | null;
   usageLoading: boolean;
@@ -51,7 +53,8 @@ export async function openAccountLoginUrl(value: string, launch: BrowserLaunch =
 }
 
 export class TuiAccount extends EventEmitter {
-  readonly view: AccountView = { session: null, available: null, requests: [], challenge: null, login: null, usage: null, usageError: null, usageLoading: false, plan: { state: "unknown" }, planLoading: false, busy: false, error: null };
+  readonly view: AccountView = { session: null, available: null, requests: [], challenge: null, login: null, connection: null, connectionNeeded: false, usage: null, usageError: null, usageLoading: false, plan: { state: "unknown" }, planLoading: false, busy: false, error: null };
+  private connectionBinding: string | null = null;
   private generation = 0;
   private disposed = false;
   private abort: AbortController | null = null;
@@ -111,6 +114,7 @@ export class TuiAccount extends EventEmitter {
   }
   private loseAuthority(error: unknown): void {
     this.view.error = this.error(error); this.view.login = null; this.view.challenge = null;
+    this.clearConnection();
     this.view.session = null; this.view.available = null; this.view.requests = [];
     this.view.usage = null; this.view.usageError = null; this.clearPlan(); this.invalidateReads();
   }
@@ -154,6 +158,7 @@ export class TuiAccount extends EventEmitter {
     // A verified loss of authority takes effect even when the following
     // optional account projection is temporarily unavailable.
     if (!session.authenticated) {
+      this.clearConnection();
       this.view.session = session; this.view.available = null; this.view.requests = []; this.view.usage = null; this.view.usageError = null; this.clearPlan();
       if (this.view.login && session.state === "signed_out") {
         this.view.login = null;
@@ -167,6 +172,7 @@ export class TuiAccount extends EventEmitter {
       // Status alone is not a usable account. Keep the existing challenge while
       // a transient projection failure is retried, and publish one coherent view.
       this.view.session = session; this.view.available = available;
+      if (this.connectionBinding && this.binding() !== this.connectionBinding) this.clearConnection();
       this.view.usage = session.authenticated ? this.view.usage : null;
       if (!session.authenticated) this.clearPlan();
       if (this.planBinding && this.binding() !== this.planBinding) { this.clearPlan(); this.view.usage = null; this.view.usageError = null; }
@@ -266,9 +272,36 @@ export class TuiAccount extends EventEmitter {
       this.change();
     }
   }
+  private clearConnection(): void {
+    this.connectionBinding = null; this.view.connection = null; this.view.connectionNeeded = false;
+  }
+  offerHostedConnection(): void {
+    if (this.disposed || !this.view.session?.authenticated) return;
+    this.view.connectionNeeded = true; this.change();
+  }
+  /** Reuses the authorized grant. Opening this link never resends a chat or creates a login. */
+  async connectHosted(open: AccountBrowserOpener = openAccountLoginUrl): Promise<void> {
+    let connection: TuiAccountConnection | undefined, binding: string | null = null;
+    await this.perform(async signal => {
+      binding = this.binding();
+      if (!binding || !this.client.getAccountConnection) throw Error("account_reauthentication_required");
+      const result = await this.client.getAccountConnection(signal);
+      if (signal.aborted || this.disposed || this.binding() !== binding) return;
+      if (result.expiresAt <= this.now()) throw Error("account_session_expired");
+      connection = result; this.connectionBinding = binding;
+      this.view.connection = result; this.view.connectionNeeded = true;
+    });
+    if (!connection || this.disposed || this.view.connection !== connection || this.binding() !== binding) return;
+    let opened = false;
+    try { opened = await open(connection.loginUrl); } catch { /* Keep a copyable URL if the OS opener is unavailable. */ }
+    if (!this.disposed && this.view.connection === connection && this.binding() === binding) {
+      this.view.error = opened ? null : "account_browser_unavailable"; this.change();
+    }
+  }
   disconnect(): Promise<void> {
     return this.perform(async signal => {
       this.clearPlan();
+      this.clearConnection();
       const revision = this.view.available?.revision;
       if (revision === undefined) throw new Error("account_share_conflict");
       const result = await this.client.unlinkAccount(revision, signal);
@@ -279,6 +312,7 @@ export class TuiAccount extends EventEmitter {
   logout(): Promise<void> {
     return this.perform(async signal => {
       this.clearPlan();
+      this.clearConnection();
       const result = await this.client.signOutAccount(signal);
       if (signal.aborted || this.disposed) return;
       this.view.session = result; this.view.usage = null; this.view.usageError = null; await this.read(signal);
@@ -308,6 +342,7 @@ export class TuiAccount extends EventEmitter {
     return promise;
   }
   cancelPending(): void {
+    this.clearConnection();
     this.planRequested = false;
     this.clearPlan();
     this.invalidateReads();

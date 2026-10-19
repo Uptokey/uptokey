@@ -32,6 +32,7 @@ function fixture(options: { intervalMs?: number; now?: () => number } = {}) {
     adoptAccount: async (accountRef: string, expectedRevision: number) => { calls.push("adopt"); writes.push({ accountRef, expectedRevision }); session = connected; available = { ...available, revision: available.revision + 1, currentAccountRef: accountRef, currentOwned: false }; return { revision: available.revision, session }; },
     unlinkAccount: async (expectedRevision: number) => { calls.push("unlink"); writes.push({ expectedRevision }); session = signedOut; available = { ...available, revision: available.revision + 1, currentAccountRef: null, currentOwned: null }; return { revision: available.revision, session }; },
     startAccountLogin: async () => { calls.push("login"); return { loginUrl: `http://localhost:3000/api/account/native/authorize?id=${randomUUID()}`, userCode: "A1B2C3D4", expiresAt: (options.now?.() ?? Date.now()) + 60_000 }; },
+    getAccountConnection: async (_signal?: AbortSignal) => { calls.push("connection"); return { loginUrl: "http://localhost:3000/api/account/native/authorize?id=12345678-1234-4234-8234-123456789abc", expiresAt: (options.now?.() ?? Date.now()) + 86_400_000 }; },
     signOutAccount: async () => { calls.push("logout"); session = signedOut; return session; },
     getAccountUsage: async () => { calls.push("usage"); return { state: "observed" as const, verifiedAt: new Date().toISOString(), currency: "USD" as const, unit: "micro_usd" as const, availableMicros: 2_000_000, reservedMicros: 0, spentMicros: 0 }; },
   };
@@ -49,6 +50,29 @@ test("reopen reads verified account state without login, inference or usage requ
   f.state(signedOut); await f.account.refresh(); assert.equal(f.account.view.session?.authenticated, false); assert.equal(f.account.view.session?.profile, undefined); assert.equal(f.account.view.usage, null);
 });
 
+test("hosted connection reuses the existing grant, retains copy fallback and never starts login or sends inference", async t => {
+  const f = fixture(); t.after(() => f.account.dispose());
+  f.state(connected, { revision: 3, currentAccountRef: ref, currentOwned: true, accounts: [] });await f.account.refresh();f.calls.length=0;
+  f.account.offerHostedConnection();assert.equal(f.account.view.connectionNeeded,true);let opened="";
+  await f.account.connectHosted(async url=>{opened=url;return false;});
+  assert.equal(opened,f.account.view.connection?.loginUrl);assert.equal(f.account.view.error,"account_browser_unavailable");assert.equal(f.account.view.login,null);assert.equal(f.account.view.session?.authenticated,true);assert.deepEqual(f.calls,["connection"]);
+  await f.account.connectHosted(async()=>true);assert.equal(f.account.view.error,null);assert.deepEqual(f.calls,["connection","connection"]);
+  f.state(signedOut);await f.account.refresh();assert.equal(f.account.view.connection,null);assert.equal(f.account.view.connectionNeeded,false);
+});
+test("canceling a delayed existing connection never opens a stale link or logs out",async t=>{
+  const f=fixture();t.after(()=>f.account.dispose());f.state(connected,{revision:1,currentAccountRef:ref,currentOwned:true,accounts:[]});await f.account.refresh();
+  let release!:()=>void,entered!:()=>void;const held=new Promise<void>(resolve=>release=resolve),started=new Promise<void>(resolve=>entered=resolve);const original=f.client.getAccountConnection;
+  f.client.getAccountConnection=async(signal?:AbortSignal)=>{entered();await held;return original(signal);};let opened=0;
+  const pending=f.account.connectHosted(async()=>{opened++;return true;});await started;f.account.cancelPending();release();await pending;
+  assert.equal(opened,0);assert.equal(f.account.view.connection,null);assert.equal(f.account.view.session?.authenticated,true);assert.ok(!f.calls.includes("logout")&&!f.calls.includes("login"));
+});
+test("connection transport accepts session expiry beyond the login challenge window and rejects unsafe URL or credential payloads",async t=>{
+  const id=randomUUID(),expiresAt=Date.now()+86_400_000,seen:any[]=[];let payload:any={loginUrl:`https://app.uptokey.com/api/account/native/authorize?id=${id}`,expiresAt};
+  const server=createServer(async(request,response)=>{const chunks:Buffer[]=[];for await(const chunk of request)chunks.push(Buffer.from(chunk));seen.push({path:request.url,authorization:request.headers.authorization,body:JSON.parse(Buffer.concat(chunks).toString())});response.writeHead(200,{"content-type":"application/json"});response.end(JSON.stringify(payload));});server.listen(0,"127.0.0.1");await once(server,"listening");t.after(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
+  const client=new TuiClient({baseUrl:`http://127.0.0.1:${(server.address() as {port:number}).port}`,token:"synthetic"});t.after(()=>client.destroy());
+  assert.deepEqual(await client.getAccountConnection(),payload);assert.deepEqual(seen[0],{path:"/local/account/login",authorization:"Bearer synthetic",body:{purpose:"hosted-admission"}});
+  for(const bad of [{loginUrl:"javascript:alert(1)",expiresAt},{loginUrl:`https://user:secret@app.uptokey.com/api/account/native/authorize?id=${id}`,expiresAt},{loginUrl:`https://app.uptokey.com/api/account/native/authorize?id=${id}&token=secret`,expiresAt},{loginUrl:`http://remote.invalid/api/account/native/authorize?id=${id}`,expiresAt},{...payload,privateKey:"not-public"},{...payload,expiresAt:Date.now()-1}]){payload=bad;await assert.rejects(client.getAccountConnection(),/account_response_invalid/);}
+});
 test("account request waits for explicit source approval and adopts once without Auth0", async t => {
   const f = fixture(); t.after(() => f.account.dispose()); await f.account.refresh(); await f.account.requestAccess();
   await waitUntil(() => f.calls.includes("consume")); assert.equal(f.account.view.error, null); assert.ok(f.account.view.challenge);

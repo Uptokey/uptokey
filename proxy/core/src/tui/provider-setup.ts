@@ -7,7 +7,8 @@ import { t } from "./i18n.ts";
 import { ensureProviderEntry, ensureUserDefinedProviderEntry, loadConfig, updateConfig } from "../config.ts";
 import { assertEndpointCredentialFree, assertProviderEndpointUrl, isLocalEndpointUrl } from "../endpoint-policy.ts";
 import { localAdminRequest } from "../local-admin-client.ts";
-import { enableProvider, normalizeProviderKey } from "../provider-lifecycle.ts";
+import { enableProvider, normalizeProviderKey, revokeProvider } from "../provider-lifecycle.ts";
+import { defaultProfileId } from "../connection-profiles.ts";
 import { isCoreProvider, isNamedExperimentalProvider, isOptionalProvider, isUserDefinedProvider, NAMED_EXPERIMENTAL_DEFAULTS } from "../provider-registry.ts";
 import { acceptNamedProviderRisk } from "../provider-risk.ts";
 import { GEMINI_FREE_PRIVACY_NOTICE_VERSION } from "../privacy.ts";
@@ -69,6 +70,8 @@ export interface PreparedProviderSetup {
 export interface ProviderSetupService {
   prepare(providerId: string, apiKey?: string, customEndpoint?: string, signal?: AbortSignal): Promise<PreparedProviderSetup>;
   prepareManual(providerId: string, apiKey: string | undefined, customEndpoint: string | undefined, modelId: string, signal?: AbortSignal): Promise<PreparedProviderSetup>;
+  /** Explicit native action: revoke one saved connection, never every key for its provider. */
+  disconnect(providerId: string, connectionId?: string, daemonUrl?: string, expectedRevision?: number): Promise<void>;
 }
 export interface ProviderSetupDependencies {
   secrets: SecretStore;
@@ -421,5 +424,45 @@ export function createProviderSetupService(deps: ProviderSetupDependencies): Pro
   return {
     prepare,
     prepareManual: (providerId, apiKey, customEndpoint, modelId, signal) => prepare(providerId, apiKey, customEndpoint, signal, modelId.trim()),
+    async disconnect(providerId, connectionId = providerId, daemonUrl = "http://127.0.0.1:21435", expectedRevision) {
+      // This vault's existing native manager/reload owns the default local daemon only.
+      // Never mutate its files while the terminal is attached to a different daemon.
+      if (daemonUrl !== "http://127.0.0.1:21435") return fail("provider_disconnect_unavailable");
+      if (!isCoreProvider(providerId) && !isOptionalProvider(providerId) && !isUserDefinedProvider(providerId)) return fail("provider_unknown");
+      if (connectionId !== providerId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(connectionId)) return fail("provider_connection_not_found");
+      // The frontend's scoped TUI token is never upgraded. The native setup service already owns this vault.
+      const admin = await deps.secrets.get("local:api-token");
+      if (!admin || !/^utk_local_[A-Za-z0-9_-]{32}$/.test(admin)) return fail("provider_disconnect_unavailable");
+      async function request(path: string, body?: unknown): Promise<Record<string, unknown>> {
+        const signal = AbortSignal.timeout(5_000);
+        try {
+          const response = await fetcher(new URL(path, "http://127.0.0.1:21435"), { method: body === undefined ? "GET" : "POST", redirect: "error", signal,
+            headers: { authorization: `Bearer ${admin}`, accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+          const value = record(await boundedJson(response, signal, 262_144));
+          if (response.status === 409) return fail("provider_connection_conflict");
+          if (!response.ok) return fail("provider_disconnect_failed");
+          return value;
+        } catch (error) { if (error instanceof ProviderSetupError) throw error; return fail("provider_disconnect_failed"); }
+      }
+      const listed = await request("/local/connections");
+      const profiles = (Array.isArray(listed.connections) ? listed.connections : []).map(record);
+      const resolvedId = connectionId === providerId ? defaultProfileId(providerId) : connectionId;
+      const row = profiles.find(item => item.id === resolvedId);
+      if (connectionId === providerId && !row) {
+        // A legacy target may not widen into a provider-wide revoke when saved accounts exist.
+        if (profiles.some(item => item.providerId === providerId)) return fail("provider_connection_conflict");
+        try {
+          await revokeProvider(providerId, deps.secrets, writeConfig, deps.invalidate ? { invalidateProvider: id => deps.invalidate!(id) } : undefined);
+          await reload();
+          return;
+        } catch { return fail("provider_disconnect_failed"); }
+      }
+      if (!row || row.providerId !== providerId || !Number.isSafeInteger(row.revision)) return fail("provider_connection_not_found");
+      // Confirmation is bound to the displayed credential revision, not a replacement key found later.
+      if (!Number.isSafeInteger(expectedRevision) || row.revision !== expectedRevision) return fail("provider_connection_conflict");
+      const result = await request(`/local/connections/${encodeURIComponent(resolvedId)}/revoke`, { revision: expectedRevision });
+      if (result.revoked !== true || result.providerId !== providerId) return fail("provider_disconnect_failed");
+    },
   };
 }

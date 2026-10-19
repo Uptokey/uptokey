@@ -132,7 +132,7 @@ function toContract(profile: StoredProfile): ConnectionProfile {
 
 export interface ProfileHooks {
   /** Revogar o perfil default migrado também desliga a credencial legada do roteador. */
-  onDefaultRevoked?: (providerId: string) => Promise<void>;
+  onDefaultRevoked?: (providerId: string, hasRemainingEnabledProfiles: boolean) => Promise<void>;
   now?: () => number;
 }
 
@@ -501,14 +501,14 @@ export class ConnectionProfileService {
       if (index < 0) throw fail("connection_not_found", 404);
       const current = state.profiles[index]!;
       if (revision !== current.revision) throw fail("revision_conflict", 409);
-      state.profiles.splice(index, 1);
-      if (current.credentialRef) {
-        try { await this.secrets.delete(current.credentialRef); } catch { /* revogação local primeiro */ }
-      }
-      await this.persist(state);
       if (current.migratedFromLegacy) {
-        try { await this.hooks.onDefaultRevoked?.(current.providerId); } catch { /* remoto incerto: recibo desconhecido */ }
+        const hasRemainingEnabledProfiles = state.profiles.some(profile => profile.id !== current.id && profile.providerId === current.providerId && profile.enabled);
+        await this.hooks.onDefaultRevoked?.(current.providerId, hasRemainingEnabledProfiles);
       }
+      // Keep the association until its cleanup is confirmed. A partial failure must
+      // not turn a still-present legacy key into the router's unscoped fallback.
+      if (current.credentialRef) await this.secrets.delete(current.credentialRef);
+      await this.persist({ ...state, profiles: state.profiles.filter(profile => profile.id !== current.id) });
       return { revoked: true, providerId: current.providerId, remote: "skipped" as const };
     });
   }

@@ -1112,10 +1112,19 @@ export class Router {
   invalidateExactCache(provider?: ProviderName): Promise<void> {
     return Promise.all((provider?[provider]:ALL_PROVIDERS).map(name=>this.cache?.invalidateProvider(name))).then(()=>{});
   }
-  connectionMetrics() {
+  connectionMetrics(configuredProfiles?: ReadonlySet<string>) {
     const ids = Object.keys(this.config.providers).filter(isProvider);
+    // Named accounts can remain after their legacy default key is removed.
+    // This read-only projection must not mark that default as configured on disk
+    // or bypass any provider-wide switch, budget, privacy or health admission.
+    const projectedConfig = configuredProfiles?.size ? {
+      ...this.config,
+      providers: Object.fromEntries(Object.entries(this.config.providers).map(([id, value]) => [id,
+        value && configuredProfiles.has(id) ? { ...value, configured: true } : value,
+      ])),
+    } as ProxyConfig : this.config;
     const quotas = this.ledger.status(Object.fromEntries(ids.map(id => [id, this.config.providers[id]?.budget])));
-    const catalogProjection = buildCatalogConnectionProjection(this.config, {
+    const catalogProjection = buildCatalogConnectionProjection(projectedConfig, {
       adapterPresent: (id) => this.providerAdapter(id as ProviderName) !== undefined,
     });
     return {
@@ -1138,7 +1147,7 @@ export class Router {
         observed: catalogProjection.observed,
       },
       providers: ids.flatMap(id => {
-        const config = this.config.providers[id];
+        const config = projectedConfig.providers[id];
         if (!config) return [];
         const quota = quotas.find(q => q.provider === id);
         const breakerOpts = { failureThreshold: config.allowedFails, cooldownMs: config.cooldownMs };

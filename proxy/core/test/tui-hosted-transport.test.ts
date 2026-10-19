@@ -5,6 +5,8 @@ import { once } from "node:events";
 import { TuiClient } from "../src/tui/client.ts";
 import { loadHostedModels, sendHosted, hostedInput, getHostedReceipt, HOSTED_PROVIDER, type HostedTransport } from "../src/tui/hosted.ts";
 import { HOSTED_TEXT, hostedText } from "../src/tui/hosted-ui.ts";
+import { TuiController } from "../src/tui/controller.ts";
+import { getLang, setLang } from "../src/tui/i18n.ts";
 
 const accountRef = `acc_${"a".repeat(64)}`, revision = 3;
 const target = { accountRef, revision, modelId: "gemini-real", priceVersion: "p1", maxOutputTokens: 4096 };
@@ -34,6 +36,65 @@ test("hosted recovery actions are localized in all ten supported languages witho
       if (language !== "en") assert.notEqual(message, hostedText(key, { amount: "$0.00" }, "en"));
     }
   }
+});
+
+test("known hosted refusals keep their specific cause through transport and the controller without retry", async () => {
+  const report = (TuiController.prototype as unknown as { reportTurnError(error: unknown, accepted: boolean): void }).reportTurnError;
+  const previousLanguage = getLang(); setLang("en");
+  try {
+    for (const [code, status, key] of [
+      ["hosted_device_busy", 429, "device_limit"], ["hosted_busy", 429, "busy"],
+      ["hosted_tools_unsupported", 400, "tools_unsupported"], ["hosted_provider_request_failed", 503, "provider_failed"],
+      ["hosted_device_pairing_required", 403, "pairing_required"],
+    ] as const) {
+      let calls = 0;
+      const result = await sendHosted(async () => { calls++; return json({ accountRef, revision, error: code }, status); }, target, "refused", messages, "external_allowed");
+      assert.deepEqual(result, { status: "rejected", requestId: "refused", error: code });
+      assert.equal(calls, 1, "a known rejection never starts an automatic retry or fallback");
+      const notices: Array<{ level: string; text: string }> = [];
+      let connections = 0;
+      report.call({ account: { offerHostedConnection() { connections++; } }, notice: (level: string, text: string) => notices.push({ level, text }) }, Error(code), true);
+      assert.deepEqual(notices, [{ level: "warning", text: hostedText(key) }]);
+      assert.equal(connections, code === "hosted_device_busy" || code === "hosted_device_pairing_required" ? 1 : 0, "only device connection refusals expose the existing-grant recovery action");
+      assert.notEqual(notices[0]!.text, hostedText("unavailable"));
+      assert.notEqual(notices[0]!.text, hostedText("quota"));
+    }
+    assert.equal(hostedText("device_limit"), "Device limit reached for this account. Use a local model or your API key.");
+    assert.ok(!hostedText("device_limit").includes("/account"), "do not advertise a nonexistent device-management path");
+  } finally { setLang(previousLanguage); }
+});
+
+test("cause-specific hosted controller feedback uses the selected language in all ten locales", () => {
+  const report = (TuiController.prototype as unknown as { reportTurnError(error: unknown, accepted: boolean): void }).reportTurnError;
+  const previousLanguage = getLang();
+  try {
+    for (const language of ["en", "pt-BR", "es", "fr", "de", "it", "ja", "ko", "zh-CN", "ar"] as const) {
+      setLang(language); const notices: string[] = []; let connections = 0;
+      for (const code of ["hosted_device_busy", "hosted_busy", "hosted_tools_unsupported", "hosted_provider_request_failed", "hosted_device_pairing_required"]) {
+        report.call({ account: { offerHostedConnection() { connections++; } }, notice: (_level: string, text: string) => notices.push(text) }, Error(code), true);
+      }
+      assert.deepEqual(notices, ["device_limit", "busy", "tools_unsupported", "provider_failed", "pairing_required"].map(key => hostedText(key as keyof typeof HOSTED_TEXT, {}, language)));
+      assert.equal(new Set(notices).size, 5);
+      assert.equal(connections, 2, "both device refusal causes retain the recovery action in every language");
+    }
+  } finally { setLang(previousLanguage); }
+});
+
+test("hosted quota and unconfirmed outcomes retain their existing recovery without urging a resend", () => {
+  const report = (TuiController.prototype as unknown as { reportTurnError(error: unknown, accepted: boolean): void }).reportTurnError;
+  const previousLanguage = getLang(); setLang("en");
+  try {
+    for (const code of ["hosted_outcome_unknown", "hosted_reconciliation_required", "hosted_already_submitted"]) {
+      const notices: string[] = [];
+      report.call({ notice: (_level: string, text: string) => notices.push(text) }, Error(code), true);
+      assert.deepEqual(notices, [hostedText("unknown")]); assert.match(notices[0]!, /receipt/);
+    }
+    for (const code of ["hosted_daily_quota_exceeded", "hosted_sponsorship_daily_exhausted", "hosted_credit_insufficient", "hosted_sybil_limit_exceeded"]) {
+      const notices: Array<[string, string]> = [];
+      report.call({ notice: (level: string, text: string) => notices.push([level, text]) }, Error(code), true);
+      assert.deepEqual(notices, [["info", hostedText("quota")]]);
+    }
+  } finally { setLang(previousLanguage); }
 });
 
 test("hosted inventory derives only zero-price enabled models from the bound live-shape catalog", async () => {

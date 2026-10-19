@@ -68,7 +68,7 @@ import { connectionText } from "./frontend/uptokey/integration-connections.ts";
 import { TuiAccount } from "./account.ts";
 import { HOSTED_PROVIDER, type TuiHostedModel } from "./hosted.ts";
 import { hostedText } from "./hosted-ui.ts";
-import { accountErrorText } from "./account-ui.ts";
+import { accountErrorText, accountText } from "./account-ui.ts";
 
 export type Mode = "build" | "plan";
 
@@ -1282,6 +1282,11 @@ export class TuiController extends EventEmitter {
     if (code.startsWith("account_")) { this.notice("warning", accountErrorText(code)); return; }
     if (["hosted_outcome_unknown", "hosted_reconciliation_required", "hosted_already_submitted"].includes(code)) { this.notice("warning", hostedText("unknown")); return; }
     if (["hosted_daily_quota_exceeded", "hosted_sponsorship_daily_exhausted", "hosted_credit_insufficient", "hosted_sybil_limit_exceeded"].includes(code)) { this.notice("info", hostedText("quota")); return; }
+    if (code === "hosted_device_busy") { this.account.offerHostedConnection(); this.notice("warning", hostedText("device_limit"), accountText("connect_terminal_hint")); return; }
+    if (code === "hosted_device_pairing_required") { this.account.offerHostedConnection(); this.notice("warning", hostedText("pairing_required"), accountText("connect_terminal_hint")); return; }
+    if (code === "hosted_busy") { this.notice("warning", hostedText("busy")); return; }
+    if (code === "hosted_tools_unsupported") { this.notice("warning", hostedText("tools_unsupported")); return; }
+    if (code === "hosted_provider_request_failed") { this.notice("warning", hostedText("provider_failed")); return; }
     if (code.startsWith("hosted_")) { this.notice("warning", hostedText("unavailable")); return; }
     if (code.startsWith("attachment_") || ["input_image_undeclared", "input_audio_undeclared", "input_capability_undeclared", "conversation_attachment_resolution_required"].includes(code)) {
       this.notice("warning", connectionText(code === "attachment_size" ? "attachment_size" : "attachment_unavailable"));

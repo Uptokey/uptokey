@@ -19,6 +19,8 @@ import { HOSTED_PROVIDER } from "../../../hosted.ts"
 import { accountText } from "../../../account-ui.ts"
 import { DialogModel } from "../../vendor/opencode-tui/component/dialog-model"
 import { useControllerTick } from "../panels/use-controller.ts"
+import { DisconnectProvider } from "./disconnect-provider.tsx"
+import { tr } from "../tr.ts"
 
 export { setupErrorText }
 
@@ -45,7 +47,13 @@ export function ConnectProvider(props:{providerId?:string}={}) {
   const tick = useControllerTick()
   const accountAuthenticated = createMemo(() => { tick(); return backend.controller.account.view.session?.authenticated === true })
 
-  const choices = createMemo(() => backend.providerChoices())
+  const choices = createMemo(() => { tick(); return backend.providerChoices() })
+  const hasSavedConnection = (id: string) => backend.controller.view.connections?.connections?.some(item => item.providerId === id && /^[0-9a-f-]{36}$/i.test(item.id)) === true
+  const configured = (choice: ReturnType<typeof backend.providerChoices>[number]) => choice.configured || hasSavedConnection(choice.id)
+  const disconnectOption = (id: string, label: string) => ({
+    title: ui("provider_disconnect", { name: label }), value: `disconnect:${id}`, category: ui("connect_ready"),
+    onSelect: () => dialog.replace(() => <DisconnectProvider providerId={id} label={label} onBack={() => dialog.replace(() => <ConnectProvider />)} />),
+  })
 
   function openUptokey() {
     const controller = backend.controller
@@ -215,19 +223,21 @@ export function ConnectProvider(props:{providerId?:string}={}) {
   })
   return (
     <DialogSelect
-      title={ui("connect_pick_provider")}
+      title={tr("Providers")}
       placeholder={ui("connect_search")}
       emptyView={<text fg={theme.textMuted}>{ui("connect_providers_empty")}</text>}
       options={[
-        ...choices().filter(choice => choice.configured).map(providerOption),
+        ...choices().filter(configured).flatMap(choice => [providerOption(choice), ...(!choice.local ? [disconnectOption(choice.id, choice.label)] : [])]),
         {
           title: "Uptokey",
           value: HOSTED_PROVIDER,
-          description: accountAuthenticated() ? "Free / Plus" : `${accountText("sign_in")} · Free / Plus`,
+          description: accountAuthenticated() ? `${ui("provider_models")} · Free / Plus` : `${accountText("sign_in")} · Free / Plus`,
           category: ui(accountAuthenticated() ? "connect_ready" : "connect_title_list"),
           onSelect: openUptokey,
         },
-        ...choices().filter(choice => !choice.configured).map(providerOption),
+        ...(accountAuthenticated() ? [disconnectOption(HOSTED_PROVIDER, "Uptokey")] : []),
+        ...(accountAuthenticated() && backend.controller.account.view.connectionNeeded ? [{ title: accountText("connect_terminal"), value: "uptokey-connect-terminal", category: "Uptokey", onSelect: () => { backend.emit({ type: "uptokey.panel.open", properties: { name: "account" } }); void backend.controller.account.connectHosted() } }] : []),
+        ...choices().filter(choice => !configured(choice)).map(providerOption),
         {
           title: "Brave Search",
           value: "web:brave",
@@ -244,7 +254,7 @@ export function ConnectProvider(props:{providerId?:string}={}) {
         title: choice.label,
         value: choice.id,
         description: choice.executable ? (choice.local ? ui("connect_local_no_key") : undefined) : ui("connect_catalog_only"),
-        category: choice.configured ? ui("connect_ready") : ui("connect_title_list"),
+        category: configured(choice) ? ui("connect_ready") : ui("connect_title_list"),
         gutter: choice.eligible ? () => <text fg={theme.success}>✓</text> : undefined,
         disabled: false,
         onSelect: () => void connect(choice),

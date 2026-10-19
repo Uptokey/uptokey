@@ -2,6 +2,8 @@ import type { TuiAccount } from "../../account.ts"
 import { accountErrorText, accountText } from "../../account-ui.ts"
 import { accountPlanPresentation, accountViewSummary } from "../../account-plan.ts"
 import { getLang } from "../../i18n.ts"
+import { ui as text } from "./i18n.ts"
+import { writeClipboard as copy } from "../../clipboard.ts"
 
 export function accountSummary(account: TuiAccount): string {
   return accountViewSummary(account.view)
@@ -16,8 +18,9 @@ export async function runLinearAccount(account: TuiAccount, ui: {
   await account.loadPlan()
   ui.say(`${accountText("title")}\n${accountSummary(account)}`)
   const showLoginLink = () => {
-    if (!account.view.login) return
-    ui.say(account.view.login.loginUrl)
+    const link = account.view.connection ?? account.view.login
+    if (!link) return
+    ui.say(link.loginUrl)
     if (account.view.error) ui.say(accountErrorText(account.view.error))
   }
   showLoginLink()
@@ -42,6 +45,22 @@ export async function runLinearAccount(account: TuiAccount, ui: {
       actions.push({ label: accountText("share"), run: () => account.requestAccess() })
     }
   } else {
+    if (view.connectionNeeded) actions.push({ label: accountText("connect_terminal"), run: () => account.connectHosted() })
+    if (view.connection) {
+      actions.push({ label: accountText("open_browser"), run: () => account.connectHosted() })
+      actions.push({ label: accountText("copy_link"), run: async () => {
+        const link = account.view.connection?.loginUrl
+        if (!link) return
+        try { await copy(link); ui.say(accountText("link_copied")) } catch { ui.say(accountText("browser_fallback")) }
+      } })
+    }
+    const disconnect = async () => {
+      ui.say(text("provider_disconnect_account_hint"))
+      const binding = `${view.available?.currentAccountRef}:${view.available?.revision}`
+      const choice = await ui.choose(["cancel", "disconnect"] as const, value => value === "cancel" ? accountText("cancel") : text("provider_disconnect_short"))
+      if (choice !== "disconnect" || `${account.view.available?.currentAccountRef}:${account.view.available?.revision}` !== binding) return
+      if (view.available?.currentOwned) await account.logout(); else await account.disconnect()
+    }
     actions.push({ label: accountText("usage"), run: async () => {
       await account.loadUsage()
       const usage = account.view.usage
@@ -54,8 +73,8 @@ export async function runLinearAccount(account: TuiAccount, ui: {
         const choice = await ui.choose(["allow", "cancel"] as const, value => accountText(value))
         if (choice === "allow") await account.approve(request, available.currentAccountRef!)
       } })
-      actions.push({ label: accountText("sign_out"), run: () => account.logout() })
-    } else actions.push({ label: accountText("disconnect"), run: () => account.disconnect() })
+      actions.push({ label: accountText("sign_out"), run: disconnect })
+    } else actions.push({ label: accountText("disconnect"), run: disconnect })
   }
   actions.push({ label: accountText("refresh"), run: async () => { await account.refresh(); await account.loadPlan() } })
   if (view.error) actions.push({ label: accountText("details"), run: () => ui.say(view.error!) })
