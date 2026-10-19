@@ -330,3 +330,47 @@ test("verified sign-out clears previous account authority even when its projecti
   assert.deepEqual(f.account.view.requests, []); assert.equal(f.account.view.usage, null); assert.equal(f.account.view.plan.state, "unknown");
   assert.equal(f.account.view.login, null); assert.equal(f.account.view.error, "account_rate_limited");
 });
+
+test("explicit credit reads wait for Refresh and coalesce without losing the click", async t => {
+  const f = fixture(); t.after(() => f.account.dispose());
+  f.state(connected, { revision: 1, currentAccountRef: ref, currentOwned: false, accounts: [{ accountRef: ref, owned: false, expiresAt: Date.now() + 60_000, session: connected }] });
+  await f.account.refresh();
+  let finish!: (value: AccountPublicSession) => void;
+  f.client.getAccountSession = () => new Promise(resolve => { finish = resolve; });
+  const refreshing = f.account.refresh(), first = f.account.loadUsage(), second = f.account.loadUsage();
+  assert.equal(first, second); assert.equal(f.calls.includes("usage"), false);
+  finish(connected); await Promise.all([refreshing, first]);
+  assert.equal(f.calls.filter(call => call === "usage").length, 1); assert.equal(f.account.view.usage?.state, "observed");
+});
+
+test("a queued credit read survives an unrelated approval mutation but not a changed account", async t => {
+  for (const switchAccount of [false, true]) {
+    const f = fixture(); t.after(() => f.account.dispose());
+    const available = { revision: 1, currentAccountRef: ref, currentOwned: false, accounts: [{ accountRef: ref, owned: false, expiresAt: Date.now() + 60_000, session: connected }] };
+    f.state(connected, available); await f.account.refresh();
+    let finish!: () => void;
+    f.client.approveAccountRequest = async () => new Promise<void>(resolve => { finish = resolve; });
+    const request: TuiAccountRequest = { id: randomUUID(), userCode: "A1B2C3D4", expiresAt: new Date(Date.now() + 60_000).toISOString(), clientName: "Fixture", audience: "tui" };
+    const approving = f.account.approve(request, ref), credit = f.account.loadUsage();
+    if (switchAccount) {
+      const otherRef = "acc_" + "b".repeat(64);
+      f.state(connected, { ...available, revision: 2, currentAccountRef: otherRef, accounts: [{ ...available.accounts[0]!, accountRef: otherRef }] });
+    }
+    finish(); await Promise.all([approving, credit]);
+    assert.equal(f.calls.filter(call => call === "usage").length, switchAccount ? 0 : 1);
+  }
+});
+
+test("cancel, disposal and terminal denial discard queued credits without a later request", async t => {
+  for (const action of ["cancel", "dispose", "denied"] as const) {
+    const f = fixture(); t.after(() => f.account.dispose());
+    f.state(connected, { revision: 1, currentAccountRef: ref, currentOwned: false, accounts: [{ accountRef: ref, owned: false, expiresAt: Date.now() + 60_000, session: connected }] });
+    await f.account.refresh();
+    let finish!: (value: AccountPublicSession) => void, reject!: (error: Error) => void;
+    f.client.getAccountSession = () => new Promise((resolve, fail) => { finish = resolve; reject = fail; });
+    const refreshing = f.account.refresh(), credit = f.account.loadUsage();
+    if (action === "cancel") f.account.cancelPending(); else if (action === "dispose") f.account.dispose();
+    if (action === "denied") reject(Object.assign(Error("account_service_unavailable"), { status: 401 })); else finish(connected);
+    await Promise.all([refreshing, credit]); assert.equal(f.calls.includes("usage"), false, action);
+  }
+});

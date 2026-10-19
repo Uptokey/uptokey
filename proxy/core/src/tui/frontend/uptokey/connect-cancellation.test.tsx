@@ -270,3 +270,49 @@ test("a context-cancelled destination follow stops its own saving dialog without
     expect(h.app.captureCharFrame()).not.toContain("Connected to")
   } finally { h.app.renderer.destroy() }
 })
+
+test("Uptokey provider search opens account access in ten languages, never API-key onboarding", async () => {
+  const previous = getLang(), h = await mount([], [a])
+  let preparations = 0
+  h.account.view.session.authenticated = false
+  Object.assign(getBackend(), { providerChoices: () => [provider], providerSetup: { prepare: () => { preparations++; throw Error("uptokey_must_not_request_key") } } })
+  try {
+    for (const lang of ["en", "pt-BR", "es", "fr", "de", "it", "ja", "ko", "zh-CN", "ar"] as Lang[]) {
+      setLang(lang); h.dialog().replace(() => <ConnectProvider />)
+      await Bun.sleep(10); await h.app.flush(); await h.app.renderOnce()
+      const before = h.app.captureCharFrame()
+      expect(before.indexOf(provider.label)).toBeLessThan(before.indexOf("Uptokey"))
+      expect(before).toContain(accountText("sign_in"))
+      await h.app.mockInput.typeText("uptokey"); await h.app.flush(); await h.app.renderOnce()
+      expect(h.app.captureCharFrame()).toContain("Uptokey")
+      h.app.mockInput.pressEnter(); await h.app.flush()
+      expect(h.events.at(-1)).toEqual({ type: "uptokey.panel.open", properties: { name: "account" } })
+      expect(h.local.model.current()).toEqual(a)
+    }
+    expect(preparations).toBe(0)
+    await h.unchanged()
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+}, 15_000)
+
+test("authenticated Uptokey provider opens only current hosted models and preserves the selected real ID", async () => {
+  const previous = getLang(); setLang("en")
+  const free = choice("gemini-real-catalog-id", "uptokey-hosted"), h = await mount([], [a, free])
+  const ref = "acc_" + "a".repeat(64)
+  Object.assign(h.account.view, { available: { currentAccountRef: ref, revision: 3 } })
+  Object.assign(h.controller, { hostedModels: [{ modelId: free.modelID, accountRef: ref, revision: 3 }] })
+  let preparations = 0
+  Object.assign(getBackend(), { providerChoices: () => [provider], providerSetup: { prepare: () => { preparations++; throw Error("uptokey_must_not_request_key") } } })
+  try {
+    h.dialog().replace(() => <ConnectProvider />)
+    await Bun.sleep(10); await h.app.flush(); await h.app.renderOnce()
+    await h.app.mockInput.typeText("uptokey"); await h.app.flush(); await h.app.renderOnce()
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).toContain(free.modelID)
+    expect(h.app.captureCharFrame().split("\n").some(line => /^model-a(?:\s|$)/.test(line.trim()))).toBe(false)
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    expect(h.local.model.current()).toEqual(free)
+    expect(h.dialog().stack).toHaveLength(0)
+    expect(h.events).toEqual([])
+    expect(preparations).toBe(0)
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})
