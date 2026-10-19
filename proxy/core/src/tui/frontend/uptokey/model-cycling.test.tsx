@@ -397,6 +397,7 @@ test("a popular provider from an empty model catalog uses masked canonical key e
   try {
     await h.openModels(); await Bun.sleep(5); await h.app.flush()
     expect(h.app.captureCharFrame()).toContain(provider.label)
+    await h.app.mockInput.typeText(provider.label); await h.app.flush(); await h.app.renderOnce()
     h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
     await h.app.mockInput.typeText("synthetic-not-a-real-key"); await h.app.flush(); await h.app.renderOnce()
     expect(h.app.captureCharFrame()).not.toContain("synthetic-not-a-real-key")
@@ -421,5 +422,46 @@ test("signed-out Free entry opens the existing account panel only on explicit se
     h.account.view.session.configured = false
     await h.accountChanged()
     expect(h.app.captureCharFrame()).not.toContain("Sign in · Free")
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})
+
+test("Uptokey, Free and Plus searches find the real hosted model in all ten languages without replacing its identity", async () => {
+  const previous = getLang(), free = choice("gemini-real-catalog-id", "uptokey-hosted")
+  const h = await mount([], [a, free], a)
+  h.updateModel(free, { name: "Gemini real catalog model" })
+  try {
+    for (const lang of ["en", "pt-BR", "es", "fr", "de", "it", "ja", "ko", "zh-CN", "ar"] as Lang[]) {
+      setLang(lang)
+      for (const query of ["uptokey", "free", "plus"]) {
+        await h.openModels()
+        await h.app.mockInput.typeText(query); await h.app.flush(); await h.app.renderOnce()
+        const frame = h.app.captureCharFrame()
+        expect(frame).toContain("Gemini real catalog model")
+        expect(frame.split("\n").some(line => /^model-a(?:\s|$)/.test(line.trim()))).toBe(false)
+        expect(h.local.model.current()).toEqual(a)
+      }
+    }
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    expect(h.local.model.current()).toEqual(free)
+    expect(h.dialog().stack).toHaveLength(0)
+    expect(h.events).toEqual([])
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+}, 15_000)
+
+test("revocation hides stale hosted search rows and offers account access without inventing a destination", async () => {
+  const previous = getLang(); setLang("en")
+  const free = choice("hosted-stale-model", "uptokey-hosted"), h = await mount([free], [a, free], a, [free])
+  try {
+    await h.openModels()
+    expect(h.app.captureCharFrame()).toContain(free.modelID)
+    h.account.view.session.authenticated = false
+    await h.accountChanged()
+    await h.app.mockInput.typeText("uptokey"); await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).not.toContain(free.modelID)
+    expect(h.app.captureCharFrame()).toContain("Sign in")
+    h.app.mockInput.pressEnter(); await h.app.flush()
+    expect(h.events).toEqual([{ type: "uptokey.panel.open", properties: { name: "account" } }])
+    expect(h.local.model.current()).toEqual(a)
+    await h.unchanged()
   } finally { h.app.renderer.destroy(); setLang(previous) }
 })

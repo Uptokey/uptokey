@@ -13,6 +13,34 @@ import { transcriptCodeBlockText } from '../../clipboard.ts'
 import { localizedDiagnostic } from '../../operation-ui.ts'
 import { readUsageRows } from './integration-connections.ts'
 import { runLinearAccount, accountSummary } from './linear-account.ts'
+import { HOSTED_PROVIDER, type TuiHostedModel } from '../../hosted.ts'
+import type { ConnectionsSnapshot } from '../../connections.ts'
+import type { AccountView } from '../../account.ts'
+
+type LinearModelInventory = {
+  view: { connections: ConnectionsSnapshot | null }
+  account: { view: Pick<AccountView, 'session' | 'available'> }
+  hostedModels: readonly TuiHostedModel[]
+}
+
+/** The same real destinations as the fullscreen picker; account navigation is never represented as a model. */
+export function linearModelChoices(controller: LinearModelInventory, query = '') {
+  const own = controller.view.connections?.providers.filter(provider => provider.eligible)
+    .flatMap(provider => provider.models.map(id => ({ provider: provider.id, id, label: provider.displayName, name: id, hosted: false }))) ?? []
+  const account = controller.account.view
+  const hosted = account.session?.authenticated && account.available?.currentAccountRef
+    ? controller.hostedModels.filter(model => model.accountRef === account.available!.currentAccountRef && model.revision === account.available!.revision)
+      .map(model => ({ provider: HOSTED_PROVIDER, id: model.modelId, label: 'Uptokey', name: model.label, hosted: true }))
+    : []
+  const needle = query.trim().toLowerCase()
+  return [...own, ...hosted].filter(model => !needle || `${model.label} ${model.name} ${model.id} ${model.hosted ? 'Uptokey Free Plus' : ''}`.toLowerCase().includes(needle))
+}
+
+/** Opening the menu does not invalidate a usable catalog or wait for hosted networking. */
+export async function loadLinearModelChoices(controller: LinearModelInventory & { refreshConnections(): Promise<void> }, query = '') {
+  if (!controller.view.connections) await controller.refreshConnections()
+  return linearModelChoices(controller, query)
+}
 
 /** Accessible presentation of the same controller, commands, vault, approvals and receipts. No alternate renderer. */
 export async function runLinearFrontend(backend:UptokeyBackend, connect?:string) {
@@ -36,11 +64,22 @@ export async function runLinearFrontend(backend:UptokeyBackend, connect?:string)
     else say(terminalText('linear_hint'))
   }
   const setup=async(id?:string)=>{
+    const choices=backend.providerChoices().filter(item=>item.executable)
+    const rows = choices.map(value => ({ kind: 'provider' as const, label: value.label, value }))
+    const uptokey = { kind: 'account' as const, label: 'Uptokey', value: undefined }
+    const options = [...rows.filter(row => row.value.configured), uptokey, ...rows.filter(row => !row.value.configured)]
+    const selected=id?(id.toLowerCase()==='uptokey'||id===HOSTED_PROVIDER?uptokey:rows.find(row=>row.value.id===id)):await choose(options,item=>item.label)
+    if(selected?.kind==='account'){
+      const models=linearModelChoices(controller).filter(model=>model.hosted)
+      if(!models.length){accountObserved=true;return runLinearAccount(controller.account,{say,choose})}
+      const model=await choose(models,value=>`${value.label} · ${value.name}`)
+      if(model)await controller.selectProviderModel(model.id,model.provider)
+      return
+    }
+    const choice=selected?.value
+    if(!choice)return
     const service=backend.providerSetup
     if(!service){say(ui('connect_unavailable'));return}
-    const choices=backend.providerChoices().filter(item=>item.executable)
-    const choice=id?choices.find(item=>item.id===id):await choose(choices,item=>item.label)
-    if(!choice)return
     const prepared=await prepareConnection({service,choice,
       requestKey:async(error)=>{if(error)say(setupErrorText(error));const key=await ask(`${ui('secret_placeholder')}: `,true);return key||null},
       requestModel:async(error)=>{if(error)say(setupErrorText(error));say(connectionText('manual_hint'));return (await ask(`${connectionText('manual_model')}: `))||null},
@@ -60,9 +99,9 @@ export async function runLinearFrontend(backend:UptokeyBackend, connect?:string)
     if(name==='account'){accountObserved=true;return runLinearAccount(controller.account,{say,choose})}
     if(name==='connections')return setup(arg)
     if(name==='models'){
-      await controller.refreshConnections()
-      const rows=controller.view.connections?.providers.filter(p=>p.eligible).flatMap(p=>p.models.map(id=>({provider:p.id,id,label:p.displayName})))??[]
-      const item=await choose(rows,value=>`${value.label} · ${value.id}`)
+      const rows=await loadLinearModelChoices(controller,arg)
+      if(!rows.length&&['uptokey','free','plus'].includes(arg?.trim().toLowerCase()??'')){accountObserved=true;return runLinearAccount(controller.account,{say,choose})}
+      const item=await choose(rows,value=>`${value.label} · ${value.name}`)
       if(item)await controller.selectProviderModel(item.id,item.provider)
       return
     }

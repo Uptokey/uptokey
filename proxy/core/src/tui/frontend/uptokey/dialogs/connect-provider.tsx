@@ -15,6 +15,10 @@ import { getBackend } from "../backend/registry.ts"
 import { SecretPrompt } from "./secret-prompt.tsx"
 import { ui } from "../i18n.ts"
 import { connectionText, prepareConnection, setupErrorText } from "../integration-connections.ts"
+import { HOSTED_PROVIDER } from "../../../hosted.ts"
+import { accountText } from "../../../account-ui.ts"
+import { DialogModel } from "../../vendor/opencode-tui/component/dialog-model"
+import { useControllerTick } from "../panels/use-controller.ts"
 
 export { setupErrorText }
 
@@ -38,8 +42,20 @@ export function ConnectProvider(props:{providerId?:string}={}) {
   const toast = useToast()
   const { theme } = useTheme()
   const backend = getBackend()
+  const tick = useControllerTick()
+  const accountAuthenticated = createMemo(() => { tick(); return backend.controller.account.view.session?.authenticated === true })
 
   const choices = createMemo(() => backend.providerChoices())
+
+  function openUptokey() {
+    const controller = backend.controller
+    const available = controller.account.view.available
+    if (controller.account.view.session?.authenticated && controller.hostedModels?.some(model => model.accountRef === available?.currentAccountRef && model.revision === available?.revision)) {
+      dialog.replace(() => <DialogModel providerID={HOSTED_PROVIDER} />)
+      return
+    }
+    backend.emit({ type: "uptokey.panel.open", properties: { name: "account" } })
+  }
 
   function connectionFlow() {
     const abort = new AbortController()
@@ -193,6 +209,7 @@ export function ConnectProvider(props:{providerId?:string}={}) {
   }
 
   onMount(()=>{
+    if (props.providerId === HOSTED_PROVIDER || props.providerId?.toLowerCase() === "uptokey") { openUptokey(); return }
     const choice=props.providerId?backend.providerChoices().find(item=>item.id===props.providerId):undefined
     if(choice)void connect(choice)
   })
@@ -201,7 +218,29 @@ export function ConnectProvider(props:{providerId?:string}={}) {
       title={ui("connect_pick_provider")}
       placeholder={ui("connect_search")}
       emptyView={<text fg={theme.textMuted}>{ui("connect_providers_empty")}</text>}
-      options={choices().map((choice) => ({
+      options={[
+        ...choices().filter(choice => choice.configured).map(providerOption),
+        {
+          title: "Uptokey",
+          value: HOSTED_PROVIDER,
+          description: accountAuthenticated() ? "Free / Plus" : `${accountText("sign_in")} · Free / Plus`,
+          category: ui(accountAuthenticated() ? "connect_ready" : "connect_title_list"),
+          onSelect: openUptokey,
+        },
+        ...choices().filter(choice => !choice.configured).map(providerOption),
+        {
+          title: "Brave Search",
+          value: "web:brave",
+          description: ui("connect_brave_description"),
+          category: ui("connect_web_search"),
+          onSelect: () => void connectBrave(),
+        },
+      ]}
+    />
+  )
+
+  function providerOption(choice: ReturnType<typeof backend.providerChoices>[number]) {
+    return {
         title: choice.label,
         value: choice.id,
         description: choice.executable ? (choice.local ? ui("connect_local_no_key") : undefined) : ui("connect_catalog_only"),
@@ -209,17 +248,8 @@ export function ConnectProvider(props:{providerId?:string}={}) {
         gutter: choice.eligible ? () => <text fg={theme.success}>✓</text> : undefined,
         disabled: false,
         onSelect: () => void connect(choice),
-      })).concat([{
-        title: "Brave Search",
-        value: "web:brave",
-        description: ui("connect_brave_description"),
-        category: ui("connect_web_search"),
-        gutter: undefined,
-        disabled: false,
-        onSelect: () => void connectBrave(),
-      }])}
-    />
-  )
+    }
+  }
 }
 
 export { PROVIDER_SETUP_PRESETS }

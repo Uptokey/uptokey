@@ -54,6 +54,8 @@ export class TuiAccount extends EventEmitter {
   private abort: AbortController | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private refreshing: Promise<void> | null = null;
+  private usageRead: Promise<void> | null = null;
+  private usageGeneration = 0;
   private active: Promise<void> | null = null;
   private activeKind: "read" | "mutation" | null = null;
   private retryAt = 0;
@@ -247,13 +249,32 @@ export class TuiAccount extends EventEmitter {
     });
   }
   loadUsage(): Promise<void> {
-    void this.loadPlan();
-    return this.perform(async signal => { const result = await this.client.getAccountUsage(signal); if (!signal.aborted && !this.disposed) this.view.usage = result; }, "read");
+    if (this.usageRead) return this.usageRead;
+    const binding = this.binding(), generation = this.usageGeneration;
+    const current = () => !this.disposed && generation === this.usageGeneration && this.binding() === binding;
+    const promise = (async () => {
+      // An explicit credit read must survive an in-flight Refresh. The shared
+      // read gate otherwise returns that operation without sending this one.
+      while (this.active) {
+        await this.active;
+        if (!current()) return;
+      }
+      if (!binding || !current()) return;
+      void this.loadPlan();
+      await this.perform(async signal => {
+        const result = await this.client.getAccountUsage(signal);
+        if (!signal.aborted && current()) this.view.usage = result;
+      }, "read");
+    })();
+    this.usageRead = promise;
+    void promise.finally(() => { if (this.usageRead === promise) this.usageRead = null; });
+    return promise;
   }
   cancelPending(): void {
     this.planRequested = false;
     this.clearPlan();
     ++this.generation; this.abort?.abort(); clearTimeout(this.timer);
+    ++this.usageGeneration; this.usageRead = null;
     this.refreshing = null; this.active = null; this.activeKind = null; this.retryAt = 0;
     this.view.challenge = null; this.view.login = null; this.view.busy = false; this.view.error = null; this.change();
   }
@@ -284,5 +305,5 @@ export class TuiAccount extends EventEmitter {
       }
     }, this.view.challenge ? "mutation" : "read");
   }
-  dispose(): void { this.disposed = true; this.clearPlan(); ++this.generation; this.abort?.abort(); clearTimeout(this.timer); this.removeAllListeners(); }
+  dispose(): void { this.disposed = true; this.clearPlan(); ++this.generation; ++this.usageGeneration; this.usageRead = null; this.abort?.abort(); clearTimeout(this.timer); this.removeAllListeners(); }
 }
