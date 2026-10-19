@@ -193,7 +193,7 @@ export function DialogModel(props: { providerID?: string }) {
       actions={[
         {
           command: "model.dialog.provider",
-          title: tr(connected() ? "Connect provider" : "View all providers"),
+          title: tr("Providers"),
           selection: "none",
           onTrigger() {
             dialog.replace(() => <DialogProvider />)

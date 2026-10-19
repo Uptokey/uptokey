@@ -17,7 +17,7 @@ import { TuiPathsProvider, TuiStartupProvider } from "../vendor/opencode-tui/con
 import { TuiConfigProvider, resolve as resolveConfig } from "../vendor/opencode-tui/config"
 import { KVProvider } from "../vendor/opencode-tui/context/kv"
 import { ThemeProvider } from "../vendor/opencode-tui/context/theme"
-import { ToastProvider } from "../vendor/opencode-tui/ui/toast"
+import { ToastProvider, Toast } from "../vendor/opencode-tui/ui/toast"
 import { DialogProvider, useDialog, type DialogContext } from "../vendor/opencode-tui/ui/dialog"
 import { DialogModel } from "../vendor/opencode-tui/component/dialog-model"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../vendor/opencode-tui/keymap"
@@ -75,7 +75,7 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
       <TuiStartupProvider value={{ skipInitialLoading: true }}><OpencodeKeymapProvider keymap={keymap}><ArgsProvider><PermissionProvider><SDKProvider url="http://127.0.0.1">
         <SyncContext.Provider value={{ data } as never}><TuiConfigProvider config={config}><KVProvider>
           <ThemeProvider mode="dark" source={{ discover: async () => ({}) }}><ToastProvider><RouteProvider>
-            <LocalProvider><DialogProvider><Consumer /></DialogProvider></LocalProvider>
+            <LocalProvider><DialogProvider><Consumer /></DialogProvider><Toast /></LocalProvider>
           </RouteProvider></ToastProvider></ThemeProvider>
         </KVProvider></TuiConfigProvider></SyncContext.Provider>
       </SDKProvider></PermissionProvider></ArgsProvider></OpencodeKeymapProvider></TuiStartupProvider>
@@ -111,9 +111,62 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
 import { getBackend } from "./backend/registry.ts"
 import { ConnectProvider } from "./dialogs/connect-provider.tsx"
 import { DialogSelect } from "../vendor/opencode-tui/ui/dialog-select"
+import { ui } from "./i18n.ts"
 const provider = { id: "synthetic-local", label: "Synthetic local", executable: true, local: true, configured: true, endpointUrl: "http://127.0.0.1:9999/v1" }
 const result = { providerId: provider.id, modelId: "synthetic-model", routingComboId: "synthetic-combo", reloaded: true as const }
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { resolve, reject, promise } }
+
+test("provider list exposes Uptokey Disconnect and requires a safe explicit confirmation", async () => {
+  const previous=getLang();setLang("en");const h=await mount([], [a]);let logouts=0,invalidations=0
+  Object.assign(h.account.view,{available:{currentAccountRef:"acc_"+"a".repeat(64),revision:3,currentOwned:true}})
+  Object.assign(h.account,{async logout(){logouts++;h.account.view.session.authenticated=false}})
+  Object.assign(h.controller,{async refreshHostedModels(){invalidations++}})
+  Object.assign(getBackend(),{providerChoices:()=>[],refreshAll(){}})
+  const settle=async()=>{await h.app.flush();await h.app.renderOnce()}
+  const openDisconnect=async()=>{h.dialog().replace(()=><ConnectProvider/>);await settle();await h.app.mockInput.typeText("uptokey");await settle();h.app.mockInput.pressArrow("down");h.app.mockInput.pressEnter();await settle()}
+  try {
+    await openDisconnect();expect(h.app.captureCharFrame()).toContain(ui("provider_disconnect_account_hint"));expect(logouts).toBe(0)
+    h.app.mockInput.pressEnter();await settle();expect(logouts).toBe(0)
+    await openDisconnect();h.app.mockInput.pressArrow("down");h.app.mockInput.pressEnter();await settle()
+    expect(logouts).toBe(1);expect(invalidations).toBe(1);expect(h.account.view.session.authenticated).toBe(false);expect(h.local.model.current()).toEqual(a)
+  } finally {h.app.renderer.destroy();setLang(previous)}
+})
+
+test("provider recovery opens the existing Account panel before connecting so browser fallback stays visible", async () => {
+  const previous = getLang(); setLang("en"); const h = await mount([], [a])
+  let connections = 0
+  Object.assign(h.account.view, { connectionNeeded: true })
+  Object.assign(h.account, { async connectHosted() { expect(h.events.at(-1)).toEqual({ type: "uptokey.panel.open", properties: { name: "account" } }); connections++ } })
+  Object.assign(getBackend(), { providerChoices: () => [] })
+  try {
+    h.dialog().replace(() => <ConnectProvider />); await h.app.flush(); await h.app.renderOnce()
+    await h.app.mockInput.typeText(accountText("connect_terminal")); await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).toContain(accountText("connect_terminal"))
+    h.app.mockInput.pressEnter(); await h.app.flush()
+    expect(connections).toBe(1); expect(h.local.model.current()).toEqual(a); expect(h.account.view.session.authenticated).toBe(true)
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})
+
+test("provider Disconnect remains visible for named-only accounts and removes only the confirmed version", async()=>{
+  const previous=getLang();setLang("en");const h=await mount([], [a]);const id="11111111-1111-4111-8111-111111111111",calls:unknown[]=[]
+  const choice={id:"groq",label:"Groq",configured:false,eligible:true,local:false,executable:true,endpointUrl:"https://api.groq.com/openai/v1/chat/completions"}
+  Object.assign(h.controller,{view:{connections:{providers:[{id:"groq",configured:true}],connections:[{id,providerId:"groq",label:"Work account",enabled:true,revision:5}]}},client:{url:"http://127.0.0.1:21435",getSelectedDestination:()=>({providerId:"connected",connectionId:"connected"})},async refreshConnections(){calls.push("refresh")}})
+  Object.assign(getBackend(),{providerChoices:()=>[choice],providerSetup:{async disconnect(...args:unknown[]){calls.push(args)}},refreshAll(){calls.push("frontend")}})
+  const settle=async()=>{await h.app.flush();await h.app.renderOnce()}
+  try {
+    h.dialog().replace(()=><ConnectProvider/>);await settle();await h.app.mockInput.typeText("groq");await settle()
+    expect(h.app.captureCharFrame()).toContain(ui("provider_disconnect",{name:"Groq"}))
+    h.app.mockInput.pressArrow("down");h.app.mockInput.pressEnter();await settle();expect(h.app.captureCharFrame()).toContain("Work account");expect(calls).toEqual([])
+    h.app.mockInput.pressArrow("down");h.app.mockInput.pressEnter();await settle()
+    expect(calls).toEqual([["groq",id,"http://127.0.0.1:21435",5],"refresh","frontend"]);expect(h.local.model.current()).toEqual(a);expect(h.account.view.session.authenticated).toBe(true)
+    calls.length=0
+    getBackend().providerSetup!.disconnect=async(_provider,_id,_url,revision)=>{calls.push(revision);throw Error('provider_connection_conflict')}
+    h.dialog().replace(()=><ConnectProvider/>);await settle();await h.app.mockInput.typeText("groq");await settle();h.app.mockInput.pressArrow("down");h.app.mockInput.pressEnter();await settle()
+    ;(h.controller as any).view.connections.connections[0].revision=6
+    h.app.mockInput.pressArrow("down");h.app.mockInput.pressEnter();await settle()
+    expect(calls).toEqual([5]);expect(h.app.captureCharFrame().replace(/\s|┃/g,"")).toContain(ui("provider_disconnect_failed").replace(/\s/g,""));expect(h.local.model.current()).toEqual(a);expect(h.account.view.session.authenticated).toBe(true)
+  } finally {h.app.renderer.destroy();setLang(previous)}
+})
 
 test("Escape cancels discovery and a late preparation is disposed without reopening or replacing the next dialog", async () => {
   setLang("en")

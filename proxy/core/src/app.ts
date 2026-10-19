@@ -1476,7 +1476,22 @@ export function createApp(
   app.get("/v1/usage/estimation", (c) => c.json(typeof router.estimationMetrics === "function" ? router.estimationMetrics() : { basis: "local_process_observation", available: false }));
   let legacyConnectionsMigratedFor: string | undefined;
   app.get("/v1/connections", async (c) => {
-    const inventory = {...router.connectionMetrics(),deviceEntitlement:deviceEntitlement() ?? null,efficiency:typeof router.efficiencyMetrics === "function" ? router.efficiencyMetrics() : null};
+    let profileInventory: Array<{ profile: import('./connection-profiles.ts').StoredProfile; hasCredential: boolean }> = [];
+    if (connectionProfiles) {
+      try {
+        // Providers configured through the CLI/TUI become default connections;
+        // independently saved profiles retain their own credentials and state.
+        const legacyKey = JSON.stringify(Object.entries(config.providers ?? {}).map(([id, item]) => [id, (item as { configured?: unknown })?.configured === true, (item as { enabled?: unknown })?.enabled === true, (item as { endpointUrl?: unknown })?.endpointUrl ?? null, (item as { models?: unknown })?.models ?? null]));
+        if (legacyKey !== legacyConnectionsMigratedFor) {
+          await connectionProfiles.migrateFromLegacy(config).then(() => { legacyConnectionsMigratedFor = legacyKey; }, () => undefined);
+        }
+        profileInventory = await Promise.all((await connectionProfiles.list()).filter(profile => !profile.providerId.startsWith('service-')).map(async profile => ({
+          profile, hasCredential: await connectionProfiles!.credentialPresent(profile),
+        })));
+      } catch { profileInventory = []; }
+    }
+    const configuredProfiles = new Set(profileInventory.filter(({profile, hasCredential}) => profile.enabled && hasCredential).map(({profile}) => profile.providerId));
+    const inventory = {...router.connectionMetrics(configuredProfiles),deviceEntitlement:deviceEntitlement() ?? null,efficiency:typeof router.efficiencyMetrics === "function" ? router.efficiencyMetrics() : null};
     const epochPending = identityEpochMismatch(config, identityEpoch?.());
     const access = epochPending ? {allowed:false,code:"config_epoch_pending"} : await offlineGuard(new Date());
     const deviceAccess = {allowed:access.allowed,reason:access.allowed ? null : access.code ?? "offline_grace_expired"};
@@ -1495,34 +1510,11 @@ export function createApp(
         admission: blocked ? { eligible: false, reason: deviceAccess.reason } : p.admission
       };
     }) ?? [];
-    let exposedConnections: Array<{ id: string; providerId: string; accessMode: string; label: string; models: string[]; enabled: boolean; eligible: boolean }> = [];
-    if (connectionProfiles) {
-      try {
-        // Providers configured through the CLI/TUI become connections (voice, transcription and media use those),
-        // once per change of the configured providers; profiles born that way follow later changes, others are never touched.
-        const legacyKey = JSON.stringify(Object.entries(config.providers ?? {}).map(([id, item]) => [id, (item as { configured?: unknown })?.configured === true, (item as { enabled?: unknown })?.enabled === true, (item as { endpointUrl?: unknown })?.endpointUrl ?? null, (item as { models?: unknown })?.models ?? null]));
-        if (legacyKey !== legacyConnectionsMigratedFor) {
-          await connectionProfiles.migrateFromLegacy(config).then(() => { legacyConnectionsMigratedFor = legacyKey; }, () => undefined);
-        }
-        const profilesList = await connectionProfiles.list();
-        exposedConnections = await Promise.all(profilesList.filter(p=>!p.providerId.startsWith('service-')).map(async (p) => {
-          const provider = projectedProviders.find((pr: any) => pr.id === p.providerId);
-          const hasCred = await connectionProfiles!.credentialPresent(p);
-          const eligible = p.enabled && hasCred && (provider?.admission?.eligible !== false);
-          return {
-            id: p.id,
-            providerId: p.providerId,
-            accessMode: p.accessMode,
-            label: p.label || p.providerId,
-            models: [...p.modelIds],
-            enabled: p.enabled,
-            eligible,
-          };
-        }));
-      } catch {
-        exposedConnections = [];
-      }
-    }
+    const exposedConnections = profileInventory.map(({profile: p, hasCredential}) => {
+      const provider = projectedProviders.find((pr: any) => pr.id === p.providerId);
+      return { id: p.id, revision: p.revision, providerId: p.providerId, accessMode: p.accessMode, label: p.label || p.providerId,
+        models: [...p.modelIds], enabled: p.enabled, eligible: p.enabled && hasCredential && (provider?.admission?.eligible !== false) };
+    });
     return c.json({...inventory, providers: projectedProviders, connections: exposedConnections, deviceAccess});
   });
   app.get("/v1/local-models", async (c) => {
@@ -1726,7 +1718,8 @@ export function createApp(
       if(ACCOUNT_POST_ACTIONS.has(action)){
         const parsed=await readBoundedJson(c.req.raw,action==='hosted'?ACCOUNT_HOSTED_MAX_REQUEST_BYTES:MAX_LOCAL_CONTROL_REQUEST_BYTES);
         const keys=action==='adopt'?['accountRef','expectedRevision']:action==='unlink'?['expectedRevision']:action==='approve'?['id','userCode','accountRef']:action==='consume'?['id']:[];
-        if(!parsed.ok||!['control','hosted'].includes(action)&&!hasExactKeys(parsed.value,keys))return c.json({error:{type:'account_request_invalid'}},400);
+        const connectionPurpose=action==='login'&&parsed.ok&&hasExactKeys(parsed.value,['purpose'])&&(parsed.value as {purpose:unknown}).purpose==='hosted-admission';
+        if(!parsed.ok||!['control','hosted'].includes(action)&&!connectionPurpose&&!hasExactKeys(parsed.value,keys))return c.json({error:{type:'account_request_invalid'}},400);
         input=parsed.value as Record<string,unknown>;
         if(action==='control')try{const request=readAccountControlRequest(input);input={operation:request.operation,payload:request.payload};}catch{return c.json({error:{type:'account_request_invalid'}},400);}
         if(action==='hosted')try{input=readAccountHostedRequest(input);}catch{return c.json({error:{type:'account_request_invalid'}},400);}
@@ -1738,6 +1731,7 @@ export function createApp(
       try{
         await admit();const service=accountService();
         const value=action==='capability'?service.capability():
+          action==='login'&&input.purpose==='hosted-admission'?await service.connection(admitted.principal,c.req.raw.signal,admit):
           action==='control'?await service.control(admitted.principal,input as never,c.req.raw.signal,admit):
           action==='hosted'?await service.hosted(admitted.principal,input as never,c.req.raw.signal,admit):
           action==='adopt'?await service.adopt(admitted.principal,input as {accountRef:string;expectedRevision:number},c.req.raw.signal,admit):
@@ -2040,14 +2034,15 @@ export function createApp(
       connectionProfilesStorage,
       {
         ...(connectionServices?.now ? { now: connectionServices.now } : {}),
-        onDefaultRevoked: async (providerId) => {
-          // Revogar o perfil default migrado desliga a credencial legada do roteador.
+        onDefaultRevoked: async (providerId, hasRemainingEnabledProfiles) => {
+          // Removing one default credential must not disable the other saved accounts.
+          // An explicit provider-wide disabled switch remains disabled.
           await persistRuntimeConfig((next) => {
             const entry = (next.providers as Record<string, typeof next.providers.groq>)[providerId];
-            if (entry) { entry.enabled = false; entry.configured = false; }
+            if (entry) { if (!hasRemainingEnabledProfiles) entry.enabled = false; entry.configured = false; }
           });
-          try { await secrets.delete(`provider:${providerId}`); } catch { /* revogação local primeiro */ }
-          try { await router.invalidateProviderCache(providerId as ProviderName); } catch { /* cache ausente */ }
+          await secrets.delete(`provider:${providerId}`);
+          await router.invalidateProviderCache(providerId as ProviderName);
         },
       },
     );

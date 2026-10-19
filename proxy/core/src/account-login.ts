@@ -7,7 +7,8 @@ import {accountControlProofPayload,accountMobilityProofPayload,isAccountAccessTo
 import {readBoundedJson} from '@uptokey/sync-contract/limits';
 import {ACCOUNT_ID,ACCOUNT_MAX_AVAILABLE,ACCOUNT_MAX_CLIENT_RESPONSE_BYTES,ACCOUNT_MAX_RESPONSE_BYTES,ACCOUNT_REF,accountProofPayload,readAccountAdoptInput,readAccountPublicSession,readAccountPublicUsage,readAccountUnlinkInput,trustedAccountOrigin,type AccountAdoptInput,type AccountAdoption,type AccountAvailable,type AccountAvailableEntry,type AccountProof,type AccountPublicSession,type AccountUnlinkInput} from './account-login-protocol.ts';
 
-type StoredAccount={version:1;origin:string;id:string;privateKey:string;expiresAt:number;pending:boolean};
+type StoredAccount={version:1;origin:string;id:string;privateKey:string;expiresAt:number;pending:boolean;retired?:true};
+type InstallationIdentity={version:1;origin:string;privateKey:string};
 type AccountReference={ownerPrincipal:string;accountRef:string};
 type AccountLink={version:1;origin:string;revision:number;signedOut:boolean;association?:AccountReference};
 type AccountIndex={version:1;origin:string;accounts:AccountReference[]};
@@ -132,6 +133,23 @@ export class AccountLoginService {
  private key(principal:string){return 'uptokey-account:'+this.principalDigest(principal);}
  private linkKey(principal:string){return 'uptokey-account-link:'+this.principalDigest(principal);}
  private indexKey(){return 'uptokey-account-index:'+digest(this.origin??'');}
+ private identityKey(){return 'uptokey-account-identity:'+digest(this.origin??'');}
+ // A signing identity belongs to this vault installation and origin, not to an
+ // account grant. It is never an HPKE key or authentication by itself. Grant
+ // IDs, proof nonces, local principals and account references remain separate.
+ private async installationIdentity(previous?:StoredAccount,admit?:AccountAdmission):Promise<InstallationIdentity>{
+  if(!this.origin)throw Error('account_service_not_configured');
+  return serialClientAuthority(this.secrets,this.identityKey(),async()=>{
+   await admit?.();const raw=await this.secrets.get(this.identityKey());await admit?.();
+   if(raw!==undefined){let row:InstallationIdentity;try{if(raw.length>4096)throw Error();row=JSON.parse(raw);if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).sort().join(',')!=='origin,privateKey,version'||row.version!==1||row.origin!==this.origin||typeof row.privateKey!=='string'||row.privateKey.length>2048)throw Error();const key=createPrivateKey(row.privateKey);if(key.asymmetricKeyType!=='ec'||key.asymmetricKeyDetails?.namedCurve!=='prime256v1')throw Error();}catch{throw Error('account_store_invalid');}return row;}
+   const privateKey=previous?.privateKey??generateKeyPairSync('ec',{namedCurve:'prime256v1'}).privateKey.export({format:'pem',type:'pkcs8'}).toString();
+   const identity:InstallationIdentity={version:1,origin:this.origin!,privateKey},value=JSON.stringify(identity);
+   await this.writeValue(this.identityKey(),value,admit);
+   await admit?.();const saved=await this.secrets.get(this.identityKey());await admit?.();
+   if(saved!==value)throw Error('account_store_invalid');
+   return identity;
+  });
+ }
  private accountRef(principal:string,row:StoredAccount){const generation=digest(createPublicKey(row.privateKey).export({format:'der',type:'spki'}).toString('base64'));return 'acc_'+digest(JSON.stringify(['uptokey.account.reference.v1',row.origin,principal,row.id,generation]));}
 
  // Queue identities are shared across service instances. Sorted locks prevent
@@ -139,15 +157,25 @@ export class AccountLoginService {
  private async withLocks<T>(principals:string[],work:()=>Promise<T>):Promise<T>{const keys=[...new Set(principals.map(principal=>'account-operation:'+this.principalDigest(principal)))].sort();const run=(at:number):Promise<T>=>at===keys.length?work():serialClientAuthority(this.secrets,keys[at]!,()=>run(at+1));return run(0);}
  private async exclusive<T>(principal:string,work:(link:AccountLink)=>Promise<T>,admit?:AccountAdmission):Promise<T>{const before=await this.readLink(principal,admit);return this.withLocks([principal,...(before.association?[before.association.ownerPrincipal]:[])],async()=>{const link=await this.readLink(principal,admit);if(link.association?.ownerPrincipal!==before.association?.ownerPrincipal)throw Error('account_share_conflict');return work(link);});}
 
- private async read(principal:string,admit?:AccountAdmission):Promise<StoredAccount|undefined>{
+ private async read(principal:string,admit?:AccountAdmission,includeRetired=false):Promise<StoredAccount|undefined>{
   await admit?.();const raw=await this.secrets.get(this.key(principal));await admit?.();if(raw===undefined)return undefined;
   let row:StoredAccount;try{if(raw.length>8192)throw Error();row=JSON.parse(raw);}catch{throw Error('account_store_invalid');}
-  if(!row||typeof row!=='object'||Array.isArray(row)||row.version!==1||row.origin!==this.origin||typeof row.id!=='string'||!ACCOUNT_ID.test(row.id)||typeof row.privateKey!=='string'||row.privateKey.length>2048||!Number.isSafeInteger(row.expiresAt)||row.expiresAt<=0||typeof row.pending!=='boolean')throw Error('account_store_invalid');
-  try{const key=createPrivateKey(row.privateKey);if(key.asymmetricKeyType!=='ec'||key.asymmetricKeyDetails?.namedCurve!=='prime256v1')throw Error();}catch{throw Error('account_store_invalid');}return row;
+  if(!row||typeof row!=='object'||Array.isArray(row)||row.version!==1||row.origin!==this.origin||typeof row.id!=='string'||!ACCOUNT_ID.test(row.id)||typeof row.privateKey!=='string'||row.privateKey.length>2048||!Number.isSafeInteger(row.expiresAt)||row.expiresAt<=0||typeof row.pending!=='boolean'||row.retired!==undefined&&row.retired!==true)throw Error('account_store_invalid');
+  try{const key=createPrivateKey(row.privateKey);if(key.asymmetricKeyType!=='ec'||key.asymmetricKeyDetails?.namedCurve!=='prime256v1')throw Error();}catch{throw Error('account_store_invalid');}return row.retired&&!includeRetired?undefined:row;
  }
  private async writeValue(key:string,value:string,admit?:AccountAdmission,after:AccountAdmission|undefined=admit){await admit?.();const previous=await this.secrets.get(key);await admit?.();await this.secrets.set(key,value);try{await after?.();}catch(error){if(await this.secrets.get(key)===value){if(previous===undefined)await this.secrets.delete(key);else await this.secrets.set(key,previous);}throw error;}}
  private async save(principal:string,row:StoredAccount,admit?:AccountAdmission){await this.writeValue(this.key(principal),JSON.stringify(row),admit);}
- private async remove(principal:string,admit?:AccountAdmission){await admit?.();await this.secrets.delete(this.key(principal));await admit?.();await this.unpublish(principal,admit);}
+ private async remove(principal:string,admit?:AccountAdmission){
+  const row=await this.read(principal,admit,true);
+  if(row){
+   // The caller already knows this grant is revoked/expired. Retaining its key
+   // for a failed migration must never retain account authority or block logout.
+   if(!row.retired)await this.save(principal,{...row,retired:true},admit);
+   try{await this.installationIdentity(row,admit);}
+   catch(error){if(!(error instanceof Error&&['account_store_invalid','secret_store_read_unavailable','secret_store_write_unavailable','secret_store_delete_unavailable'].includes(error.message)))throw error;await this.unpublish(principal,admit);return;}
+  }
+  await admit?.();await this.secrets.delete(this.key(principal));await admit?.();await this.unpublish(principal,admit);
+ }
  private defaultLink():AccountLink{return {version:1,origin:this.origin??'',revision:0,signedOut:false};}
  private async readLink(principal:string,admit?:AccountAdmission):Promise<AccountLink>{
   await admit?.();const raw=await this.secrets.get(this.linkKey(principal));await admit?.();if(raw===undefined)return this.defaultLink();
@@ -171,10 +199,20 @@ export class AccountLoginService {
  private async statusUnchecked(principal:string,row:StoredAccount,signal?:AbortSignal,admit?:AccountAdmission):Promise<AccountPublicSession>{if(row.pending&&row.expiresAt<=this.now()){await this.remove(principal,admit);return this.signedOut();}try{const answer=await this.request('/api/account/native/'+(row.pending?'poll':'status'),this.proof(row,row.pending?'poll':'status'),signal,admit);const session=readAccountPublicSession(answer);if(session.authenticated){if(typeof answer.expiresAt!=='number'||!Number.isSafeInteger(answer.expiresAt)||answer.expiresAt<=this.now())throw Error('account_response_invalid');const updated={...row,pending:false,expiresAt:answer.expiresAt};if(row.pending||row.expiresAt!==answer.expiresAt)await this.save(principal,updated,admit);await this.publish(principal,updated,admit);}else if(session.state==='signed_out')await this.remove(principal,admit);await admit?.();return session;}catch(error){if(expired(error)){await this.remove(principal,admit);return this.signedOut();}throw error;}}
  private async currentStatus(principal:string,link:AccountLink,signal?:AbortSignal,admit?:AccountAdmission):Promise<AccountPublicSession>{await admit?.();if(!this.origin||link.signedOut)return this.signedOut();if(!link.association){const row=await this.read(principal,admit);return row?this.statusUnchecked(principal,row,signal,admit):this.signedOut();}try{const {row,guard}=await this.readSource(principal,link,link.association,admit);return await this.statusUnchecked(link.association.ownerPrincipal,row,signal,guard);}catch(error){if(error instanceof Error&&error.message==='account_share_pending')return this.signedOut();throw error;}}
 
- async login(principal:string,signal?:AbortSignal,admit?:AccountAdmission){return this.exclusive(principal,async link=>{await admit?.();if(!this.origin)throw Error('account_service_not_configured');if(link.association){const session=await this.currentStatus(principal,link,signal,admit);if(session.authenticated)return {session};}if(link.signedOut||link.association)link=await this.changeLink(principal,link,{version:1,origin:this.origin,signedOut:false},admit);const old=await this.read(principal,admit);if(old?.pending&&old.expiresAt>this.now())return {loginUrl:this.origin+'/api/account/native/authorize?id='+old.id,userCode:old.id.replaceAll('-','').slice(0,8).toUpperCase(),expiresAt:old.expiresAt};if(old&&!old.pending){const status=await this.statusUnchecked(principal,old,signal,admit);if(status.authenticated)return {session:status};}
-  const pair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),publicKey=pair.publicKey.export({format:'jwk'}),privateKey=pair.privateKey.export({format:'pem',type:'pkcs8'}).toString();const answer=await this.request('/api/account/native/challenge',{publicKey},signal,admit);if(typeof answer.id!=='string'||!ACCOUNT_ID.test(answer.id)||typeof answer.expiresAt!=='number'||!Number.isSafeInteger(answer.expiresAt)||answer.expiresAt<=this.now()||answer.expiresAt>this.now()+6*60_000)throw Error('account_response_invalid');const row:StoredAccount={version:1,origin:this.origin,id:answer.id,privateKey,expiresAt:answer.expiresAt,pending:true};await this.save(principal,row,admit);return {loginUrl:this.origin+'/api/account/native/authorize?id='+row.id,userCode:row.id.replaceAll('-','').slice(0,8).toUpperCase(),expiresAt:row.expiresAt};},admit);}
+ async login(principal:string,signal?:AbortSignal,admit?:AccountAdmission){return this.exclusive(principal,async link=>{await admit?.();if(!this.origin)throw Error('account_service_not_configured');const identityAdmission=async()=>{await admit?.();if(signal?.aborted)throw Error('account_cancelled');};if(link.association){const session=await this.currentStatus(principal,link,signal,admit);if(session.authenticated)return {session};}if(link.signedOut||link.association)link=await this.changeLink(principal,link,{version:1,origin:this.origin,signedOut:false},admit);const old=await this.read(principal,admit,true);const identity=await this.installationIdentity(old,identityAdmission);if(old?.pending&&!old.retired&&old.expiresAt>this.now())return {loginUrl:this.origin+'/api/account/native/authorize?id='+old.id,userCode:old.id.replaceAll('-','').slice(0,8).toUpperCase(),expiresAt:old.expiresAt};if(old&&!old.pending&&!old.retired){const status=await this.statusUnchecked(principal,old,signal,admit);if(status.authenticated)return {session:status};}
+  const privateKey=identity.privateKey,publicKey=createPublicKey(privateKey).export({format:'jwk'});const answer=await this.request('/api/account/native/challenge',{publicKey},signal,admit);if(typeof answer.id!=='string'||!ACCOUNT_ID.test(answer.id)||typeof answer.expiresAt!=='number'||!Number.isSafeInteger(answer.expiresAt)||answer.expiresAt<=this.now()||answer.expiresAt>this.now()+6*60_000)throw Error('account_response_invalid');const row:StoredAccount={version:1,origin:this.origin,id:answer.id,privateKey,expiresAt:answer.expiresAt,pending:true};await this.save(principal,row,admit);return {loginUrl:this.origin+'/api/account/native/authorize?id='+row.id,userCode:row.id.replaceAll('-','').slice(0,8).toUpperCase(),expiresAt:row.expiresAt};},admit);}
 
  async status(principal:string,signal?:AbortSignal,admit?:AccountAdmission){return this.exclusive(principal,link=>this.currentStatus(principal,link,signal,admit),admit);}
+ /** An authenticated client's existing grant URL, never a new login or a credential. */
+ async connection(principal:string,signal?:AbortSignal,admit?:AccountAdmission){return this.exclusive(principal,async link=>{
+  const active=async()=>{await admit?.();if(signal?.aborted)throw Error('account_cancelled');await this.checkLink(principal,link,admit);};
+  await active();if(!this.origin)throw Error('account_service_not_configured');if(link.signedOut)throw Error('account_reauthentication_required');
+  const source=link.association?await this.readSource(principal,link,link.association,admit):undefined,row=source?.row??await this.read(principal,admit),owner=link.association?.ownerPrincipal??principal;
+  if(!row||row.pending||row.expiresAt<=this.now())throw Error('account_reauthentication_required');
+  await source?.guard();await active();const current=await this.read(owner,source?.guard??admit);
+  if(!current||current.pending||current.expiresAt<=this.now()||this.accountRef(owner,current)!==this.accountRef(owner,row))throw Error('account_session_revoked');
+  await source?.guard();await active();return {loginUrl:this.origin+'/api/account/native/authorize?id='+current.id,expiresAt:current.expiresAt};
+ },admit);}
  async logout(principal:string,signal?:AbortSignal,admit?:AccountAdmission){await admit?.();this.cancelMobility(principal);return this.exclusive(principal,async link=>{if(link.association){await this.changeLink(principal,link,{version:1,origin:this.origin??'',signedOut:true},admit);return this.signedOut();}const row=await this.read(principal,admit);if(row)await this.request('/api/account/native/logout',this.proof(row,'logout'),signal,admit);await this.remove(principal,admit);await this.changeLink(principal,link,{version:1,origin:this.origin??'',signedOut:true},admit);return this.signedOut();},admit);}
  async usage(principal:string,signal?:AbortSignal,admit?:AccountAdmission){return this.exclusive(principal,async link=>{await admit?.();const verifiedAt=new Date(this.now()).toISOString();if(!this.origin)return {state:'not_configured' as const,verifiedAt};if(link.signedOut)return {state:'reauthentication_required' as const,verifiedAt};let row:StoredAccount|undefined;let guard=admit;if(link.association){try{const source=await this.readSource(principal,link,link.association,admit);row=source.row;guard=source.guard;}catch(error){if(error instanceof Error&&error.message==='account_share_pending')return {state:'reauthentication_required' as const,verifiedAt};throw error;}}else row=await this.read(principal,admit);if(!row||row.pending)return {state:'reauthentication_required' as const,verifiedAt};try{const answer=await this.request('/api/account/native/usage',this.proof(row,'usage'),signal,guard);return readAccountPublicUsage(answer);}catch(error){if(expired(error))return {state:'reauthentication_required' as const,verifiedAt};throw error;}},admit);}
 

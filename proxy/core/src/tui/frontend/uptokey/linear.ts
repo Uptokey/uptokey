@@ -16,6 +16,8 @@ import { runLinearAccount, accountSummary } from './linear-account.ts'
 import { HOSTED_PROVIDER, type TuiHostedModel } from '../../hosted.ts'
 import type { ConnectionsSnapshot } from '../../connections.ts'
 import type { AccountView } from '../../account.ts'
+import { runLinearProviderDisconnect } from './provider-actions.ts'
+import { accountText } from '../../account-ui.ts'
 
 type LinearModelInventory = {
   view: { connections: ConnectionsSnapshot | null }
@@ -67,13 +69,21 @@ export async function runLinearFrontend(backend:UptokeyBackend, connect?:string)
     const choices=backend.providerChoices().filter(item=>item.executable)
     const rows = choices.map(value => ({ kind: 'provider' as const, label: value.label, value }))
     const uptokey = { kind: 'account' as const, label: 'Uptokey', value: undefined }
-    const options = [...rows.filter(row => row.value.configured), uptokey, ...rows.filter(row => !row.value.configured)]
+    const configured=(row:typeof rows[number])=>row.value.configured||controller.view.connections?.connections?.some(item=>item.providerId===row.value.id&&/^[0-9a-f-]{36}$/i.test(item.id))===true
+    const own = rows.filter(configured).flatMap(row => [row, ...(!row.value.local ? [{ kind: 'disconnect' as const, label: ui('provider_disconnect', { name: row.label }), value: row.value }] : [])])
+    const options = [...own, uptokey, ...rows.filter(row => !configured(row))]
     const selected=id?(id.toLowerCase()==='uptokey'||id===HOSTED_PROVIDER?uptokey:rows.find(row=>row.value.id===id)):await choose(options,item=>item.label)
+    if(selected?.kind==='disconnect')return runLinearProviderDisconnect(backend,selected.value.id,selected.value.label,{say,choose})
     if(selected?.kind==='account'){
       const models=linearModelChoices(controller).filter(model=>model.hosted)
       if(!models.length){accountObserved=true;return runLinearAccount(controller.account,{say,choose})}
-      const model=await choose(models,value=>`${value.label} · ${value.name}`)
-      if(model)await controller.selectProviderModel(model.id,model.provider)
+      const actions = [...models.map(model => ({ kind: 'model' as const, label: `${model.label} · ${model.name}`, model })),
+        ...(controller.account.view.connectionNeeded ? [{ kind: 'connect' as const, label: accountText('connect_terminal'), model: undefined }] : []),
+        { kind: 'disconnect' as const, label: ui('provider_disconnect',{name:'Uptokey'}), model: undefined }]
+      const action=await choose(actions,value=>value.label)
+      if(action?.kind==='model')await controller.selectProviderModel(action.model.id,action.model.provider)
+      if(action?.kind==='connect'){await controller.account.connectHosted();accountObserved=true;return runLinearAccount(controller.account,{say,choose})}
+      if(action?.kind==='disconnect')await runLinearProviderDisconnect(backend,HOSTED_PROVIDER,'Uptokey',{say,choose})
       return
     }
     const choice=selected?.value

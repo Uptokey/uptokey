@@ -154,6 +154,12 @@ async function fixture(t: TestContext, options: { own?: boolean; model?: string;
   };
 }
 
+test("device refusal offers the existing account connection action without automatically reopening, signing out or resending",async t=>{
+ const f=await fixture(t);await f.settled();const before=f.calls.filter(call=>call.body?.operation==='chat').length;
+ for(const code of ['hosted_device_busy','hosted_device_pairing_required']){(f.controller as any).reportTurnError(new Error(code),false);assert.equal(f.controller.account.view.connectionNeeded,true);}
+ assert.equal(f.controller.account.view.connection,null);assert.equal(f.controller.account.view.session?.authenticated,true);
+ assert.equal(f.calls.filter(call=>call.path==='/local/account/login'||call.path==='/local/account/logout').length,0);assert.equal(f.calls.filter(call=>call.body?.operation==='chat').length,before);
+});
 test("verified catalog supplies seven Free models dynamically, after own connected models, without inference on selection", async t => {
   const f = await fixture(t, { own: true }); await f.settled();
   assert.deepEqual(f.controller.hostedModels.map(item => item.modelId), ids());

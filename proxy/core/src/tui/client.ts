@@ -20,6 +20,7 @@ import { readAccountPlan, type AccountPlan } from "./account-plan.ts";
 export type TuiAccountAvailable = AccountAvailable;
 export type TuiAccountMutation = AccountAdoption;
 export type TuiAccountLogin = { session: AccountPublicSession } | { loginUrl: string; userCode: string; expiresAt: number };
+export type TuiAccountConnection = { loginUrl: string; expiresAt: number };
 export type TuiAccountChallenge = AccountShareChallenge;
 export type TuiAccountRequest = AccountShareRequest;
 
@@ -349,6 +350,15 @@ export class TuiClient extends EventEmitter {
 
   async adoptAccount(accountRef: string, expectedRevision: number, signal?: AbortSignal): Promise<TuiAccountMutation> {
     return this.accountMutation("adopt", { accountRef, expectedRevision }, signal);
+  }
+
+  async getAccountConnection(signal?: AbortSignal): Promise<TuiAccountConnection> {
+    const row = await this.accountRequest("login", { purpose: "hosted-admission" }, signal);
+    if (Object.keys(row).sort().join(",") !== "expiresAt,loginUrl" || typeof row.loginUrl !== "string" || !Number.isSafeInteger(row.expiresAt) || Number(row.expiresAt) <= Date.now()) throw Error("account_response_invalid");
+    let url: URL;
+    try { url = new URL(row.loginUrl); } catch { throw Error("account_response_invalid"); }
+    if (url.username || url.password || url.hash || url.pathname !== "/api/account/native/authorize" || [...url.searchParams.keys()].length !== 1 || !ACCOUNT_ID.test(url.searchParams.get("id") ?? "") || url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw Error("account_response_invalid");
+    return { loginUrl: url.href, expiresAt: Number(row.expiresAt) };
   }
 
   async unlinkAccount(expectedRevision: number, signal?: AbortSignal): Promise<TuiAccountMutation> {

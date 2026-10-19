@@ -4,7 +4,7 @@ export const HOSTED_CLIENT_ERRORS=Object.freeze({account_chat_scope_changed:409,
   hosted_request_invalid:400,hosted_request_too_large:413,hosted_context_limit_exceeded:400,hosted_output_limit_exceeded:400,
   hosted_unauthenticated:401,hosted_model_unavailable:503,hosted_credit_insufficient:402,hosted_operating_budget_exhausted:503,
   hosted_ledger_idempotency_conflict:409,hosted_busy:429,hosted_request_cancelled:408,hosted_admission_invalid_device:400,
-  hosted_device_busy:429,hosted_sybil_limit_exceeded:429,hosted_daily_quota_exceeded:429,hosted_sponsorship_inactive:403,
+  hosted_device_busy:429,hosted_device_pairing_required:403,hosted_sybil_limit_exceeded:429,hosted_daily_quota_exceeded:429,hosted_sponsorship_inactive:403,
   hosted_sponsorship_daily_exhausted:429,hosted_sponsorship_capacity_exhausted:503,hosted_sponsorship_policy_conflict:409,
   hosted_sponsorship_idempotency_conflict:409,hosted_provider_request_failed:503,hosted_tools_unsupported:400});
 

@@ -133,6 +133,7 @@ test("account starts browser sign-in first and keeps the same usable link, copy 
     consumeAccountAccess: async () => {}, approveAccountRequest: async () => {},
     adoptAccount: async () => { throw Error("unexpected_adoption") }, unlinkAccount: async () => { throw Error("unexpected_unlink") },
     startAccountLogin: async () => { loginStarted = true; calls.push("login"); return { loginUrl: url, userCode: "1234ABCD", expiresAt: Date.now() + 60_000 } },
+    getAccountConnection: async () => { calls.push("connection"); return { loginUrl: url, expiresAt: Date.now() + 60_000 } },
     signOutAccount: async () => signedOut,
     getAccountUsage: async () => ({ state: "unavailable", verifiedAt: new Date().toISOString() }),
     getAccountPlan: async () => { calls.push("subscription.status"); return { accountRef: "account_" + "d".repeat(64), subscription: { status: "none", cancelAtPeriodEnd: false, currentPeriodEnd: null }, allowance: null } },
@@ -192,5 +193,15 @@ test("account starts browser sign-in first and keeps the same usable link, copy 
     await waitFrame(frame => frame.includes("Fixture") && frame.includes("Free") && frame.includes("Hosted AI included"))
     expect(account.view.login).toBe(null)
     expect(calls.filter(value => value === "login")).toHaveLength(1)
+    // Recovery of an already signed-in terminal keeps its own URL and copy path, without another login.
+    account.offerHostedConnection()
+    await account.connectHosted(async value => { opened.push(value); return false })
+    dialog.replace(() => <AccountPanel />)
+    await waitFrame(frame => frame.includes(accountText("connect_terminal")) && frame.includes("Copy link") && frame.includes("Open or copy the link to sign in."))
+    expect(app.captureCharFrame().replace(/\s/g, "")).toContain(url)
+    expect(account.view.session?.authenticated).toBe(true); expect(account.view.login).toBe(null)
+    app.mockInput.pressKey("HOME"); await app.flush(); app.mockInput.pressArrow("down"); app.mockInput.pressArrow("down"); await app.flush(); app.mockInput.pressEnter(); await app.flush()
+    await waitFrame(() => copied.length === 3)
+    expect(copied.at(-1)).toBe(url); expect(calls.filter(value => value === "connection")).toHaveLength(1); expect(calls.filter(value => value === "login")).toHaveLength(1)
   } finally { app.renderer.destroy(); account.dispose(); setLang(previous) }
 }, 15_000)
