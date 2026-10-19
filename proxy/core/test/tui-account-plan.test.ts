@@ -102,6 +102,29 @@ test('startup refresh never reads a plan; explicit read coalesces and does not b
   assert.equal(f.account.view.plan.state, 'observed'); assert.equal(f.calls.filter(call => call === 'subscription.status').length, 1);
 });
 
+test('rechecking a confirmed plan keeps it visible while pending but never hides a failed recheck', async t => {
+  const f = fixture(); t.after(() => f.account.dispose()); await f.account.refresh(); await f.account.loadPlan();
+  const confirmed = f.account.view.plan; let reject!: (error: Error) => void;
+  f.answer(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const pending = f.account.loadPlan(); await delay(0);
+  assert.equal(f.account.view.plan, confirmed); assert.equal(f.account.view.planLoading, true);
+  assert.equal(accountPlanPresentation(f.account.view.plan, 'en', now).label, 'Plus');
+  reject(Error('account_service_unavailable')); await pending;
+  assert.equal(f.account.view.plan.state, 'unavailable'); assert.equal(f.account.view.planLoading, false);
+  assert.equal(accountPlanPresentation(f.account.view.plan, 'en', now).label, 'Plan unavailable');
+});
+
+test('terminal plan denial invalidates account authority and discards queued credits', async t => {
+  const f = fixture(); t.after(() => f.account.dispose()); await f.account.refresh();
+  let reject!: (error: Error) => void; f.answer(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const pending = f.account.loadPlan(); await delay(0); const credits = f.account.loadUsage();
+  reject(Object.assign(Error('account_service_unavailable'), { status: 403 })); await Promise.all([pending, credits]);
+  assert.equal(f.account.view.session, null); assert.equal(f.account.view.available, null);
+  assert.equal(f.account.view.plan.state, 'unknown'); assert.equal(f.account.view.planLoading, false);
+  assert.equal(f.account.view.usage, null); assert.equal(f.account.view.usageLoading, false);
+  assert.equal(f.calls.includes('usage'), false);
+});
+
 test('closing the account view during refresh prevents a late plan query', async () => {
   let resolve!: () => void, reads = 0;
   const lifetime = new AbortController();

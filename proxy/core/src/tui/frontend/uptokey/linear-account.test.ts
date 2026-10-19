@@ -9,14 +9,17 @@ test("linear account makes browser sign-in primary and prints the exact pending 
   const calls: string[] = [], output: string[] = [], opened: string[] = [], choices: string[][] = []
   const url = "https://app.uptokey.com/api/account/native/authorize?id=5bf37e97-92cf-42fb-8c3d-29f8095552e2"
   const session = { configured: true, authenticated: false, loginAvailable: true, state: "signed_out" as const }
+  let loginStarted = false
   const account = new TuiAccount({
-    getAccountSession: async () => session,
+    // The native broker reports connecting while this challenge is pending;
+    // signed_out is an explicit loss of authority, not a pending response.
+    getAccountSession: async () => loginStarted ? { ...session, state: "connecting" } : session,
     getAvailableAccounts: async () => ({ revision: 0, currentAccountRef: null, currentOwned: null, accounts: [] }),
     getAccountRequests: async () => [],
     requestAccountAccess: async () => { calls.push("share"); return { id: "synthetic", userCode: "ABCD1234", expiresAt: new Date(Date.now() + 60_000).toISOString() } },
     consumeAccountAccess: async () => {}, approveAccountRequest: async () => {},
     adoptAccount: async () => { throw Error("unused") }, unlinkAccount: async () => { throw Error("unused") },
-    startAccountLogin: async () => { calls.push("login"); return { loginUrl: url, userCode: "5678ABCD", expiresAt: Date.now() + 60_000 } },
+    startAccountLogin: async () => { loginStarted = true; calls.push("login"); return { loginUrl: url, userCode: "5678ABCD", expiresAt: Date.now() + 60_000 } },
     signOutAccount: async () => session,
     getAccountUsage: async () => ({ state: "unavailable", verifiedAt: new Date().toISOString() }),
   }, { intervalMs: 60_000 })

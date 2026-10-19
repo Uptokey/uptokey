@@ -67,14 +67,14 @@ export function AccountPanel() {
         rows.push({ title: accountText("share"), value: "share", onSelect: () => { void account.requestAccess() } })
       }
     } else {
-      rows.push({ title: accountText("usage"), value: "usage", description: view.usage ? view.usage.state === "observed" ? accountText("balance", { value: new Intl.NumberFormat(getLang(), { style: "currency", currency: "USD" }).format(view.usage.availableMicros! / 1_000_000) }) : accountText("usage_unavailable") : undefined, onSelect: () => { void account.loadUsage() } })
+      rows.push({ title: accountText("usage"), value: "usage", description: view.usageLoading ? accountText("loading") : view.usageError ? accountText("usage_unavailable") : view.usage ? view.usage.state === "observed" ? accountText("balance", { value: new Intl.NumberFormat(getLang(), { style: "currency", currency: "USD" }).format(view.usage.availableMicros! / 1_000_000) }) : accountText("usage_unavailable") : undefined, onSelect: () => { void account.loadUsage() } })
       const available = view.available
       if (available?.currentOwned) {
         for (const request of view.requests) rows.push({ title: accountText("approve", { name: request.clientName, code: request.userCode }), value: request.id, onSelect: () => approve(request, available.currentAccountRef!) })
         rows.push({ title: accountText("sign_out"), value: "sign-out", onSelect: () => { void account.logout() } })
       } else rows.push({ title: accountText("disconnect"), value: "disconnect", onSelect: () => { void account.disconnect() } })
     }
-    rows.push({ title: accountText("refresh"), value: "refresh", description: view.busy ? accountText("loading") : undefined, onSelect: () => { void loadAccountPlanForView(account, lifetime.signal) } })
+    rows.push({ title: accountText("refresh"), value: "refresh", description: view.busy || view.planLoading ? accountText("loading") : undefined, onSelect: () => { void loadAccountPlanForView(account, lifetime.signal) } })
     if (view.error) rows.push({ title: accountText("details"), value: "details", onSelect: () => dialog.replace(() => <TextView title={accountText("details")} text={view.error!} />) })
     return rows
   })

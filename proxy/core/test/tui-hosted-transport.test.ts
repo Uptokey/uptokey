@@ -52,6 +52,43 @@ test("hosted inventory derives only zero-price enabled models from the bound liv
   assert.equal(calls, 4);
 });
 
+test("the verified seven-model catalog shows individual model and source names without replacing dispatch identities", async () => {
+  const entries = [
+    ["google-gemini-3-5-flash-lite", "uptokey-beta-free-2026-10-09", "Gemini 3.5 Flash-Lite · Google"],
+    ["google-gemini-3-8-flash", "uptokey-beta-free-2026-10-09", "Gemini 3.8 Flash · Google"],
+    ["uptokey-free-fast", "free-beta-v1", "Llama 3.2 3B · Cloudflare"],
+    ["uptokey-free", "free-beta-v1", "GPT-OSS 20B · Cloudflare"],
+    ["uptokey-free-reasoning", "free-beta-v1", "GPT-OSS 120B · Cloudflare"],
+    ["uptokey-free-code", "free-beta-v1", "Qwen2.5-Coder 32B · Cloudflare"],
+    ["uptokey-free-ovh-reasoning", "free-beta-v1", "GPT-OSS 120B · OVHcloud"],
+  ] as const;
+  const value = { ...catalog(), models: entries.map(([id, version]) => ({
+    id, price: { model: id, version: String(version), currency: "USD", inputMicrosPerMillion: 0, outputMicrosPerMillion: 0 },
+    limits: { inputTokens: 8192, outputTokens: 8192, contextTokens: 16384 },
+  })) };
+  const models = await loadHostedModels(async () => json(value), accountRef, revision);
+  assert.deepEqual(models.map(model => [model.modelId, model.priceVersion, model.label]), entries);
+  assert.equal(new Set(models.map(model => model.label)).size, 7);
+  for (const model of models) {
+    assert.equal(model.accountRef, accountRef); assert.equal(model.revision, revision);
+    assert.equal(hostedInput(model, "named-model", messages).model, model.modelId);
+  }
+  value.models = value.models.map(model => ({ ...model, price: { ...model.price, version: "new-unverified-version" } }));
+  const changed = await loadHostedModels(async () => json(value), accountRef, revision);
+  assert.deepEqual(changed.map(model => model.label), entries.map(([id]) => id));
+  value.models = value.models.slice(0, 2);
+  assert.equal((await loadHostedModels(async () => json(value), accountRef, revision)).length, 2);
+});
+
+test("unrecognized catalog prototype names stay literal model identities", async () => {
+  const value = { ...catalog(), models: [
+    ["constructor", "free-beta-v1"], ["toString", "uptokey-beta-free-2026-10-09"], ["name", "constructor"],
+  ].map(([id, version]) => ({ id, price: { model: id, version, currency: "USD", inputMicrosPerMillion: 0, outputMicrosPerMillion: 0 },
+    limits: { inputTokens: 8192, outputTokens: 8192, contextTokens: 16384 } })) };
+  const models = await loadHostedModels(async () => json(value), accountRef, revision);
+  assert.deepEqual(models.map(model => model.label), ["constructor", "toString", "name"]);
+});
+
 test("hosted never sends forbidden local-only work, media or forged identities", async () => {
   let calls = 0;
   const transport: HostedTransport = async () => { calls++; return json({}); };
