@@ -88,7 +88,7 @@ export function admitFreshNodeRuntime({ runtimePath, licensePath, archivePath, s
     [signedChecksumsPath, 2 * 1024 * 1024], [keyringPath, 8 * 1024 * 1024],
   ].map(([path, maximum]) => ({ path, maximum, ...checkedFile(path, maximum) }));
   const [runtime, license, archive, signature, keyring] = inputs;
-  const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'uptokey-node-verify-')));
+  const temporary = realpathSync.native(mkdtempSync(join(tmpdir(), 'uptokey-node-verify-')));
   try {
     const env = hostEnvironment(), archiveTool = freshNodeArchiveTool(env), checksumPath = join(temporary, 'SHASUMS256.txt');
     // Git's GPG also misinterprets native absolute home/signature paths. Keep

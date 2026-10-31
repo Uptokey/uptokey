@@ -1,15 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, toNamespacedPath } from 'node:path';
+import { basename, dirname, join, toNamespacedPath } from 'node:path';
 import { admitFreshNodeRuntime, freshNodeRuntimeFromEnvironment, freshNodeArchiveTool, verifiedFreshNodeStagedRuntime, FRESH_NODE_VERSION, FRESH_NODE_ABI, FRESH_NODE_SIGNER } from './fresh-node-runtime.mjs';
 import { stageNodeRuntimeLicense } from './accepted-sidecar-artifacts.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 function fixture(t, platform = 'win32') {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'uptokey-node-fixture-')));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'uptokey-node-fixture-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const prefix = `node-${FRESH_NODE_VERSION}-${platform === 'win32' ? 'win' : 'linux'}-x64`;
   const archiveName = prefix + (platform === 'win32' ? '.zip' : '.tar.xz');
@@ -206,4 +208,33 @@ test('Windows verbatim-root inputs retain absolute nonlink admission for all fiv
   for (const key of ['runtimePath', 'licensePath', 'archivePath', 'signedChecksumsPath', 'keyringPath']) f.inputs[key] = toNamespacedPath(f.inputs[key]);
   assert.equal(admitted(f).nodeSha256, sha(f.runtime));
   assert.equal(f.calls.some(call => call.command === f.inputs.runtimePath), false);
+});
+
+test('owned fixture and verifier homes use native spelling when non-native realpath differs', t => {
+  const original = fs.realpathSync, native = original.native; let legacyOwnedCalls = 0;
+  const mocked = t.mock.method(fs, 'realpathSync', (target, ...args) => {
+    if (/^uptokey-node-(?:fixture|verify)-/.test(basename(target))) {
+      legacyOwnedCalls++;
+      const canonical = native(target, ...args);
+      // A valid case alias on Windows models a spelling returned by the
+      // non-native resolver which the strict native guard must not admit.
+      return process.platform === 'win32' ? join(dirname(canonical), basename(canonical).toUpperCase()) : canonical;
+    }
+    return original(target, ...args);
+  });
+  Object.defineProperty(mocked, 'native', { value: native, configurable: true });
+  syncBuiltinESMExports();
+  try {
+    const f = fixture(t); assert.equal(admitted(f).nodeSha256, sha(f.runtime));
+    assert.equal(legacyOwnedCalls, 0, 'owned temporary roots must use the same native spelling as checkedFile');
+  } finally { mocked.mock.restore(); syncBuiltinESMExports(); }
+});
+
+test('external Windows case aliases still fail native spelling admission before any verifier', { skip: process.platform !== 'win32' }, t => {
+  const f = fixture(t);
+  const alias = join(dirname(f.root), basename(f.root).toUpperCase(), 'bin', 'node');
+  assert.notEqual(alias, f.inputs.runtimePath);
+  assert.equal(toNamespacedPath(realpathSync.native(alias)), toNamespacedPath(f.inputs.runtimePath));
+  assert.throws(() => admitFreshNodeRuntime({ ...f.inputs, runtimePath: alias }, { runner: f.runner }), /fresh_node_path_invalid/);
+  assert.equal(f.calls.length, 0);
 });

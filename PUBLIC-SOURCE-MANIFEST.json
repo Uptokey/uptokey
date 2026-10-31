@@ -1,6 +1,6 @@
 {
   "schema": "uptokey-public-source-v2",
-  "generatedAtUtc": "2026-10-31T15:40:00.5452951Z",
+  "generatedAtUtc": "2026-10-31T15:47:15.2878890Z",
   "sourceCommit": null,
   "sourceWorkingTree": "not-inspected",
   "files": [
@@ -11899,14 +11899,14 @@
     {
       "Source": "quimera/tauri/scripts/fresh-node-runtime.mjs",
       "Destination": "quimera/tauri/scripts/fresh-node-runtime.mjs",
-      "SourceSha256": "c9688bbee02e09ef671f306777568998b802a6605f46f12dfe715cb9cf1239f5",
-      "Sha256": "c9688bbee02e09ef671f306777568998b802a6605f46f12dfe715cb9cf1239f5"
+      "SourceSha256": "496481241d9ac1ff71e1f4b613e5dd11f988399e1996c1be874ab838580f0413",
+      "Sha256": "496481241d9ac1ff71e1f4b613e5dd11f988399e1996c1be874ab838580f0413"
     },
     {
       "Source": "quimera/tauri/scripts/fresh-node-runtime.test.mjs",
       "Destination": "quimera/tauri/scripts/fresh-node-runtime.test.mjs",
-      "SourceSha256": "f5cbe94a13051802310eaabe5b01a232ead2541151f8faa4acab21b925ef62e4",
-      "Sha256": "f5cbe94a13051802310eaabe5b01a232ead2541151f8faa4acab21b925ef62e4"
+      "SourceSha256": "9bdf049ea89f72967077716f983bec558e2151f586c99b6d864dfd7c20dfd5fe",
+      "Sha256": "9bdf049ea89f72967077716f983bec558e2151f586c99b6d864dfd7c20dfd5fe"
     },
     {
       "Source": "quimera/tauri/scripts/frontend-hook.mjs",
