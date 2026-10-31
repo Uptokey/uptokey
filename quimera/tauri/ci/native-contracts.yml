@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24.21.0
+          node-version: 24.22.1
       - name: Verify source-only workflow policy
         run: node quimera/tauri/scripts/native-contracts-policy.mjs .github/workflows/native-contracts.yml
 
@@ -37,6 +37,6 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24.21.0
+          node-version: 24.22.1
       - name: Verify native source contracts without starting the application
-        run: node --test quimera/tauri/scripts/native-contracts-policy.test.mjs quimera/tauri/scripts/build-release.test.mjs quimera/tauri/scripts/release-cargo.test.mjs quimera/tauri/scripts/verify-native-build-identity.test.mjs proxy/core/scripts/native-artifact-version-evidence.test.mjs quimera/tauri/scripts/check-native-source.test.mjs
+        run: node --test quimera/tauri/scripts/native-contracts-policy.test.mjs quimera/tauri/scripts/build-release.test.mjs quimera/tauri/scripts/release-cargo.test.mjs quimera/tauri/scripts/verify-native-build-identity.test.mjs proxy/core/scripts/native-artifact-version-evidence.test.mjs quimera/tauri/scripts/check-native-source.test.mjs quimera/tauri/scripts/fresh-node-runtime.test.mjs

@@ -31,6 +31,7 @@ import { validateOutputTarget, createStagingOutput, publishStagingOutput } from 
 import { parseAcceptedPreparationArgs, validateAcceptedOutput, admitAcceptedSidecarArtifacts,
   stageAcceptedCoreArtifact, stageAcceptedComputerRuntime, verifyAcceptedStagedArtifacts,
   admitAcceptedNodeRuntimeLicense, stageNodeRuntimeLicense } from './accepted-sidecar-artifacts.mjs';
+import { admitFreshNodeRuntime, freshNodeRuntimeFromEnvironment, verifiedFreshNodeStagedRuntime } from './fresh-node-runtime.mjs';
 import { extractRuntimeSpecifiers } from '../../../proxy/core/scripts/npm-pack-beta.mjs';
 import { CONTEXT_HELPER_ENTRY, contextHelperPackages, contextHelperAttestation } from './context-helper-attestation.mjs';
 import { terminalRuntimePackages } from './terminal-runtime-packages.mjs';
@@ -53,13 +54,17 @@ if (preparation.check) {
   process.exit(process.exitCode || 0);
 }
 const protectedDirectories = [tauriDir, proxyDir, repositoryRoot, dirname(process.execPath)];
-let accepted;
+let accepted, freshNode;
 try {
   validateOutputTarget(preparation.directory, protectedDirectories);
   if (preparation.reuseAccepted) {
     validateAcceptedOutput(preparation.directory, repositoryRoot);
     accepted = admitAcceptedSidecarArtifacts(repositoryRoot);
     if (process.env.UPTOKEY_BUILD_VERSION && process.env.UPTOKEY_BUILD_VERSION !== accepted.core.version) throw Error('accepted_build_version_mismatch');
+  } else if (process.platform !== 'darwin') {
+    // Fresh public preparation cannot infer provenance or a full license from
+    // whichever Node happens to be on PATH. Refuse before building the core.
+    freshNode = admitFreshNodeRuntime(freshNodeRuntimeFromEnvironment());
   }
 }
 catch (error) { console.error(error.message); process.exit(2); }
@@ -133,14 +138,14 @@ const runtimeDir = join(outDir, runtimePrefix);
 if (isMac) mkdirSync(runtimeDir, { recursive: true });
 
 // --- Node runtime -------------------------------------------------------
-const runtimeSource = process.env.UPTOKEY_NODE_RUNTIME || (isMac
+const runtimeSource = freshNode?.runtimePath || process.env.UPTOKEY_NODE_RUNTIME || (isMac
   ? join(repositoryRoot, 'experiments/deepseek-workbench/output/node-macos-provenance-20261027', 'node-' + process.arch)
   : process.execPath);
 if (!existsSync(runtimeSource)) {
   console.error(`node_runtime_missing:${runtimeSource}`);
   process.exit(1);
 }
-const nodeLicense = accepted || isMac ? admitAcceptedNodeRuntimeLicense(repositoryRoot, runtimeSource) : undefined;
+const nodeLicense = freshNode ?? (accepted || isMac ? admitAcceptedNodeRuntimeLicense(repositoryRoot, runtimeSource) : undefined);
 // The checked archive can originate on another OS and need not be executable there.
 const stagedRuntime = join(outDir, binaryName);
 if (isMac) {
@@ -148,7 +153,8 @@ if (isMac) {
   if (sha256Hex(stagedRuntime) !== nodeLicense.nodeSha256) throw Error('accepted_node_runtime_changed');
   chmodSync(stagedRuntime, 0o755);
 }
-const runtimeAbi = spawnSync(isMac ? stagedRuntime : runtimeSource, ["-p", "process.versions.modules"], { encoding: "utf8", windowsHide: true });
+const runtimeAbi = freshNode ? { status: 0, stdout: String(freshNode.receipt.nodeModuleAbi) }
+  : spawnSync(isMac ? stagedRuntime : runtimeSource, ["-p", "process.versions.modules"], { encoding: "utf8", windowsHide: true });
 const abi = runtimeAbi.stdout?.trim();
 if (runtimeAbi.status !== 0 || !abi) {
   console.error("node_runtime_abi_unreadable");
@@ -177,8 +183,9 @@ if (process.platform === 'darwin') {
 }
 
 // Native addon loadability proof against the exact runtime being shipped.
-run(isMac ? stagedRuntime : runtimeSource, ["-e", "require('better-sqlite3'); console.log('sqlite-ok')"], { cwd: proxyDir });
-run(isMac ? stagedRuntime : runtimeSource, ["-e", "require('@napi-rs/keyring'); console.log('keyring-ok')"], { cwd: proxyDir });
+const addonProbeRuntime = () => freshNode ? verifiedFreshNodeStagedRuntime(stagedRuntime, freshNode) : (isMac ? stagedRuntime : runtimeSource);
+run(addonProbeRuntime(), ["-e", "require('better-sqlite3'); console.log('sqlite-ok')"], { cwd: proxyDir });
+run(addonProbeRuntime(), ["-e", "require('@napi-rs/keyring'); console.log('keyring-ok')"], { cwd: proxyDir });
 
 // --- Verified entries (copied, never rewritten) --------------------------
 const sourceHashes = [distCli, distWorker, distSchemaWorker, distNotices, distHelper].map(sha256Hex);

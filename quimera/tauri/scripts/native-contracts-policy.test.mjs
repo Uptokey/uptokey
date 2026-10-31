@@ -18,7 +18,7 @@ test('removing a platform or bypassing the required policy job fails', () => {
 });
 test('unreviewed actions, floating tools and persisted credentials fail', () => {
   for (const text of [workflow.replace(/actions\/checkout@[a-f0-9]{40}/, 'actions/checkout@v4'),
-    workflow.replace('24.21.0', '24'), workflow.replace('persist-credentials: false', 'persist-credentials: true'),
+    workflow.replace('24.22.1', '24'), workflow.replace('persist-credentials: false', 'persist-credentials: true'),
     workflow.replace('  contents: read', '  contents: write'), workflow.replace('    steps:', '    env:\n      TOKEN: value\n    steps:')]) {
     assert.notDeepEqual(validateNativeContractsWorkflow(text), []);
   }
@@ -41,7 +41,7 @@ test('job-local permissions, YAML continuations and quoted jobs cannot evade the
   ]) assert.notDeepEqual(validateNativeContractsWorkflow(text), []);
 });
 test('checkout credential policy and Node version remain bound to their own action', () => {
-  const swapped = workflow.replace(/persist-credentials: false|node-version: 24\.21\.0/g,
-    value => value.startsWith('persist-credentials') ? 'node-version: 24.21.0' : 'persist-credentials: false');
+  const swapped = workflow.replace(/persist-credentials: false|node-version: 24\.22\.1/g,
+    value => value.startsWith('persist-credentials') ? 'node-version: 24.22.1' : 'persist-credentials: false');
   assert.ok(validateNativeContractsWorkflow(swapped).includes('native_contract_action_input_unbound'));
 });

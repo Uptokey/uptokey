@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, symlinkSync, readFileSync, realpathSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, toNamespacedPath } from "node:path";
 import { test } from "node:test";
+import { syncBuiltinESMExports } from "node:module";
 import { createNativeArtifactVersionEvidence, validateNativeBuildIdentity, validateNativeArtifactVersionReceipt } from "./native-artifact-version-evidence.mjs";
 
 const expected = { version: "0.2.0", targetOs: "windows", targetArch: "x86_64", defaultInterface: "Harness", sourceCommit: "a".repeat(40) };
@@ -49,7 +52,7 @@ test("receipt rejects absent expectation and nonportable artifact basenames", ()
 });
 
 test("input and output directory junctions or symlinks are refused before spawn", () => {
-  const dir = mkdtempSync(join(realpathSync(tmpdir()), "uptokey-native-identity-links-"));
+  const dir = mkdtempSync(join(realpathSync.native(tmpdir()), "uptokey-native-identity-links-"));
   try {
     const real = join(dir, "real");
     const link = join(dir, "link");
@@ -66,7 +69,7 @@ test("input and output directory junctions or symlinks are refused before spawn"
 });
 
 test("unsupported old executable is refused before spawn; boolean support is rejected", () => {
-  const dir = mkdtempSync(join(realpathSync(tmpdir()), "uptokey-native-identity-"));
+  const dir = mkdtempSync(join(realpathSync.native(tmpdir()), "uptokey-native-identity-"));
   try {
     const artifactPath = join(dir, process.platform === "win32" ? "old.cmd" : "old");
     const sentinel = join(dir, "STARTED");
@@ -76,6 +79,7 @@ test("unsupported old executable is refused before spawn; boolean support is rej
     assert.throws(() => createNativeArtifactVersionEvidence(options), /command_unsupported/);
     assert.throws(() => createNativeArtifactVersionEvidence({ ...options, supportsIdentity: true }), /options_invalid/);
     assert.throws(() => createNativeArtifactVersionEvidence({ ...options, probeCommand: process.execPath }), /options_invalid/);
+    assert.throws(() => createNativeArtifactVersionEvidence({ ...options, runner: () => {} }), /options_invalid/);
     assert.throws(() => createNativeArtifactVersionEvidence({ ...options, expectedSubjectSha256: "d".repeat(64) }), /hash_mismatch/);
     assert.equal(existsSync(sentinel), false);
     assert.equal(existsSync(options.outputPath), false);
@@ -97,7 +101,7 @@ test("native dispatch precedes profile, resources, context and single instance",
 });
 
 test("supported module-only fixture can produce evidence without entering startup", { skip: !process.env.UPTOKEY_NATIVE_IDENTITY_TEST_FIXTURE }, () => {
-  const dir = mkdtempSync(join(realpathSync(tmpdir()), "uptokey-native-identity-fixture-"));
+  const dir = mkdtempSync(join(realpathSync.native(tmpdir()), "uptokey-native-identity-fixture-"));
   try {
     const artifactPath = process.env.UPTOKEY_NATIVE_IDENTITY_TEST_FIXTURE;
     const bytes = readFileSync(artifactPath);
@@ -114,7 +118,7 @@ test("supported module-only fixture can produce evidence without entering startu
 test("Windows verbatim identity paths preserve drive-root checks and reject traversal and junctions", {
   skip: process.platform !== "win32" || !process.env.UPTOKEY_NATIVE_IDENTITY_TEST_FIXTURE,
 }, () => {
-  const dir = mkdtempSync(join(realpathSync(tmpdir()), "uptokey-native-identity-namespace-"));
+  const dir = mkdtempSync(join(realpathSync.native(tmpdir()), "uptokey-native-identity-namespace-"));
   try {
     const artifact = process.env.UPTOKEY_NATIVE_IDENTITY_TEST_FIXTURE;
     const digest = createHash("sha256").update(readFileSync(artifact)).digest("hex");
@@ -140,4 +144,102 @@ test("Windows verbatim identity paths preserve drive-root checks and reject trav
     assert.equal(existsSync(join(dir, "traversal.json")), false);
     assert.equal(existsSync(join(dir, "not-written.json")), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+function syntheticSubject(t) {
+  const parent = realpathSync.native(tmpdir());
+  const directory = mkdtempSync(join(parent, "uptokey-native-identity-race-"));
+  t.after(() => {
+    assert.equal(dirname(directory), parent);
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const artifactPath = join(directory, "original-subject.exe");
+  // Never executable: the subprocess is mocked locally in these synthetic unit cases.
+  const bytes = Buffer.from("uptokey-native-build-identity-v1 --native-build-identity synthetic subject");
+  writeFileSync(artifactPath, bytes);
+  const options = { ...expected, artifactPath, outputPath: join(directory, "receipt.json"),
+    targetOs: { win32: "windows", darwin: "macos", linux: "linux" }[process.platform],
+    targetArch: { x64: "x86_64", arm64: "aarch64" }[process.arch],
+    expectedSubjectSha256: createHash("sha256").update(bytes).digest("hex") };
+  const response = () => ({ status: 0, signal: null, stdout: Buffer.from(JSON.stringify({ ...identity,
+    target: { os: options.targetOs, arch: options.targetArch } }) + "\n"), stderr: Buffer.alloc(0) });
+  return { directory, bytes, options, response };
+}
+
+test("synthetic original replacement cannot redirect the fixed command from private verified bytes", t => {
+  const f = syntheticSubject(t), write = fs.writeFileSync;
+  let snapshot, calls = 0;
+  t.mock.method(fs, "writeFileSync", (path, bytes, options) => {
+    const result = write(path, bytes, options);
+    if (basename(dirname(path)).startsWith("uptokey-native-identity-probe-")) {
+      snapshot = path;
+      assert.equal(options.flag, "wx");
+      write(f.options.artifactPath, "synthetic changed original; never execute");
+    }
+    return result;
+  });
+  t.mock.method(childProcess, "spawnSync", (command, args) => {
+    calls++;
+    assert.equal(command, snapshot);
+    assert.notEqual(command, f.options.artifactPath);
+    assert.deepEqual(args, ["--native-build-identity"]);
+    assert.deepEqual(readFileSync(command), f.bytes);
+    return f.response();
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => createNativeArtifactVersionEvidence(f.options), /artifact_changed/);
+    assert.equal(calls, 1);
+    assert.equal(existsSync(dirname(snapshot)), false);
+    assert.equal(existsSync(f.options.outputPath), false);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+});
+
+test("synthetic private copy corruption is refused before spawn and its directory is cleaned", t => {
+  const f = syntheticSubject(t), write = fs.writeFileSync;
+  let snapshot, calls = 0;
+  t.mock.method(fs, "writeFileSync", (path, bytes, options) => {
+    const result = write(path, bytes, options);
+    if (basename(dirname(path)).startsWith("uptokey-native-identity-probe-")) {
+      snapshot = path;
+      write(path, "synthetic corrupted private copy");
+    }
+    return result;
+  });
+  t.mock.method(childProcess, "spawnSync", () => { calls++; throw Error("unexpected synthetic probe"); });
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => createNativeArtifactVersionEvidence(f.options), /snapshot_changed/);
+    assert.equal(calls, 0);
+    assert.equal(existsSync(dirname(snapshot)), false);
+    assert.equal(existsSync(f.options.outputPath), false);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+});
+
+test("synthetic private probe preserves the original subject basename and rechecks output ancestors", t => {
+  const f = syntheticSubject(t);
+  let snapshot;
+  t.mock.method(childProcess, "spawnSync", command => {
+    snapshot = command;
+    assert.deepEqual(readFileSync(command), f.bytes);
+    return f.response();
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = createNativeArtifactVersionEvidence(f.options);
+    assert.equal(result.receipt.artifact, basename(f.options.artifactPath));
+    assert.equal(result.receipt.subjectSha256, f.options.expectedSubjectSha256);
+    assert.equal(existsSync(dirname(snapshot)), false);
+    const outputDirectory = join(f.directory, "output"), moved = join(f.directory, "moved"), target = join(f.directory, "target");
+    mkdirSync(outputDirectory); mkdirSync(target);
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    t.mock.method(childProcess, "spawnSync", () => {
+      fs.renameSync(outputDirectory, moved);
+      symlinkSync(target, outputDirectory, process.platform === "win32" ? "junction" : "dir");
+      return f.response();
+    });
+    syncBuiltinESMExports();
+    assert.throws(() => createNativeArtifactVersionEvidence({ ...f.options, outputPath: join(outputDirectory, "race.json") }), /path_link_or_ancestor_invalid/);
+    assert.equal(existsSync(join(target, "race.json")), false);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
 });

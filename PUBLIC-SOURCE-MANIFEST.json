@@ -1,6 +1,6 @@
 {
   "schema": "uptokey-public-source-v2",
-  "generatedAtUtc": "2026-10-31T14:38:03.385Z",
+  "generatedAtUtc": "2026-10-31T15:40:00.5452951Z",
   "sourceCommit": null,
   "sourceWorkingTree": "not-inspected",
   "files": [
@@ -19,14 +19,14 @@
     {
       "Source": "quimera/tauri/ci/native-contracts.yml",
       "Destination": ".github/workflows/native-contracts.yml",
-      "SourceSha256": "307406f1d005e84666cb0dea8cca50257f447015eae5b1f05305e8d4055f3a10",
-      "Sha256": "307406f1d005e84666cb0dea8cca50257f447015eae5b1f05305e8d4055f3a10"
+      "SourceSha256": "18e93a91a0e9c8a4e185f7a100b91921c5e64946f7fc44d8a1d241b0cbf27e0f",
+      "Sha256": "18e93a91a0e9c8a4e185f7a100b91921c5e64946f7fc44d8a1d241b0cbf27e0f"
     },
     {
       "Source": "quimera/tauri/ci/native-source-check.yml",
       "Destination": ".github/workflows/native-source-check.yml",
-      "SourceSha256": "53b6a96565c1006b289abe2f72e83510b0589a5a067c659bf668508b6bd53803",
-      "Sha256": "53b6a96565c1006b289abe2f72e83510b0589a5a067c659bf668508b6bd53803"
+      "SourceSha256": "3f2d601c5708d89ef0d3ca3c2c5601febf68cf19b14653f3724d602ac55933bc",
+      "Sha256": "3f2d601c5708d89ef0d3ca3c2c5601febf68cf19b14653f3724d602ac55933bc"
     },
     {
       "Source": "packaging/public-source/.github/workflows/secret-scan.yml",
@@ -457,8 +457,8 @@
     {
       "Source": "experiments/deepseek-workbench/runtime/Containerfile",
       "Destination": "experiments/deepseek-workbench/runtime/Containerfile",
-      "SourceSha256": "a8e3aa202a6613d2ddf7543d5a71781d733da07352718a37a58b598ac34a5fbb",
-      "Sha256": "a8e3aa202a6613d2ddf7543d5a71781d733da07352718a37a58b598ac34a5fbb"
+      "SourceSha256": "b3d3d9a5f901e4bf71cf49b19504e1800eb3fc927b300386ad98926b296bfe63",
+      "Sha256": "b3d3d9a5f901e4bf71cf49b19504e1800eb3fc927b300386ad98926b296bfe63"
     },
     {
       "Source": "experiments/deepseek-workbench/runtime/Containerfile.automation-delta",
@@ -2401,8 +2401,8 @@
     {
       "Source": "proxy/core/bun.lock",
       "Destination": "proxy/core/bun.lock",
-      "SourceSha256": "37fa31b3a407dc1252e9167b3025c57993d5b6e4c019676cb7f45a36d83b0cac",
-      "Sha256": "37fa31b3a407dc1252e9167b3025c57993d5b6e4c019676cb7f45a36d83b0cac"
+      "SourceSha256": "8750cd8b9cc1c04ccdd9cb3451ff98b7baa26a4641279910bc3109fd86c5bf21",
+      "Sha256": "8750cd8b9cc1c04ccdd9cb3451ff98b7baa26a4641279910bc3109fd86c5bf21"
     },
     {
       "Source": "docs/beta/FIRST-RUN-BETA.md",
@@ -2419,14 +2419,14 @@
     {
       "Source": "proxy/core/package-lock.json",
       "Destination": "proxy/core/package-lock.json",
-      "SourceSha256": "6784d7c8f5ca47a6db3bb487db5e54e50c3eff6c99f9d0f0ad5f1dfb8e5b4405",
-      "Sha256": "6784d7c8f5ca47a6db3bb487db5e54e50c3eff6c99f9d0f0ad5f1dfb8e5b4405"
+      "SourceSha256": "4e9730c5eaff6f6bfa46a108e860764fce668ae669bd57bc108a3b4189319283",
+      "Sha256": "4e9730c5eaff6f6bfa46a108e860764fce668ae669bd57bc108a3b4189319283"
     },
     {
       "Source": "proxy/core/package.json",
       "Destination": "proxy/core/package.json",
-      "SourceSha256": "e8d4111068e4dbf7ace62bd7d3cc17563a35f6d2856368e36b8505baecdb7bd0",
-      "Sha256": "e8d4111068e4dbf7ace62bd7d3cc17563a35f6d2856368e36b8505baecdb7bd0"
+      "SourceSha256": "268f9630389b6244aa6970940e7572dd364474645474433eae37236397b0e5b1",
+      "Sha256": "268f9630389b6244aa6970940e7572dd364474645474433eae37236397b0e5b1"
     },
     {
       "Source": "proxy/core/README.md",
@@ -3007,14 +3007,14 @@
     {
       "Source": "proxy/core/scripts/native-artifact-version-evidence.mjs",
       "Destination": "proxy/core/scripts/native-artifact-version-evidence.mjs",
-      "SourceSha256": "9be74c48359ab584369263fcb0cba936916fe0b8c6fe3f86deec5e1be674db39",
-      "Sha256": "9be74c48359ab584369263fcb0cba936916fe0b8c6fe3f86deec5e1be674db39"
+      "SourceSha256": "07e2da61354ab73a565394b74344bf6ae287497313b7b976d2af304e27721fa5",
+      "Sha256": "07e2da61354ab73a565394b74344bf6ae287497313b7b976d2af304e27721fa5"
     },
     {
       "Source": "proxy/core/scripts/native-artifact-version-evidence.test.mjs",
       "Destination": "proxy/core/scripts/native-artifact-version-evidence.test.mjs",
-      "SourceSha256": "c924e6cafbbd28cd6b7bc8769edf88bd3bce15d00a8e105ccc21ff33967aeb92",
-      "Sha256": "c924e6cafbbd28cd6b7bc8769edf88bd3bce15d00a8e105ccc21ff33967aeb92"
+      "SourceSha256": "7e51d0fec27164c94110270aa4296f4a536ce3baa1c0a58e0caada32d7660757",
+      "Sha256": "7e51d0fec27164c94110270aa4296f4a536ce3baa1c0a58e0caada32d7660757"
     },
     {
       "Source": "proxy/core/scripts/native-signature-evidence-cli.mjs",
@@ -11473,14 +11473,14 @@
     {
       "Source": "quimera/tauri/ci/native-contracts.yml",
       "Destination": "quimera/tauri/ci/native-contracts.yml",
-      "SourceSha256": "307406f1d005e84666cb0dea8cca50257f447015eae5b1f05305e8d4055f3a10",
-      "Sha256": "307406f1d005e84666cb0dea8cca50257f447015eae5b1f05305e8d4055f3a10"
+      "SourceSha256": "18e93a91a0e9c8a4e185f7a100b91921c5e64946f7fc44d8a1d241b0cbf27e0f",
+      "Sha256": "18e93a91a0e9c8a4e185f7a100b91921c5e64946f7fc44d8a1d241b0cbf27e0f"
     },
     {
       "Source": "quimera/tauri/ci/native-source-check.yml",
       "Destination": "quimera/tauri/ci/native-source-check.yml",
-      "SourceSha256": "53b6a96565c1006b289abe2f72e83510b0589a5a067c659bf668508b6bd53803",
-      "Sha256": "53b6a96565c1006b289abe2f72e83510b0589a5a067c659bf668508b6bd53803"
+      "SourceSha256": "3f2d601c5708d89ef0d3ca3c2c5601febf68cf19b14653f3724d602ac55933bc",
+      "Sha256": "3f2d601c5708d89ef0d3ca3c2c5601febf68cf19b14653f3724d602ac55933bc"
     },
     {
       "Source": "quimera/tauri/computer-use/Cargo.lock",
@@ -11897,6 +11897,18 @@
       "Sha256": "533163b69deabf9530ad1fca2b011f0b24819f2921e5f790be671bc1d288d334"
     },
     {
+      "Source": "quimera/tauri/scripts/fresh-node-runtime.mjs",
+      "Destination": "quimera/tauri/scripts/fresh-node-runtime.mjs",
+      "SourceSha256": "c9688bbee02e09ef671f306777568998b802a6605f46f12dfe715cb9cf1239f5",
+      "Sha256": "c9688bbee02e09ef671f306777568998b802a6605f46f12dfe715cb9cf1239f5"
+    },
+    {
+      "Source": "quimera/tauri/scripts/fresh-node-runtime.test.mjs",
+      "Destination": "quimera/tauri/scripts/fresh-node-runtime.test.mjs",
+      "SourceSha256": "f5cbe94a13051802310eaabe5b01a232ead2541151f8faa4acab21b925ef62e4",
+      "Sha256": "f5cbe94a13051802310eaabe5b01a232ead2541151f8faa4acab21b925ef62e4"
+    },
+    {
       "Source": "quimera/tauri/scripts/frontend-hook.mjs",
       "Destination": "quimera/tauri/scripts/frontend-hook.mjs",
       "SourceSha256": "0ba69431d703f9b58aedfa58526180c9d8b69b0308444f493a55b9a38a67f9d5",
@@ -11953,14 +11965,14 @@
     {
       "Source": "quimera/tauri/scripts/native-contracts-policy.mjs",
       "Destination": "quimera/tauri/scripts/native-contracts-policy.mjs",
-      "SourceSha256": "03ce1e06d31b72edc12293a59802da8b02dcfc2a17269e19ed1b29a791b1cd37",
-      "Sha256": "03ce1e06d31b72edc12293a59802da8b02dcfc2a17269e19ed1b29a791b1cd37"
+      "SourceSha256": "7e9e23b379f285f55ed24c40433c41838d0280abf938e9e477c997dd3d995f3f",
+      "Sha256": "7e9e23b379f285f55ed24c40433c41838d0280abf938e9e477c997dd3d995f3f"
     },
     {
       "Source": "quimera/tauri/scripts/native-contracts-policy.test.mjs",
       "Destination": "quimera/tauri/scripts/native-contracts-policy.test.mjs",
-      "SourceSha256": "08fc7715ecb75f9066168ef11bbdd25cbec8897fdc0252caeb497273a597e6cf",
-      "Sha256": "08fc7715ecb75f9066168ef11bbdd25cbec8897fdc0252caeb497273a597e6cf"
+      "SourceSha256": "8d086dbe933da13ad8ae7451e8a06e86c53155f5685b52816cbc3ea72281253d",
+      "Sha256": "8d086dbe933da13ad8ae7451e8a06e86c53155f5685b52816cbc3ea72281253d"
     },
     {
       "Source": "quimera/tauri/scripts/prepare-harness-sidecar.mjs",
@@ -11977,8 +11989,8 @@
     {
       "Source": "quimera/tauri/scripts/prepare-sidecar.mjs",
       "Destination": "quimera/tauri/scripts/prepare-sidecar.mjs",
-      "SourceSha256": "a04ca06a240375e31c5c11b8cce298ca405e394ad56f3703008b73f773ef96cc",
-      "Sha256": "6d251a5dc1a549721430c9391c6a08c9bca0a074623714dbd0646bd5ccef71f1"
+      "SourceSha256": "6862263b171ab53c2c84f6e51b2d640f37f2371b3b60c6ff7cbf24de7ff8f187",
+      "Sha256": "c664be0204de80b47bed92a94717dcf5c57b62c2a4c0f1e0a1583ee1cd6d271c"
     },
     {
       "Source": "quimera/tauri/scripts/release-build-plan.mjs",

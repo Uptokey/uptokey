@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { basename, dirname, parse, resolve } from "node:path";
+import { chmodSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, parse, resolve, toNamespacedPath } from "node:path";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { validReleaseVersion } from "./artifact-version-evidence.mjs";
@@ -30,7 +31,8 @@ function checkedPath(input, output = false) {
     const metadata = lstatSync(metadataPath, { throwIfNoEntry: false });
     if (!metadata) {
       if (!output || current !== path) throw new Error("native_identity_path_missing");
-    } else if (metadata.isSymbolicLink() || (current !== path && !metadata.isDirectory())) {
+    } else if (metadata.isSymbolicLink() || (current !== path && !metadata.isDirectory())
+        || toNamespacedPath(realpathSync.native(metadataPath)) !== toNamespacedPath(metadataPath)) {
       throw new Error("native_identity_path_link_or_ancestor_invalid");
     }
     if (current === root) break;
@@ -84,7 +86,7 @@ export function createNativeArtifactVersionEvidence(options) {
   const path = checkedPath(options.artifactPath);
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0 || stat.size > 256 * 1024 * 1024) throw new Error("native_identity_artifact_invalid");
-  const artifact = realpathSync(path);
+  const artifact = realpathSync.native(path);
   const bytes = readFileSync(artifact);
   const digest = sha256(bytes);
   if (digest !== options.expectedSubjectSha256) throw new Error("native_identity_artifact_hash_mismatch");
@@ -93,27 +95,45 @@ export function createNativeArtifactVersionEvidence(options) {
   const hostOs = { win32: "windows", darwin: "macos", linux: "linux" }[process.platform];
   const hostArch = { x64: "x86_64", arm64: "aarch64" }[process.arch];
   if (options.targetOs !== hostOs || options.targetArch !== hostArch) throw new Error("native_identity_probe_host_mismatch");
-  const result = spawnSync(artifact, [NATIVE_IDENTITY_COMMAND], {
-    windowsHide: true, shell: false, timeout: 10_000, maxBuffer: 4096,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (result.error || result.signal || result.status !== 0 || !Buffer.isBuffer(result.stdout)
-      || !Buffer.isBuffer(result.stderr) || result.stderr.length) throw new Error("native_identity_probe_failed");
-  let identity;
+  // Only this fixed read-only command is supported. Execute the already hashed
+  // bytes in an owned private directory, never the caller's mutable input path.
+  // This does not claim protection from arbitrary same-user malicious processes.
+  const temporary = realpathSync.native(mkdtempSync(join(realpathSync.native(tmpdir()), "uptokey-native-identity-probe-")));
   try {
-    const stdout = new TextDecoder("utf-8", { fatal: true }).decode(result.stdout);
-    if (!/^[^\r\n]+\r?\n$/.test(stdout)) throw new Error();
-    identity = JSON.parse(stdout.trimEnd());
-  } catch { throw new Error("native_identity_probe_output_invalid"); }
-  const errors = validateNativeBuildIdentity(identity, options);
-  if (errors.length) throw new Error(errors[0]);
-  if (sha256(readFileSync(artifact)) !== digest) throw new Error("native_identity_artifact_changed");
-  const receipt = {
-    schema: RECEIPT_SCHEMA, identity, artifact: basename(artifact), subjectSha256: digest,
-    checks: { staticCommandSupport: true, executableBuildIdentity: true },
-  };
-  writeFileSync(output, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-  return { output, receipt };
+    const probe = join(temporary, process.platform === "win32" ? "uptokey_tauri.exe" : "uptokey_tauri");
+    writeFileSync(probe, bytes, { flag: "wx", mode: 0o700 });
+    if (process.platform !== "win32") chmodSync(probe, 0o700);
+    const verifySnapshot = () => {
+      checkedPath(probe);
+      const info = lstatSync(probe);
+      if (!info.isFile() || info.size !== bytes.length || sha256(readFileSync(probe)) !== digest) throw new Error("native_identity_snapshot_changed");
+    };
+    verifySnapshot();
+    const result = spawnSync(probe, [NATIVE_IDENTITY_COMMAND], {
+      windowsHide: true, shell: false, timeout: 10_000, maxBuffer: 4096,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (result.error || result.signal || result.status !== 0 || !Buffer.isBuffer(result.stdout)
+        || !Buffer.isBuffer(result.stderr) || result.stderr.length) throw new Error("native_identity_probe_failed");
+    verifySnapshot();
+    let identity;
+    try {
+      const stdout = new TextDecoder("utf-8", { fatal: true }).decode(result.stdout);
+      if (!/^[^\r\n]+\r?\n$/.test(stdout)) throw new Error();
+      identity = JSON.parse(stdout.trimEnd());
+    } catch { throw new Error("native_identity_probe_output_invalid"); }
+    const errors = validateNativeBuildIdentity(identity, options);
+    if (errors.length) throw new Error(errors[0]);
+    checkedPath(artifact);
+    if (sha256(readFileSync(artifact)) !== digest) throw new Error("native_identity_artifact_changed");
+    const receipt = {
+      schema: RECEIPT_SCHEMA, identity, artifact: basename(artifact), subjectSha256: digest,
+      checks: { staticCommandSupport: true, executableBuildIdentity: true },
+    };
+    checkedPath(output, true);
+    writeFileSync(output, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    return { output, receipt };
+  } finally { rmSync(temporary, { recursive: true, force: true }); }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
