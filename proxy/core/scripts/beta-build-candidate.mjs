@@ -3,7 +3,7 @@
 // workspace/output — never touching proxy/core/dist or any runtime in use.
 // Produces a deterministic tarball and a run manifest. Default mode compares
 // two independent builds; --reuse-dist records artifact identity only.
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, readdirSync, lstatSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, lstatSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, basename } from "node:path";
@@ -111,19 +111,9 @@ export function candidateBuildEvidence(paths, { reuse = false } = {}) {
   };
 }
 
-function assemblePackageRoot(distDir, frontendDir, packageRoot) {
-  mkdirSync(packageRoot, { recursive: true });
-  for (const file of ["package.json", "package-lock.json", "LICENSE", "README.md"]) cpSync(join(scriptsRoot, file), join(packageRoot, file));
-  cpSync(join(workspaceRoot, "docs", "beta", "FIRST-RUN-BETA.md"), join(packageRoot, "FIRST-RUN-BETA.md"));
-  cpSync(join(workspaceRoot, "packaging", "npm-uptokey", "SPEC-MCP-V1.md"), join(packageRoot, "SPEC-MCP-V1.md"));
-  mkdirSync(join(packageRoot, "dist"));
-  for (const file of ["cli.js", "composition-worker.js", "service-schema-worker.js", "workspace-context-helper.js", "BUILD_INFO.json", "THIRD-PARTY-NOTICES.md"]) {
-    const source = join(distDir, file);
-    if (!existsSync(source)) throw new Error(`candidate_dist_missing:${file}`);
-    cpSync(source, join(packageRoot, "dist", file));
-  }
-  if (!existsSync(join(frontendDir, "BUILD_INFO.json"))) throw new Error("candidate_frontend_manifest_missing");
-  cpSync(frontendDir, join(packageRoot, "dist", "tui"), { recursive: true, force: false, errorOnExist: true });
+/** Use the canonical fixed document map and manifest/file checks for both layouts. */
+export function stageCandidatePackage({ distDir, frontendDir, stage, sourceRoot = scriptsRoot }) {
+  return stagePackage(sourceRoot, stage, "beta", { distDir, frontendDir });
 }
 
 function main() {
@@ -156,11 +146,9 @@ function main() {
     const reproducibility = candidateBuildEvidence({ buildA, buildB, frontendA, frontendB }, { reuse: reuseDist !== null });
     const buildReproducible = reproducibility.byteIdentical;
 
-    const packageRoot = join(stage, "package-root");
-    assemblePackageRoot(buildA, frontendA, packageRoot);
     const staging = join(stage, "staging");
     mkdirSync(staging, { recursive: true });
-    const staged = stagePackage(packageRoot, staging, "beta");
+    const staged = stageCandidatePackage({ distDir: buildA, frontendDir: frontendA, stage: staging });
     const version = staged.manifest.version;
     const tarball = join(runDir, `uptokey-${version}.tgz`);
     const packed = writeDeterministicTarball(staging, tarball);

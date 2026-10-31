@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, symlinkSync, realpathSync, cpSync, readFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { candidateBuildEvidence, verifyCandidateReproducibility } from "../scripts/beta-build-candidate.mjs";
+import { candidateBuildEvidence, verifyCandidateReproducibility, stageCandidatePackage } from "../scripts/beta-build-candidate.mjs";
+import { SHIPPED_FILE_SOURCES } from "../scripts/npm-pack-beta.mjs";
+import { betaPackageFixture } from "./helpers/beta-package-fixture.mjs";
 
 const bundleNames = {
   cliJs: "cli.js",
@@ -120,4 +122,51 @@ test("a missing independently built component cannot be accepted", t => {
   const paths = fixture(t);
   rmSync(join(paths.buildB, "cli.js"));
   assert.throws(() => verifyCandidateReproducibility(paths), { code: "ENOENT" });
+});
+
+function packageFixture(t) {
+  const f = betaPackageFixture(t);
+  const distDir = join(f.directory, "candidate-core"), frontendDir = join(f.directory, "candidate-tui");
+  cpSync(f.distDir, distDir, { recursive: true });
+  cpSync(f.frontendDir, frontendDir, { recursive: true });
+  rmSync(f.distDir, { recursive: true });
+  return { ...f, distDir, frontendDir };
+}
+
+test("candidate package staging supports direct-core public docs without workspace fallback copies", t => {
+  const f = packageFixture(t);
+  for (const [name, fallback] of Object.entries(SHIPPED_FILE_SOURCES)) {
+    writeFileSync(join(f.source, name), `public fixture ${name}\n`);
+    rmSync(join(f.source, fallback));
+  }
+  const result = stageCandidatePackage({ ...f, sourceRoot: f.source });
+  assert.equal(result.manifest.name, "uptokey");
+  assert.equal(result.manifest.version, f.pkg.version);
+  for (const name of Object.keys(SHIPPED_FILE_SOURCES)) assert.equal(readFileSync(join(f.stage, name), "utf8"), `public fixture ${name}\n`);
+  assert.equal(readFileSync(join(f.stage, "dist", "cli.js"), "utf8"), readFileSync(join(f.distDir, "cli.js"), "utf8"));
+});
+
+test("candidate package staging retains the fixed canonical workspace doc fallback", t => {
+  const f = packageFixture(t);
+  const result = stageCandidatePackage({ ...f, sourceRoot: f.source });
+  assert.equal(result.manifest.version, f.pkg.version);
+  for (const [name, fallback] of Object.entries(SHIPPED_FILE_SOURCES)) assert.deepEqual(readFileSync(join(f.stage, name)), readFileSync(join(f.source, fallback)));
+  assert.deepEqual(readFileSync(join(f.stage, "dist", "tui", "BUILD_INFO.json")), readFileSync(join(f.frontendDir, "BUILD_INFO.json")));
+});
+
+test("candidate package staging refuses either absent required document", t => {
+  for (const [name, fallback] of Object.entries(SHIPPED_FILE_SOURCES)) {
+    const f = packageFixture(t);
+    rmSync(join(f.source, fallback));
+    assert.throws(() => stageCandidatePackage({ ...f, sourceRoot: f.source }), { code: "ENOENT" }, name);
+    assert.equal(existsSync(join(f.stage, "package.json")), false);
+  }
+});
+
+test("candidate package staging retains linked-document refusal", t => {
+  const f = packageFixture(t), name = "FIRST-RUN-BETA.md";
+  try { symlinkSync(join(f.source, SHIPPED_FILE_SOURCES[name]), join(f.source, name), "file"); }
+  catch (error) { if (error.code === "EPERM") { t.skip("Host does not permit file symlink fixtures"); return; } throw error; }
+  assert.throws(() => stageCandidatePackage({ ...f, sourceRoot: f.source }), /package_source_file_invalid/);
+  assert.equal(existsSync(join(f.stage, "package.json")), false);
 });

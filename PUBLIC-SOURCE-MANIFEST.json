@@ -1,6 +1,6 @@
 {
   "schema": "uptokey-public-source-v2",
-  "generatedAtUtc": "2026-10-31T15:47:15.2878890Z",
+  "generatedAtUtc": "2026-10-31T16:11:54.9023861Z",
   "sourceCommit": null,
   "sourceWorkingTree": "not-inspected",
   "files": [
@@ -1459,8 +1459,8 @@
     {
       "Source": "packaging/public-source/package.json",
       "Destination": "package.json",
-      "SourceSha256": "e2d2f424cc1dd77fb313bcad9863d24428d9926e60d4ed20ea53eadecc1569fc",
-      "Sha256": "e2d2f424cc1dd77fb313bcad9863d24428d9926e60d4ed20ea53eadecc1569fc"
+      "SourceSha256": "306f99df146a6823f7e4b794a7d35014ed0daf20c8687bc65b84a071804b1cf7",
+      "Sha256": "306f99df146a6823f7e4b794a7d35014ed0daf20c8687bc65b84a071804b1cf7"
     },
     {
       "Source": "proxy/CAMINHOS.json",
@@ -2419,14 +2419,14 @@
     {
       "Source": "proxy/core/package-lock.json",
       "Destination": "proxy/core/package-lock.json",
-      "SourceSha256": "4e9730c5eaff6f6bfa46a108e860764fce668ae669bd57bc108a3b4189319283",
-      "Sha256": "4e9730c5eaff6f6bfa46a108e860764fce668ae669bd57bc108a3b4189319283"
+      "SourceSha256": "d56ec046a2f5833c35f0aa0c9299c13a1d2ee94f0c697b4965dd9b129dfb4d3e",
+      "Sha256": "d56ec046a2f5833c35f0aa0c9299c13a1d2ee94f0c697b4965dd9b129dfb4d3e"
     },
     {
       "Source": "proxy/core/package.json",
       "Destination": "proxy/core/package.json",
-      "SourceSha256": "268f9630389b6244aa6970940e7572dd364474645474433eae37236397b0e5b1",
-      "Sha256": "268f9630389b6244aa6970940e7572dd364474645474433eae37236397b0e5b1"
+      "SourceSha256": "7a2fb29be6e3b067c4311d21213d1ae12fc775959ac1c07c0b8b9614ed8b3fd4",
+      "Sha256": "7a2fb29be6e3b067c4311d21213d1ae12fc775959ac1c07c0b8b9614ed8b3fd4"
     },
     {
       "Source": "proxy/core/README.md",
@@ -2473,8 +2473,8 @@
     {
       "Source": "proxy/core/scripts/beta-build-candidate.mjs",
       "Destination": "proxy/core/scripts/beta-build-candidate.mjs",
-      "SourceSha256": "0751064b0488bebaea82db98ec5133cabed710f0d925d7e7b5ee6f9b1c59a418",
-      "Sha256": "0751064b0488bebaea82db98ec5133cabed710f0d925d7e7b5ee6f9b1c59a418"
+      "SourceSha256": "1e9f6b4e5b09d2a0095fe1190f407940af8dd07bc7c6d24686983576ca8930b7",
+      "Sha256": "1e9f6b4e5b09d2a0095fe1190f407940af8dd07bc7c6d24686983576ca8930b7"
     },
     {
       "Source": "proxy/core/scripts/beta-clean-install.mjs",
@@ -3199,8 +3199,8 @@
     {
       "Source": "proxy/core/scripts/test-isolated.mjs",
       "Destination": "proxy/core/scripts/test-isolated.mjs",
-      "SourceSha256": "06f1263344ec6602d27e422e78c479fb9ec35452f6c5abde0a4d0f52a648b18b",
-      "Sha256": "06f1263344ec6602d27e422e78c479fb9ec35452f6c5abde0a4d0f52a648b18b"
+      "SourceSha256": "6a1c43d91c43db20284ae7ee56a94b5cb1505d62f4bb3856d481b9bb23ad6b0a",
+      "Sha256": "6a1c43d91c43db20284ae7ee56a94b5cb1505d62f4bb3856d481b9bb23ad6b0a"
     },
     {
       "Source": "proxy/core/scripts/test-local-ui-session.mjs",
@@ -8503,8 +8503,8 @@
     {
       "Source": "proxy/core/test/beta-build-candidate.test.mjs",
       "Destination": "proxy/core/test/beta-build-candidate.test.mjs",
-      "SourceSha256": "688c903c4b25a25b14021de003328e576170711b82b0305ce1fa2498a38842f9",
-      "Sha256": "688c903c4b25a25b14021de003328e576170711b82b0305ce1fa2498a38842f9"
+      "SourceSha256": "200f0c8f78a48c2412cebec0432e107b7b5b21d8a328b4716ca33f0ba7858468",
+      "Sha256": "200f0c8f78a48c2412cebec0432e107b7b5b21d8a328b4716ca33f0ba7858468"
     },
     {
       "Source": "proxy/core/test/beta-frontend-package.test.mjs",
@@ -8569,8 +8569,8 @@
     {
       "Source": "proxy/core/test/tui-account.test.ts",
       "Destination": "proxy/core/test/tui-account.test.ts",
-      "SourceSha256": "1eb98abf7302f1cd48fa4c324b6257343ffb323b78c996a93bae92c9969a0baa",
-      "Sha256": "1eb98abf7302f1cd48fa4c324b6257343ffb323b78c996a93bae92c9969a0baa"
+      "SourceSha256": "815e31134e1b33da9402872b33b7861ec6675d49b4ad2cfbbd5c9d16c75d0362",
+      "Sha256": "815e31134e1b33da9402872b33b7861ec6675d49b4ad2cfbbd5c9d16c75d0362"
     },
     {
       "Source": "proxy/core/test/tui-bootstrap-service-boundary.test.ts",
