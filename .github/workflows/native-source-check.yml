@@ -1,0 +1,51 @@
+# Public workflow template: map to .github/workflows/native-source-check.yml.
+# Source checking only. No sidecar verification, linking, installer or release acceptance.
+# Cargo/tauri-build write compiler cache and generated schemas in this runner workspace.
+name: Native Harness source check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  source-check:
+    name: Harness source check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - os: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Install Linux Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev libgbm-dev libxkbcommon-dev
+      - name: Install the reviewed Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal --no-self-update
+      - name: Select Rust for the native check directory
+        run: rustup override set 1.98.1 --path quimera/tauri
+      - name: Require the native runner host from the matrix
+        run: >-
+          node -e "const r=require('node:child_process').spawnSync('rustc',['+1.98.1','-vV'],{encoding:'utf8'});if(r.error||r.status!==0||!r.stdout.split(/\r?\n/).includes('host: ${{ matrix.target }}'))process.exit(1)"
+      - name: Fetch locked dependencies for this native host
+        run: cargo +1.98.1 fetch --locked --manifest-path quimera/tauri/Cargo.toml --target ${{ matrix.target }}
+      - name: Fetch locked Computer Use dependencies for this native host
+        run: cargo +1.98.1 fetch --locked --manifest-path quimera/tauri/computer-use/Cargo.toml --target ${{ matrix.target }}
+      - name: Check Harness source offline without packaged resources
+        run: node quimera/tauri/scripts/check-native-source.mjs

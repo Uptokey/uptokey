@@ -1,0 +1,158 @@
+{
+  "entry": "canonical Uptokey account components, native account response contract and provider setup contract",
+  "sources": [
+    {
+      "path": "proxy/contratos/account-native.js",
+      "sha256": "91d2969bbf7b0d3fce6aad384fd21ffa40acc137c433b864b53ee04c55b7afbe"
+    },
+    {
+      "path": "proxy/contratos/canonical.js",
+      "sha256": "0b3a0e269073055db59dbde3ad157d5ce34d3ab60e524e334b8cbbe568bede6d"
+    },
+    {
+      "path": "proxy/contratos/limits.js",
+      "sha256": "ba529cc70f88d08ea4e98c69adababccf8fff1ee71c9b25a607c4fa8d60adbbd"
+    },
+    {
+      "path": "proxy/contratos/plain-data.js",
+      "sha256": "ed415d40bb40b4942f11535d1dc6904beaee05c0163539b7276e44690c2937ed"
+    },
+    {
+      "path": "proxy/contratos/provider-setup.js",
+      "sha256": "837014680316e82f399020df11ddf768dce999e762a008e9ba994d822466ffc5"
+    },
+    {
+      "path": "proxy/contratos/tailnet-origin.js",
+      "sha256": "c3df20acdfe57f8b5e28d0483003a9babbae8cab817742d7f38a2a7dcbda6d83"
+    },
+    {
+      "path": "proxy/contratos/workflow.js",
+      "sha256": "af3a950ee701e67fd3bdd1e3a8327e78511f2ac0943522931c8bcd3793b04bd8"
+    },
+    {
+      "path": "proxy/core/src/account-login-protocol.ts",
+      "sha256": "5095eac785bc8cec56c4f3b4a5ca02e1f73552a51b2d76a9a49e0b3e6ed7b8be"
+    },
+    {
+      "path": "quimera/uptokey/control-plane/src/personal-subscription-view.ts",
+      "sha256": "8aa63ca0c12e380f30d3e02d188688e1d04c9c7e0712df0c52ed9b8d7b29fc84"
+    },
+    {
+      "path": "quimera/uptokey/dashboard/src/lib/account-link-response.ts",
+      "sha256": "e58c5faf92377f54e5f70036914ebe7c47c8040992d4a9a912f5a40db930ecf6"
+    },
+    {
+      "path": "quimera/uptokey/dashboard/src/lib/account-status-response.ts",
+      "sha256": "ee99e2a4942d8e63fde07653a8873c178f0443cd15685c97d334190d6f023a30"
+    },
+    {
+      "path": "quimera/uptokey/dashboard/src/lib/browser-response.ts",
+      "sha256": "6ab6df280a8ad9bfa79bb64892cdd03491bb5e207c764ce3deef10abfe70819a"
+    },
+    {
+      "path": "quimera/uptokey/dashboard/src/lib/control-plane-projections.ts",
+      "sha256": "50652aa450b01919251a619979252925be19358343515cd7c6224a2f3d28472b"
+    },
+    {
+      "path": "quimera/uptokey/dashboard/src/lib/deadline.ts",
+      "sha256": "e3eebe8b71eb0c38b239c0ec335be5015b23dafba5bd410c56bb68bc45fb61e9"
+    },
+    {
+      "path": "quimera/uptokey/dashboard/src/lib/same-origin-client.ts",
+      "sha256": "9551c9f1dadeeac8a6d095d4513e6c3f1167f8bf36240acf868b6f3ca4b5699a"
+    },
+    {
+      "path": "quimera/uptokey/dashboard/src/lib/stream-lifecycle.ts",
+      "sha256": "c4ef2fe934785d7d80532410bc79b87ae5d1e7c48c4e7bf267c9447e0071db94"
+    },
+    {
+      "path": "quimera/uptokey/dashboard/src/lib/webauthn-client.ts",
+      "sha256": "f2a05bc60ff66737f160a9d11ee59fd73aa3a88e74502753bcb041bcf7a14251"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/design-bridge/account-client.ts",
+      "sha256": "9d17428c62849a16ddad6905749c09aadbc07c3f8bd5c6beb828b92a8e47fb7b"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/design-bridge/account-rail.css",
+      "sha256": "0e68efa9c41c8dc1eb38c47b983ee4ec57c9e9e66e3f013ae3ed0503226f7a80"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/design-bridge/account-rail.ts",
+      "sha256": "a35352d4b0fe17ea49f0594754dbc57c67cab7fd5374046fea2f83ff2a103068"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/design-bridge/account.tsx",
+      "sha256": "f67c04e2f7d9e9663cd3486eb1b6f683eae2cb62e39d49d69d96562ed755d242"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/design-bridge/billing-account.ts",
+      "sha256": "92f4f4d22ab548e0b12303cb88cb49a7f40be88f655bc792748aa853391f96c5"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/design-bridge/hosted-subscription-client.ts",
+      "sha256": "4e1eb932ae08e3328bf014ae727ea94bf29dd78eae3d1718332751821678af79"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/design-bridge/hosted-subscription.tsx",
+      "sha256": "a82b549fdbf2c6bc7df82028182bc9ca7c36e0918d966cd386a5b883afdd97af"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/account-i18n.ts",
+      "sha256": "c9d5c300edb599a9b96b17684b21818ce6af5280588f32e76f5859dd1e1e0152"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/hosted-subscription.ts",
+      "sha256": "32a3a35c3c15738caf49510310ff14546bfc0b10c1d5b7589267a3778bb39fe4"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/i18n.ts",
+      "sha256": "4c20ee27d9e0c69d4fbcc5df6a0d8618b27c83b14f810fcb68cd2122fa01bee5"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/interaction-effects.ts",
+      "sha256": "20ee6155119e9f2bd3d2eb7b5b2666fe587766f6557ea3f604cf82d83f2c3314"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/master-i18n-dict.ts",
+      "sha256": "9a2b3d747c7243db17cb57fd6bcf33156ae36933e5d2e3bdf6d26e897ab0946e"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/preferences.ts",
+      "sha256": "9b490187752e07de8501ef4fd45a33d86a4c827a3eb4b9591f423e760cd1205f"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/proxy.ts",
+      "sha256": "c5b5520642a41c75c1e98102ee276c871233056b2f47fe05427def8ddaebc1a4"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/rtl.ts",
+      "sha256": "9cc699c7d2cfcbbb6ba9831626895eb6cdd03dc9002b78913d472744b5fac5ed"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/subscription-i18n.ts",
+      "sha256": "6a9922a6d841e109d233134cdd5bae7bebe62e5581250f5062c4fa397f80a342"
+    },
+    {
+      "path": "quimera/uptokey/uptokey-pwa/src/lib/usage-observability-i18n.ts",
+      "sha256": "2fd5b25ebf7664517abfcfe57b19f38d1f5f2a7893b07fa1520fbe469824713e"
+    }
+  ],
+  "privateConfigurationImported": false,
+  "adaptations": [
+    "Explicit rail lifecycle instead of auto-mount",
+    "LocalAccount HTTP boundary replaced with narrow native IPC; validation and authorization remain canonical",
+    "No-secret getLocalToken presence marker for canonical local controls",
+    "One persistent ConnectedAccount instance with null headless presentation; avatar invokes original login handler without opening Account",
+    "Validated challenge handed to existing pending lifecycle before opener; opener errors preserved and cancellation revalidated",
+    "Canonical validated pending login URL retained for explicit reopen after status, binding and expiry checks; no second challenge",
+    "Compact explicit Account/Usage presentation and original Harness Toast for headless errors",
+    "Canonical provider setup protocol copied byte-for-byte for the Harness native transport"
+  ],
+  "mounted": false,
+  "catalogRevalidation": {
+    "binding": "Canonical accountBindingRevision/subscribeAccountBinding, unchanged",
+    "refresh": "Canonical subscribeInteractionRefresh account graph, unchanged",
+    "purpose": "Invalidate the original model directory after account input changes; no login, credential or authorization mutation"
+  }
+}

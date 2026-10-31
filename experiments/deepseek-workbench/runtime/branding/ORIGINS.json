@@ -1,0 +1,30 @@
+{
+  "product": "Uptokey",
+  "assets": [
+    {
+      "source": "quimera/tauri/brand-assets/uptokey-icon2-black-64x64.png",
+      "target": "runtime/branding/mark.png",
+      "sha256": "2652cf3cd7a045b82e0d2b981742fae56907e4356a0a6ef07d3d9c6a4931efbb"
+    },
+    {
+      "source": "quimera/tauri/brand-assets/uptokey-icon2-white-64x64.png",
+      "target": "runtime/branding/white.png",
+      "sha256": "ca67c659969881951e308e666eecbbce80a03b8d06da3004abea2f1731d2c012"
+    },
+    {
+      "source": "quimera/tauri/icons/icon.png",
+      "target": "runtime/branding/icon.png",
+      "sha256": "7b5f0d2562c104c4f38dc4d04c10bf38d9127dc1cd3631acf1f110f57b1c44fd"
+    },
+    {
+      "source": "quimera/tauri/icons/icon.png",
+      "target": "desktop/icons/icon.png",
+      "sha256": "7b5f0d2562c104c4f38dc4d04c10bf38d9127dc1cd3631acf1f110f57b1c44fd"
+    },
+    {
+      "source": "quimera/tauri/icons/icon.ico",
+      "target": "desktop/icons/icon.ico",
+      "sha256": "da66e9a2939807de5043334a2415e5fde2b29f768bd224d8b762af9775657977"
+    }
+  ]
+}

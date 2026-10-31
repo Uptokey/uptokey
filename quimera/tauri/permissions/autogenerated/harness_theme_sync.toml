@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-harness-theme-sync"
+description = "Enables the harness_theme_sync command without any pre-configured scope."
+commands.allow = ["harness_theme_sync"]
+
+[[permission]]
+identifier = "deny-harness-theme-sync"
+description = "Denies the harness_theme_sync command without any pre-configured scope."
+commands.deny = ["harness_theme_sync"]

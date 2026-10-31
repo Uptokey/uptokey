@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "harness-computer-focus"
+description = "Present an already registered exact focus ticket; no target or process selection."
+commands.allow = ["harness_computer_approve_focus"]

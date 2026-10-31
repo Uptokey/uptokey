@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "harness-theme",
+  "description": "Native theme projection for the isolated Uptokey Harness window only.",
+  "local": false,
+  "windows": ["workbench"],
+  "remote": { "urls": ["http://127.0.0.1:43180/*"] },
+  "permissions": ["harness-theme"]
+}

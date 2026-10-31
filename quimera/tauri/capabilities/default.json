@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "main-window",
+  "description": "Superfície mínima da janela principal: receber eventos do shell e emitir notificações autorizadas. Nenhum filesystem, shell, HTTP ou diálogo genérico é exposto à WebView.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "notification:allow-notify",
+    "native-shell"
+  ],
+  "local": true
+}

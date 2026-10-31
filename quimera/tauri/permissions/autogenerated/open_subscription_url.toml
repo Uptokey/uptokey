@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-subscription-url"
+description = "Enables the open_subscription_url command without any pre-configured scope."
+commands.allow = ["open_subscription_url"]
+
+[[permission]]
+identifier = "deny-open-subscription-url"
+description = "Denies the open_subscription_url command without any pre-configured scope."
+commands.deny = ["open_subscription_url"]

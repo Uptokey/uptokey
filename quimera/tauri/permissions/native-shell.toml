@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "native-shell"
+description = "Existing canonical commands restricted to the local main window."
+commands.allow = ["proxy_address","proxy_start","proxy_stop","proxy_restart","proxy_status","proxy_health","get_system_theme","get_preferred_theme","set_preferred_theme","resolve_theme","notification_show","diagnostics_export","pick_folder","list_workspace_contexts","approve_workspace_context","open_account_login","open_subscription_url","open_model_page","open_provider_portal"]

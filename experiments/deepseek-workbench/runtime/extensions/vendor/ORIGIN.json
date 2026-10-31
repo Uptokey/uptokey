@@ -1,0 +1,10 @@
+[
+  {
+    "sha256": "869f5d22cce0ca1e79058560ad7afd6894048f761b5e37511e3f7c0c581fbbe5",
+    "source": "proxy/core/src/vault-crypto.ts"
+  },
+  {
+    "sha256": "93141080de182469c309d4a34dc2bf68b2b9c20f99abd1b68a537057dc8318d9",
+    "source": "proxy/core/src/vault-identity-lock.ts"
+  }
+]

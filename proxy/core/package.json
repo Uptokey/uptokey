@@ -1,6 +1,6 @@
 {
   "name": "@uptokey/proxy-local",
-  "version": "0.1.0-beta.25",
+  "version": "0.1.0-beta.26",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "bin": {
@@ -79,7 +79,7 @@
     "pngjs": "7.0.0",
     "tar-stream": "2.2.0",
     "tree-sitter-wasm": "2.0.2",
-    "undici": "7.30.0",
+    "undici": "7.30.1",
     "web-tree-sitter": "^0.27.0",
     "ws": "8.21.3",
     "zod": "^3.25.76"

@@ -1,0 +1,20 @@
+{
+  "name": "uptokey-harness-isolated-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-fs-ssh": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-sandbox-ssh": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-ssh": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-subprocess-ssh": "0.2.1-rc.2",
+    "libsodium-wrappers": "0.8.4"
+  },
+  "allowScripts": {
+    "@deepseek-ai/dsh-subprocess-local": true,
+    "koffi": true,
+    "node-pty": true,
+    "@google/genai": false,
+    "protobufjs": false
+  }
+}

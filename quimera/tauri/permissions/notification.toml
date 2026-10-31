@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "harness-notification"
+description = "Show one of four fixed Uptokey attention messages. No conversation text, token, filesystem, network or arbitrary notification content."
+commands.allow = ["harness_notification_show"]

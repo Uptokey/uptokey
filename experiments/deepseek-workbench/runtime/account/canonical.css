@@ -1,0 +1,20 @@
+.rail-footer .account-rail{display:flex;align-items:center;gap:8px;width:100%;height:auto;min-height:40px;padding:8px;border-radius:9px;text-align:start;white-space:normal;background:transparent;color:inherit;cursor:pointer}
+.rail-footer .account-avatar{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;border-radius:50%;background:var(--panel-2,var(--surface-2,#202529));color:var(--text,#edf3f4)}
+.rail-footer .account-identity{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:1.4}
+.rail-footer .account-free{margin-inline-start:auto;color:var(--success,var(--account-success,#60b899));font-size:11px;flex-shrink:0}
+.rail-footer .account-rail:hover{background:var(--panel-2,var(--surface-2,#202529))}
+.rail-footer .account-rail:focus-visible{outline:2px solid var(--blue,var(--accent,#4ca9ff));outline-offset:2px}
+[data-pane="left"].collapsed .account-identity,[data-pane="left"].collapsed .account-free{display:none}
+.account-menu{position:fixed;z-index:1000;max-height:calc(100dvh - 32px);overflow:auto;padding:6px;border:1px solid var(--line,var(--border,#394044));border-radius:12px;background:var(--surface,#171d21);color:var(--text,#edf3f4);box-shadow:0 12px 36px #0005;font:inherit;overscroll-behavior:contain}
+.account-menu[hidden]{display:none}
+.account-menu-identity{display:flex;flex-direction:column;gap:3px;padding:8px 10px;min-width:0;font-size:12px}
+.account-menu-identity strong,.account-menu-identity span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-menu .account-free{color:var(--success,var(--account-success,#60b899))}
+:root[data-theme="light"] .account-menu,:root[data-theme="light"] .account-rail{--account-success:#047857}
+.account-menu-item{display:block;width:100%;padding:9px 10px;border:0;border-radius:7px;background:transparent;color:inherit;text-align:start;font:inherit;font-size:13px;cursor:pointer;touch-action:manipulation}
+.account-menu-item:hover,.account-menu-item:focus-visible{background:var(--panel-2,var(--surface-2,#202529))}
+.account-menu-item:focus-visible{outline:2px solid var(--blue,var(--accent,#4ca9ff));outline-offset:-2px}
+.account-menu-item:disabled{opacity:.65;cursor:wait}
+.account-menu-separator{height:1px;margin:5px 4px;background:var(--line,var(--border,#394044))}
+.account-menu-feedback:empty{display:none}
+.account-menu-feedback{padding:5px 10px;font-size:12px;overflow-wrap:anywhere}

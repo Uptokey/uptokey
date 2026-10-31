@@ -1,0 +1,18 @@
+{
+  "license": "MIT",
+  "revision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "adaptations": [
+    "TypeScript compiled to JavaScript only; kernel locking implementation unchanged"
+  ],
+  "sources": [
+    {
+      "source": "upstream/packages/session/session-persistence-jsonl/src/lease.ts",
+      "sha256": "377f24b1446382d703d5f1346f44e15a25368a0e7967e5bd41db700a919d7ad8"
+    },
+    {
+      "source": "upstream/packages/session/session-persistence-jsonl/src/win32.ts",
+      "sha256": "410402b1b28047db87bea4c7c60794d0f1f7338c7b736e06fa43e476f479f579"
+    }
+  ],
+  "outputSha256": "2babba788bcbda48aa11c62c736a392a59a40e4040011ff06108f9a643c80a6a"
+}

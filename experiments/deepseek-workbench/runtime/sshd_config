@@ -1,0 +1,23 @@
+Port 43191
+HostKey /tmp/lab-ssh/host_ed25519
+PidFile /tmp/lab-ssh/sshd.pid
+AuthorizedKeysFile /run/secrets/uptokey-workbench-local-model-public-key /run/secrets/uptokey-workbench-core-public-key /home/node/.ssh/uptokey-computer-authorized-keys
+AllowUsers node
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+UsePAM no
+AllowTcpForwarding remote
+AllowStreamLocalForwarding no
+PermitListen 127.0.0.1:43192 127.0.0.1:43194 127.0.0.1:43196
+PermitOpen none
+GatewayPorts no
+AllowAgentForwarding no
+X11Forwarding no
+PermitTTY no
+MaxSessions 0
+ForceCommand /bin/false
+LogLevel ERROR

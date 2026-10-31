@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "harness-theme"
+description = "Apply the existing Harness theme preference to its native window and read the observed result. No persistent configuration, filesystem or generic window API."
+commands.allow = ["harness_theme_sync", "harness_theme_state"]

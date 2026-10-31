@@ -14,6 +14,9 @@ import { runLinearAccount } from "../src/tui/frontend/uptokey/linear-account.ts"
 import type { AccountPublicSession } from "../src/account-login-protocol.ts";
 import { accountViewSummary } from "../src/tui/account-plan.ts";
 
+const { summarizeTapFailures }: { summarizeTapFailures: (tap: string, source: string, file: string) => Array<{ subtest: string; location: string; code: string }> } =
+  await import(new URL("../scripts/test-isolated.mjs", import.meta.url).href);
+
 const signedOut: AccountPublicSession = { configured: true, authenticated: false, loginAvailable: true, state: "signed_out" };
 const connected: AccountPublicSession = { configured: true, authenticated: true, loginAvailable: true, state: "connected", profile: { displayName: "Fixture", plan: "free" } };
 const ref = "acc_" + "a".repeat(64);
@@ -444,4 +447,26 @@ test("credit failure stays in credits and neither rereads nor conceals a confirm
   assert.equal(f.account.view.session?.authenticated, true); assert.equal(f.account.view.error, null);
   assert.equal(f.account.view.usage, null); assert.equal(f.account.view.usageError, "account_service_unavailable");
   assert.equal(f.account.view.usageLoading, false); assert.equal(f.account.view.planLoading, false);
+});
+
+test("isolated CI diagnostics identify only source-known names and relative declaration locations", () => {
+  const source = '\nimport test from "node:test";\ntest("approved account projection retries", async () => {});\n';
+  const tap = 'not ok 7 - approved account projection retries\n  ---\n  error: "synthetic-private-payload"\n  actual: "synthetic-credential"\n  location: "/private/home/profile/tui-account.test.ts:300:1"\n  ...\n';
+  assert.deepEqual(summarizeTapFailures(tap, source, "tui-account.test.ts"), [{ subtest: "approved account projection retries", location: "test/tui-account.test.ts:3:1", code: "test_failed" }]);
+  assert.doesNotMatch(JSON.stringify(summarizeTapFailures(tap, source, "tui-account.test.ts")), /private|credential|profile|300/);
+});
+
+test("isolated CI diagnostics never reflect forged TAP names, payloads or paths", () => {
+  const tap = 'not ok 1 - synthetic-token-value\nnot ok 2 - ::error::synthetic-injected-command\n  error: "synthetic-assertion\\n::error::private"\n';
+  const result = summarizeTapFailures(tap, 'test("recognized test", () => {});', "../../private/synthetic-token");
+  assert.deepEqual(result, [{ subtest: "unrecognized_subtest", location: "test/unknown.test", code: "test_failed" }]);
+  assert.doesNotMatch(JSON.stringify(result), /synthetic|::error|\.\.\//);
+});
+
+test("isolated CI diagnostics are bounded and preserve an unavailable failure", () => {
+  const names = Array.from({ length: 20 }, (_, index) => `bounded source test ${index}`);
+  const source = names.map(name => `test("${name}", () => {});`).join("\n");
+  const tap = names.map((name, index) => `not ok ${index + 1} - ${name}`).join("\n");
+  assert.equal(summarizeTapFailures(tap, source, "fixture.test.ts").length, 5);
+  assert.deepEqual(summarizeTapFailures("unstructured synthetic-private crash", "", "fixture.test.ts"), [{ subtest: "failure_detail_unavailable", location: "test/fixture.test.ts", code: "process_failed" }]);
 });

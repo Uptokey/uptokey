@@ -1,0 +1,8 @@
+FROM localhost/uptokey-harness:post-edit-verification-20261025
+USER root
+COPY extensions/post-edit-verification-core.mjs /opt/harness/extensions/post-edit-verification-core.mjs
+COPY extensions/post-edit-verification.mjs /opt/harness/extensions/post-edit-verification.mjs
+COPY extensions/post-edit-verification.test.mjs /opt/harness/extensions/post-edit-verification.test.mjs
+RUN chown node:node /opt/harness/extensions/post-edit-verification*.mjs
+USER node
+RUN node --test /opt/harness/extensions/post-edit-verification.test.mjs
