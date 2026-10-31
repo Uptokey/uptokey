@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "harness-local-connections"
+description = "Read last public local bridge states and reconnect existing local bridges. No new pairing authority, credential export, lifecycle, shell or arbitrary HTTP."
+commands.allow = ["harness_local_connections"]

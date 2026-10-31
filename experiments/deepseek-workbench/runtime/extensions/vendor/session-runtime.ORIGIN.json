@@ -1,0 +1,14 @@
+{
+  "license": "MIT",
+  "revision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "adaptations": [
+    "TypeScript compiled to JavaScript only; original handle and live-event tracker unchanged"
+  ],
+  "sources": [
+    {
+      "source": "upstream/packages/session/session-persistence-jsonl/src/storage.ts",
+      "sha256": "57d5fa1d7efd17789d6a223f6aa5e06b79092665bea13f8a23d3bab644d066c3"
+    }
+  ],
+  "outputSha256": "2c5fce4aa575cee6dac1c137af90c8fccb6938305c15092c05eab874e0985f4d"
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-proxy-restart"
+description = "Enables the proxy_restart command without any pre-configured scope."
+commands.allow = ["proxy_restart"]
+
+[[permission]]
+identifier = "deny-proxy-restart"
+description = "Denies the proxy_restart command without any pre-configured scope."
+commands.deny = ["proxy_restart"]

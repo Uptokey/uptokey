@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "harness-computer-focus",
+  "description": "Consume a Host-registered one-shot focus ticket in the existing selected native session.",
+  "local": false,
+  "windows": ["workbench"],
+  "remote": { "urls": ["http://127.0.0.1:43180/*"] },
+  "permissions": ["harness-computer-focus"]
+}

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "harness-account"
+description = "Public Uptokey account operations, canonical account destinations and stored-credential model rediscovery. No token, key, filesystem, shell or generic HTTP access."
+commands.allow = ["harness_account_request", "harness_open_account_login", "harness_complete_account_login", "harness_open_account_page", "harness_refresh_provider_models"]

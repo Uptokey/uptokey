@@ -1,0 +1,8 @@
+FROM ad8af15495cc468ce46999b6d3799922a1b7fdbc2a1f8207822464160caffd07
+USER root
+COPY integrations/playwright.mjs integrations/playwright-policy.mjs integrations/playwright-network.mjs integrations/playwright-egress-policy.mjs integrations/computer-relay.mjs /opt/integrations/
+COPY execution/proxy.mjs /opt/harness/execution/proxy.mjs
+COPY branding/automation-approval.mjs branding/automation-approval.test.mjs /opt/harness/branding/
+COPY sshd_config /opt/harness/sshd_config
+RUN node --test /opt/harness/branding/automation-approval.test.mjs
+USER node

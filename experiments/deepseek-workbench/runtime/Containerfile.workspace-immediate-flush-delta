@@ -1,0 +1,9 @@
+FROM localhost/uptokey-harness:post-edit-verification-20261025-r2
+USER root
+COPY extensions/encrypted-workspace.mjs /opt/harness/extensions/encrypted-workspace.mjs
+COPY extensions/encrypted-workspace.test.mjs /opt/harness/extensions/encrypted-workspace.test.mjs
+COPY extensions/encrypted-workspace-abrupt-child.mjs /opt/harness/extensions/encrypted-workspace-abrupt-child.mjs
+COPY extensions/check-runtime.mjs /opt/harness/extensions/workspace-immediate-flush-runtime-proof.mjs
+RUN chown node:node /opt/harness/extensions/encrypted-workspace.mjs /opt/harness/extensions/encrypted-workspace.test.mjs /opt/harness/extensions/encrypted-workspace-abrupt-child.mjs \
+ && node --test /opt/harness/extensions/encrypted-workspace.test.mjs
+USER node

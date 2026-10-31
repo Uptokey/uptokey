@@ -1,0 +1,36 @@
+- id: fs-sandbox
+  disabled: true
+- id: subprocess
+  disabled: true
+- id: sandbox
+  disabled: true
+# This deployment uses local/BYOK models, not a relabeled DeepSeek account.
+- id: ui-settings-account
+  disabled: true
+- insert:
+    - id: uptokey-execution-ssh
+      name: /opt/harness/execution/connection.mjs
+    - id: uptokey-execution-fs
+      name: /opt/harness/execution/filesystem.mjs
+    - id: uptokey-execution-subprocess
+      name: /opt/harness/execution/subprocess.mjs
+    - id: uptokey-execution-sandbox
+      name: /opt/harness/node_modules/@deepseek-ai/dsh-sandbox-ssh/lib/index.js
+    - id: uptokey-public-api-ready
+      name: /opt/harness/extensions/public-api-ready.mjs
+- id: ptc-runtime
+  inject: [ssh]
+  config:
+    launch: !!js ctx.ssh.ptcLaunch
+- id: uptokey-api-weather
+  config:
+    serverName: weather
+    transport: stdio
+    command: /usr/bin/ssh
+    args:
+      - '-T'
+      - '-o'
+      - BatchMode=yes
+      - workbench-executor
+      - 'HTTPS_PROXY=http://127.0.0.1:43190 /usr/local/bin/node /opt/integrations/weather.mjs'
+    failOnStartupError: true

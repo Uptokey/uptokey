@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-harness-refresh-provider-models"
+description = "Enables the harness_refresh_provider_models command without any pre-configured scope."
+commands.allow = ["harness_refresh_provider_models"]
+
+[[permission]]
+identifier = "deny-harness-refresh-provider-models"
+description = "Denies the harness_refresh_provider_models command without any pre-configured scope."
+commands.deny = ["harness_refresh_provider_models"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-harness-account-request"
+description = "Enables the harness_account_request command without any pre-configured scope."
+commands.allow = ["harness_account_request"]
+
+[[permission]]
+identifier = "deny-harness-account-request"
+description = "Denies the harness_account_request command without any pre-configured scope."
+commands.deny = ["harness_account_request"]

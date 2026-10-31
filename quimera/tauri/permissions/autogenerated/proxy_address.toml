@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-proxy-address"
+description = "Enables the proxy_address command without any pre-configured scope."
+commands.allow = ["proxy_address"]
+
+[[permission]]
+identifier = "deny-proxy-address"
+description = "Denies the proxy_address command without any pre-configured scope."
+commands.deny = ["proxy_address"]

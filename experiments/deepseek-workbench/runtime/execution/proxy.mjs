@@ -1,0 +1,10 @@
+import {createRequire} from 'node:module';
+import {createPublicEgressPolicy} from '/opt/integrations/playwright-egress-policy.mjs';
+const {Server}=createRequire('/opt/integrations/package.json')('proxy-chain');
+const proxy=new Server({host:'127.0.0.1',port:43190,verbose:false,prepareRequestFunction:createPublicEgressPolicy()});
+proxy.on('requestFailed',()=>console.error('Executor proxy request failed'));
+await proxy.listen();
+const close=async()=>{await proxy.close(true);process.exit(0)};
+for(const signal of ['SIGINT','SIGTERM'])process.on(signal,close);
+process.stdin.once('end',close);
+process.stdin.resume();

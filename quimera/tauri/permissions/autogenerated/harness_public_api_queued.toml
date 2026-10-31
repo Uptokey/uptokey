@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-harness-public-api-queued"
+description = "Enables the harness_public_api_queued command without any pre-configured scope."
+commands.allow = ["harness_public_api_queued"]
+
+[[permission]]
+identifier = "deny-harness-public-api-queued"
+description = "Denies the harness_public_api_queued command without any pre-configured scope."
+commands.deny = ["harness_public_api_queued"]

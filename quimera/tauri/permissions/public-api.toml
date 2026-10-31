@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "harness-public-api"
+description = "Acknowledge one pending native API receipt. No registration, filesystem, network, account or generic window access."
+commands.allow = ["harness_public_api_queued"]

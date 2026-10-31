@@ -1,0 +1,42 @@
+# Source contracts only. This workflow does not build, sign or accept a desktop release.
+name: Native Harness source contracts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.21.0
+      - name: Verify source-only workflow policy
+        run: node quimera/tauri/scripts/native-contracts-policy.mjs .github/workflows/native-contracts.yml
+
+  contracts:
+    needs: policy
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.21.0
+      - name: Verify native source contracts without starting the application
+        run: node --test quimera/tauri/scripts/native-contracts-policy.test.mjs quimera/tauri/scripts/build-release.test.mjs quimera/tauri/scripts/release-cargo.test.mjs quimera/tauri/scripts/verify-native-build-identity.test.mjs proxy/core/scripts/native-artifact-version-evidence.test.mjs

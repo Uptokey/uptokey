@@ -1,0 +1,80 @@
+# Official upstream overlay: apps/web/tests/pin-browse-picker.overlay.yml.
+- id: directory-picker
+  disabled: true
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+# Laboratory policy: do not upload conversations to the official provider.
+- id: session-log-deepseek
+  disabled: true
+# Existing compact presentation; no second transcript UI.
+- id: credentials
+  disabled: true
+- id: session-persistence-jsonl
+  disabled: true
+- insert:
+    - id: uptokey-encrypted-sessions
+      name: /opt/harness/extensions/encrypted-sessions.mjs
+      config:
+        legacyRoot: /home/node/.dsh/sessions
+        root: /home/node/.dsh/sessions-encrypted/v1
+        keyPath: /run/secrets/uptokey-workbench-vault-key
+    - id: uptokey-automation-approval
+      name: /opt/harness/branding/automation-approval.mjs
+    - id: uptokey-encrypted-images
+      name: /opt/harness/extensions/encrypted-images.mjs
+    - id: uptokey-encrypted-files
+      name: /opt/harness/extensions/encrypted-files.mjs
+    - id: uptokey-request-image-cache
+      name: /opt/harness/extensions/request-image-cache.mjs
+    - id: uptokey-local-discovery
+      name: /opt/harness/extensions/local-discovery.mjs
+    - id: uptokey-hosted
+      name: /opt/harness/extensions/hosted.mjs
+    - id: uptokey-api-file
+      name: /opt/harness/extensions/api-file.mjs
+      config:
+        servers: [mcp__weather__]
+    - id: uptokey-durable-changes
+      name: /opt/harness/extensions/durable-changes.mjs
+      config:
+        keyPath: /run/secrets/uptokey-workbench-vault-key
+    - id: uptokey-post-edit-verification
+      name: /opt/harness/extensions/post-edit-verification.mjs
+    - id: uptokey-credentials
+      name: /opt/harness/extensions/credentials.mjs
+      config:
+        path: /home/node/.dsh/credentials.encrypted.json
+        keyPath: /run/secrets/uptokey-workbench-vault-key
+        bridgeKeyPath: /run/secrets/uptokey-workbench-core-gate
+        localModelKeyPath: /run/secrets/uptokey-workbench-local-model-public-key
+- id: ui-chat
+  config:
+    transcriptView: compact
+- insert:
+    - id: uptokey-api-weather
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: weather
+        transport: stdio
+        command: node
+        args:
+          - /opt/integrations/weather.mjs
+        failOnStartupError: true
+- insert:
+    - id: uptokey-browser
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: browser
+        transport: stdio
+        command: /usr/bin/ssh
+        args:
+          - '-T'
+          - '-o'
+          - BatchMode=yes
+          - workbench-executor
+          - 'PLAYWRIGHT_BROWSERS_PATH=/opt/playwright UPTOKEY_BROWSER_PROXY=http://127.0.0.1:43190 /usr/local/bin/node /opt/integrations/playwright.mjs'
+        failOnStartupError: false
+        toolCallTimeoutMs: 45000

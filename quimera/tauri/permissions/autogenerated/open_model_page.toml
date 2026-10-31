@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-model-page"
+description = "Enables the open_model_page command without any pre-configured scope."
+commands.allow = ["open_model_page"]
+
+[[permission]]
+identifier = "deny-open-model-page"
+description = "Denies the open_model_page command without any pre-configured scope."
+commands.deny = ["open_model_page"]

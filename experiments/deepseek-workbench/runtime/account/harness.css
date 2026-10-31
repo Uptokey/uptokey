@@ -1,0 +1,206 @@
+/* The canonical components consume the Harness theme through scoped aliases. */
+.uptokey-harness-account-footer,
+.account-menu,
+.uptokey-harness-account-dialog {
+  --text: var(--dsw-alias-label-primary);
+  --surface: var(--dsw-alias-bg-layer-2);
+  --surface-2: var(--dsw-alias-interactive-bg-hover);
+  --panel-2: var(--dsw-alias-interactive-bg-hover);
+  --line: var(--dsw-alias-border-l3);
+  --blue: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+}
+.uptokey-harness-account-footer {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.uptokey-plus-seat:empty { display: none; }
+.uptokey-plus-cta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid #977fff;
+  border-radius: var(--dsw-radius-md, 10px);
+  background: #6c47ff;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease, box-shadow .15s ease;
+}
+.uptokey-plus-cta:hover:not(:disabled) { background: #7b5aff; box-shadow: 0 0 16px #6c47ff40; }
+.uptokey-plus-cta:focus-visible { outline: 2px solid var(--dsw-alias-link, #017aff); outline-offset: 3px; }
+.uptokey-plus-cta:disabled { opacity: .65; cursor: progress; }
+.uptokey-plus-spark { font-size: 18px; line-height: 1; }
+.uptokey-plus-arrow { margin-inline-start: auto; }
+.uptokey-harness-account-footer[data-wide="false"] .uptokey-plus-cta { width: 36px; min-height: 36px; padding: 6px; justify-content: center; }
+.uptokey-harness-account-footer[data-wide="false"] .uptokey-plus-label,
+.uptokey-harness-account-footer[data-wide="false"] .uptokey-plus-arrow { display: none; }
+@media (prefers-reduced-motion: reduce) { .uptokey-plus-cta { transition: none; } }
+.uptokey-harness-account-footer .account-rail {
+  height: 42px;
+  min-height: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+}
+.uptokey-harness-account-footer .account-avatar {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.uptokey-harness-account-footer .account-identity {
+  font-size: 13px;
+}
+.uptokey-harness-account-footer[data-wide="false"] {
+  width: 36px;
+}
+.uptokey-harness-account-footer[data-wide="false"] .account-rail {
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  gap: 0;
+}
+.uptokey-harness-account-footer[data-wide="false"] .account-identity,
+.uptokey-harness-account-footer[data-wide="false"] .account-free {
+  display: none;
+}
+.account-menu {
+  font-size: 13px;
+}
+.account-menu strong,
+.uptokey-harness-account-panel strong,
+.uptokey-harness-account-panel h3,
+.uptokey-harness-account-panel h4 {
+  font-weight: 500;
+}
+.uptokey-harness-account-dialog {
+  width: min(440px, 100%);
+  max-height: 100%;
+}
+.uptokey-harness-account-content {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.uptokey-harness-account-panel {
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.uptokey-harness-account-panel .sb-section,
+.uptokey-harness-account-panel .subscription-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.uptokey-harness-account-panel p,
+.uptokey-harness-account-panel h3,
+.uptokey-harness-account-panel h4 {
+  margin: 0;
+}
+.uptokey-harness-account-panel h3,
+.uptokey-harness-account-panel h4 {
+  font-size: 13px;
+}
+.uptokey-harness-account-panel .settings-actions,
+.uptokey-harness-account-panel .subscription-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.uptokey-harness-account-panel [data-account-primary]:empty {
+  display: none;
+}
+.uptokey-harness-account-panel .account-secondary {
+  border-top: 1px solid var(--dsw-alias-border-l3);
+  padding-top: 12px;
+}
+.uptokey-harness-account-panel .account-secondary > summary {
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary);
+}
+.uptokey-harness-account-panel .account-secondary[open] > summary {
+  margin-bottom: 12px;
+}
+.uptokey-harness-account-panel .account-secondary > .settings-actions,
+.uptokey-harness-account-panel .account-secondary > [data-account-balance] {
+  margin: 12px 0;
+}
+.uptokey-harness-account-panel button,
+.uptokey-harness-account-panel a.settings-button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.uptokey-harness-account-panel button:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.uptokey-harness-account-panel button.settings-button-prominent {
+  background: var(--dsw-alias-button-primary-fill);
+  border-color: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+.uptokey-harness-account-panel button.settings-button-prominent:hover:not(:disabled) {
+  background: var(--dsw-alias-button-primary-hover);
+}
+.uptokey-harness-account-panel button:disabled {
+  cursor: default;
+  opacity: .65;
+}
+.uptokey-harness-account-panel a {
+  color: var(--dsw-alias-link);
+}
+.uptokey-harness-account-panel .subscription-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.uptokey-harness-account-panel .subscription-plan-grid article {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-md);
+}
+.uptokey-harness-account-panel .subscription-plan-grid header,
+.uptokey-harness-account-panel [data-account-balance] dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.uptokey-harness-account-panel .subscription-plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.uptokey-harness-account-panel [data-account-balance] dl,
+.uptokey-harness-account-panel [data-account-balance] dd {
+  margin: 0;
+}
+.uptokey-harness-account-panel meter {
+  max-width: 100%;
+}
+@media (max-width: 480px) {
+  .uptokey-harness-account-panel .subscription-plan-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "uptokey-deepseek-workbench-local",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/lab.mjs start",
+    "open": "node scripts/lab.mjs open",
+    "stop": "node scripts/lab.mjs stop",
+    "status": "node scripts/lab.mjs status",
+    "connect-local": "node scripts/lab.mjs connect-local",
+    "core:pair": "node scripts/lab.mjs core-pair",
+    "core:pair-finish": "node scripts/lab.mjs core-pair-finish",
+    "core:connect": "node scripts/lab.mjs connect-core",
+    "core:configure": "node scripts/configure-core.mjs",
+    "hosted:catalog": "node scripts/hosted-catalog.mjs",
+    "api:add": "node scripts/register-public-api.mjs",
+    "vault:protect": "node scripts/lab.mjs vault-protect",
+    "diagnostics": "node scripts/diagnostics.mjs",
+    "workspace:export": "node scripts/export-workspace.mjs",
+    "workspace:import": "node scripts/import-workspace.mjs",
+    "reconnect": "node scripts/reconnect.mjs",
+    "runtime:restart": "node scripts/restart-runtime.mjs",
+    "configure-local": "node scripts/configure-ollama.mjs",
+    "prepare-local-model": "node scripts/prepare-ollama-model.mjs",
+    "desktop": "node scripts/desktop.mjs start",
+    "desktop:build": "node scripts/desktop.mjs build",
+    "desktop:test": "node scripts/desktop.mjs test",
+    "build": "node scripts/lab.mjs build",
+    "verify": "node scripts/verify.mjs",
+    "verify:tauri-transposition": "node scripts/check-tauri-transposition.mjs",
+    "verify:product-contract": "node --test scripts/product-contract.test.mjs && node scripts/product-contract.mjs",
+    "executor:check": "node scripts/check-executor.mjs"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "1.3.0"
+  }
+}

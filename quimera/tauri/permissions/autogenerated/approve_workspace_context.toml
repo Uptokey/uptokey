@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-approve-workspace-context"
+description = "Enables the approve_workspace_context command without any pre-configured scope."
+commands.allow = ["approve_workspace_context"]
+
+[[permission]]
+identifier = "deny-approve-workspace-context"
+description = "Denies the approve_workspace_context command without any pre-configured scope."
+commands.deny = ["approve_workspace_context"]

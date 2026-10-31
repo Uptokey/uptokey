@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "harness-public-api",
+  "description": "Acknowledge delivery of a saved public API to the isolated Harness window.",
+  "local": false,
+  "windows": ["workbench"],
+  "remote": { "urls": ["http://127.0.0.1:43180/*"] },
+  "permissions": ["harness-public-api"]
+}

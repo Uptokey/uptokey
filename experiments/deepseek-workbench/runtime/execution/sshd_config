@@ -1,0 +1,21 @@
+Port 43201
+ListenAddress 0.0.0.0
+HostKey /tmp/executor/host_ed25519
+PidFile /tmp/executor/sshd.pid
+AuthorizedKeysFile /home/node/.ssh/authorized_keys
+AllowUsers node
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+UsePAM no
+# OpenSSH 9.2 shares its channel permission set with Unix-socket forwards.
+# The upstream helper needs these; no reverse forwarding or published port.
+AllowTcpForwarding local
+AllowStreamLocalForwarding yes
+AllowAgentForwarding no
+X11Forwarding no
+PermitTTY no
+LogLevel ERROR

@@ -46,3 +46,27 @@ regexTarget = "secret"
 paths = ["(?:^|/)proxy/integracoes/9router/app/open-sse/providers/shared\\.js$"]
 regexes = ["^interleaved-thinking-2025-05-14$"]
 
+[[allowlists]]
+description = "Public OCI workspace policy label, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ["(?:^|/)experiments/deepseek-workbench/runtime/Containerfile$"]
+regexes = ["^encrypted-tmpfs-v1$"]
+
+[[allowlists]]
+description = "Public browser preferences storage key, not an authentication value"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ["(?:^|/)experiments/deepseek-workbench/runtime/account/canonical\\.js$"]
+regexes = ["^uptokey\\.prefs\\.v1$"]
+
+[[allowlists]]
+description = "Public browser language storage key, not an authentication value"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ["(?:^|/)experiments/deepseek-workbench/runtime/account/canonical\\.js$"]
+regexes = ["^quimera\\.lang\\.v1$"]
+

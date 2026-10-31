@@ -1,0 +1,52 @@
+FROM docker.io/library/node:24.21.0-bookworm-slim
+LABEL io.uptokey.workspace="encrypted-tmpfs-v1"
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ ca-certificates ripgrep procps && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/harness
+COPY package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+COPY integrations/package*.json /opt/integrations/
+RUN cd /opt/integrations && if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+COPY apis/ /opt/harness/apis/
+COPY integrations/openapi.mjs integrations/weather.mjs integrations/playwright.mjs integrations/playwright-policy.mjs integrations/playwright-network.mjs integrations/playwright-egress-policy.mjs integrations/computer-relay.mjs /opt/integrations/
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN node /opt/integrations/node_modules/playwright/cli.js install --with-deps chromium --only-shell && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-liberation2 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* && mkdir -p /run/sshd && usermod -p '*' node
+COPY sshd_config /opt/harness/sshd_config
+COPY contracts/ /opt/harness/contracts/
+COPY extensions/materialization-ownership.mjs /opt/harness/extensions/materialization-ownership.mjs
+COPY execution/ /opt/harness/execution/
+RUN node --test /opt/harness/execution/image-path.test.mjs
+RUN node --test /opt/harness/execution/subprocess-ownership.test.mjs
+RUN node --test /opt/harness/execution/filesystem-ownership.test.mjs
+RUN mkdir -p /workspace /home/node/.dsh/attachments /opt/harness/demo && chown -R node:node /workspace /home/node /opt/harness/demo
+COPY --chown=node:node demo/ /opt/harness/demo/
+COPY entry.mjs browse-picker.yml /opt/harness/
+COPY account/ /opt/harness/account/
+COPY branding/ /opt/harness/branding/
+COPY integrations/computer-focus-client.mjs /opt/harness/integrations/computer-focus-client.mjs
+RUN node --test /opt/harness/branding/automation-approval.test.mjs
+RUN node --test /opt/harness/branding/lifecycle-notifications.test.mjs
+RUN node --test /opt/harness/branding/plugin-trust-approval.test.mjs /opt/harness/branding/plugin-boundary-patch.test.mjs /opt/harness/branding/explicit-approval-patch.test.mjs
+RUN node /opt/harness/branding/apply.mjs
+RUN node /opt/harness/branding/plugin-boundary-runtime-smoke.mjs
+COPY extensions/ /opt/harness/extensions/
+RUN node --test /opt/harness/extensions/materialization-ownership.test.mjs
+RUN node --test /opt/harness/extensions/materialization-eviction.test.mjs
+RUN node --test /opt/harness/extensions/attachment-preview.test.mjs
+RUN node --test /opt/harness/extensions/post-edit-verification.test.mjs
+RUN node --test /opt/harness/extensions/local-discovery.test.mjs
+RUN node --test /opt/harness/extensions/api-file-registry.test.mjs
+RUN node --test /opt/harness/extensions/credentials.test.mjs /opt/harness/extensions/durable-changes.test.mjs /opt/harness/extensions/api-file-pipeline.test.mjs
+RUN node --test /opt/harness/extensions/hosted-adapter.test.mjs /opt/harness/extensions/hosted-native.test.mjs /opt/harness/extensions/hosted-response.test.mjs
+RUN node --test /opt/harness/extensions/encrypted-sessions-store.test.mjs /opt/harness/extensions/encrypted-sessions.test.mjs
+RUN node --test /opt/harness/extensions/legacy-session-recovery.test.mjs /opt/harness/extensions/legacy-session-recovery-cli.test.mjs
+RUN node --test /opt/harness/extensions/request-image-cache.test.mjs
+RUN node --test /opt/harness/extensions/encrypted-images.test.mjs
+RUN node --test /opt/harness/extensions/generic-secretstream.test.mjs /opt/harness/extensions/encrypted-files.test.mjs /opt/harness/extensions/materialization-paths.test.mjs
+RUN node --test /opt/harness/extensions/encrypted-workspace.test.mjs
+RUN node --test /opt/harness/extensions/encrypted-export.test.mjs
+USER node
+WORKDIR /workspace
+ENV DSH_HOME=/home/node/.dsh DSH_TELEMETRY_DISABLED=1
+ENTRYPOINT ["node", "/opt/harness/entry.mjs"]

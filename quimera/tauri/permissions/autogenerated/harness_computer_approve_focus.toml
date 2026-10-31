@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-harness-computer-approve-focus"
+description = "Enables the harness_computer_approve_focus command without any pre-configured scope."
+commands.allow = ["harness_computer_approve_focus"]
+
+[[permission]]
+identifier = "deny-harness-computer-approve-focus"
+description = "Denies the harness_computer_approve_focus command without any pre-configured scope."
+commands.deny = ["harness_computer_approve_focus"]

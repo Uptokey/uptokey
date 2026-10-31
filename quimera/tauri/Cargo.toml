@@ -1,0 +1,60 @@
+[package]
+name = "uptokey_tauri"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.90"
+description = "Uptokey desktop shell (Tauri) — supervisor do proxy-local canônico"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "uptokey_tauri_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "uptokey_tauri"
+path = "src/main.rs"
+
+[features]
+# Set by the Harness bundle configuration, including installed shortcuts which
+# launch the executable without CLI arguments. The original shell stays opt-in
+# at build time by omitting this feature.
+harness-entry = []
+
+[dependencies]
+tauri = { version = "=2.12.5", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-notification = "=2.4.0"
+tauri-plugin-dialog = "=2.7.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+rand = "0.8"
+url = "2"
+zip = { version = "=4.6.1", default-features = false }
+tauri-plugin-opener = "=2.7.2"
+
+[target."cfg(windows)".dependencies]
+windows-sys-harness = { package = "windows-sys", version = "=0.61.2", features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_WindowsAndMessaging", "Win32_Security"] }
+windows-sys = { version = "0.52", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security", "Win32_UI_Shell"] }
+
+[target."cfg(unix)".dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+tauri-build = "=2.7.4"
+serde_json = "1"
+
+
+[profile.release]
+panic = "abort"
+strip = true
+lto = true
+codegen-units = 1
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tauri = { version = "=2.12.5", features = ["tray-icon"] }
+gio = "=0.18.4"
+glib = "=0.18.5"

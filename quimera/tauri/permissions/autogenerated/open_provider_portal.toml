@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-provider-portal"
+description = "Enables the open_provider_portal command without any pre-configured scope."
+commands.allow = ["open_provider_portal"]
+
+[[permission]]
+identifier = "deny-open-provider-portal"
+description = "Denies the open_provider_portal command without any pre-configured scope."
+commands.deny = ["open_provider_portal"]

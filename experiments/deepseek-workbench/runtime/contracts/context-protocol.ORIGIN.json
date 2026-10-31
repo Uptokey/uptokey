@@ -1,0 +1,16 @@
+{
+  "generatedAt": "2026-10-25T01:16:13.086Z",
+  "sourceParsersUnchanged": true,
+  "credentialsIncluded": false,
+  "sources": [
+    {
+      "path": "../../quimera/uptokey/uptokey-pwa/src/lib/workspace-context-link.ts",
+      "sha256": "d231155da37ed71bf36c11897ac20c9ad1b2ba5c6905ef63790f0bdc3b8a5910"
+    },
+    {
+      "path": "../../proxy/core/vendor/sync-contract/project-agent.js",
+      "sha256": "474cf8068ce41d3255e825bf5c3d5cf3103e703e79f92f6cff050526517ea6a1"
+    }
+  ],
+  "outputSha256": "a70360be5ca9f2145abf73acc317e62d9b4b1a442ea958d291332d36d54c030f"
+}
