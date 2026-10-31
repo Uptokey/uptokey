@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Builds a distribution candidate entirely in a staging tree under
 // workspace/output — never touching proxy/core/dist or any runtime in use.
-// Produces: two independent builds for byte-reproducibility comparison,
-// a deterministic tarball and a run manifest with hashes and provenance.
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, readdirSync, lstatSync } from "node:fs";
+// Produces a deterministic tarball and a run manifest. Default mode compares
+// two independent builds; --reuse-dist records artifact identity only.
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, readdirSync, lstatSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, basename } from "node:path";
@@ -56,16 +56,26 @@ function directoryDigest(directory) {
   return createHash("sha256").update(files.join("\n")).digest("hex");
 }
 
-/** Reject differing build bytes before staging or writing a releasable tarball. */
+const CORE_COMPONENTS = Object.freeze({
+  cliJs: "cli.js",
+  compositionWorkerJs: "composition-worker.js",
+  serviceSchemaWorkerJs: "service-schema-worker.js",
+  workspaceContextHelperJs: "workspace-context-helper.js",
+});
+
+function canonicalDirectory(directory) {
+  const path = realpathSync.native(directory);
+  return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
+/** Reject self-comparisons and differing bytes before staging a release candidate. */
 export function verifyCandidateReproducibility({ buildA, buildB, frontendA, frontendB }) {
-  const pairs = {
-    cliJs: [join(buildA, "cli.js"), join(buildB, "cli.js")],
-    compositionWorkerJs: [join(buildA, "composition-worker.js"), join(buildB, "composition-worker.js")],
-    serviceSchemaWorkerJs: [join(buildA, "service-schema-worker.js"), join(buildB, "service-schema-worker.js")],
-    workspaceContextHelperJs: [join(buildA, "workspace-context-helper.js"), join(buildB, "workspace-context-helper.js")],
-  };
-  const result = Object.fromEntries(Object.entries(pairs).map(([name, paths]) => {
-    const [a, b] = paths.map(sha256File);
+  const aliases = [];
+  if (canonicalDirectory(buildA) === canonicalDirectory(buildB)) aliases.push("core");
+  if (canonicalDirectory(frontendA) === canonicalDirectory(frontendB)) aliases.push("tuiFrontend");
+  if (aliases.length) throw new Error(`candidate_independent_build_directories_required:${aliases.join(",")}`);
+  const result = Object.fromEntries(Object.entries(CORE_COMPONENTS).map(([name, filename]) => {
+    const [a, b] = [buildA, buildB].map(directory => sha256File(join(directory, filename)));
     return [name, { a, b, identical: a === b }];
   }));
   const a = directoryDigest(frontendA), b = directoryDigest(frontendB);
@@ -73,6 +83,32 @@ export function verifyCandidateReproducibility({ buildA, buildB, frontendA, fron
   const differences = Object.keys(result).filter(name => !result[name].identical);
   if (differences.length) throw new Error(`candidate_build_not_reproducible:${differences.join(",")}`);
   return result;
+}
+
+/** Reused bytes provide identity evidence, never independent-build reproducibility. */
+export function candidateBuildEvidence(paths, { reuse = false } = {}) {
+  if (reuse) {
+    return {
+      evidenceMode: "reused_artifacts",
+      approach: "Existing core and frontend artifacts reused; identity digests only",
+      reusedArtifacts: {
+        core: {
+          directory: realpathSync.native(paths.buildA),
+          files: Object.fromEntries(Object.entries(CORE_COMPONENTS).map(([name, filename]) => [name, sha256File(join(paths.buildA, filename))])),
+        },
+        tuiFrontend: { directory: realpathSync.native(paths.frontendA), sha256: directoryDigest(paths.frontendA) },
+      },
+      byteIdentical: false,
+      caveat: "No independent builds were performed; these digests do not establish reproducibility.",
+    };
+  }
+  return {
+    evidenceMode: "independent_builds",
+    approach: "SOURCE_DATE_EPOCH fixed, same toolchain, two independent builds",
+    ...verifyCandidateReproducibility(paths),
+    byteIdentical: true,
+    caveat: "Byte identity is scoped to the same Node/zlib/Bun versions on this host.",
+  };
 }
 
 function assemblePackageRoot(distDir, frontendDir, packageRoot) {
@@ -117,8 +153,8 @@ function main() {
     const frontendOutA = reuseDist ? `reused:${frontendA}` : buildFrontendInto(frontendA);
     const frontendOutB = reuseDist ? `reused:${frontendB}` : buildFrontendInto(frontendB);
 
-    const reproducibility = verifyCandidateReproducibility({ buildA, buildB, frontendA, frontendB });
-    const buildReproducible = true;
+    const reproducibility = candidateBuildEvidence({ buildA, buildB, frontendA, frontendB }, { reuse: reuseDist !== null });
+    const buildReproducible = reproducibility.byteIdentical;
 
     const packageRoot = join(stage, "package-root");
     assemblePackageRoot(buildA, frontendA, packageRoot);
@@ -142,12 +178,7 @@ function main() {
       gitHead,
       coreVersion: pkg.version,
       buildInfo: buildInfo,
-      reproducibility: {
-        approach: "SOURCE_DATE_EPOCH fixed, same toolchain, two independent builds",
-        ...reproducibility,
-        byteIdentical: buildReproducible,
-        caveat: "Byte identity is scoped to the same Node/zlib/Bun versions on this host.",
-      },
+      reproducibility,
       tarball: {
         path: tarball,
         sha256: packed.sha256,

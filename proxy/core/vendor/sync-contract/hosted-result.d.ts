@@ -2,7 +2,8 @@ export type HostedCompletedResult = {status: "completed"; requestId: string; con
   chargedMicros: number; priceVersion: string; usage: {inputTokens: number; outputTokens: number; cachedInputTokens?: number};
   finishReason?: "stop" | "length" | "tool_calls";
   /** Present exactly when finishReason is "tool_calls"; the client executes them under its own approvals. */
-  toolCalls?: Array<{id: string; name: string; arguments: string}>};
+  toolCalls?: Array<{id: string; name: string; arguments: string}>;
+  providerReplay?: import('./hosted-provider-replay.js').HostedProviderReplay};
 export type HostedClientResult = HostedCompletedResult
   | {status: "outcome_unknown" | "reconciliation_required"; requestId: string}
   | {status: "already_submitted"; requestId: string; settlement: "reserved" | "settled"}

@@ -115,9 +115,18 @@ function macosReceipt(artifact, subjectSha256) {
 
 export function assertMacosKeychainEntitlements(entitlements, teamId) {
   const expected = `${teamId}.com.uptokey.proxy`;
-  const application = /<key>application-identifier<\/key>\s*<string>([^<]+)<\/string>/.exec(entitlements)?.[1];
+  // macOS uses the Apple-prefixed entitlement. A legacy alias cannot substitute
+  // for it or disagree with it; both retain the existing app/group identity.
+  const applications = [...entitlements.matchAll(/<key>com\.apple\.application-identifier<\/key>\s*<string>([^<]+)<\/string>/g)];
+  const aliases = [...entitlements.matchAll(/<key>application-identifier<\/key>\s*<string>([^<]+)<\/string>/g)];
   const group = /<key>keychain-access-groups<\/key>\s*<array>\s*<string>([^<]+)<\/string>\s*<\/array>/.exec(entitlements)?.[1];
-  if (application !== expected || group !== expected) throw new Error("macos_application_bound_keychain_entitlement_missing");
+  if (!/^[A-Z0-9]{10}$/.test(teamId) || applications.length !== 1 || applications[0][1] !== expected
+      || (entitlements.match(/<key>com\.apple\.application-identifier<\/key>/g) ?? []).length !== 1
+      || aliases.length > 1 || aliases.some(match => match[1] !== expected)
+      || (entitlements.match(/<key>application-identifier<\/key>/g) ?? []).length !== aliases.length
+      || (entitlements.match(/<key>keychain-access-groups<\/key>/g) ?? []).length !== 1 || group !== expected) {
+    throw new Error("macos_application_bound_keychain_entitlement_missing");
+  }
 }
 
 function linuxReceipt(artifact, subjectSha256, signature, keyring, expectedSigner) {

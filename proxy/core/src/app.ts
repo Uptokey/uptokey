@@ -150,6 +150,7 @@ const ACCOUNT_ROUTES = new Set(['capability','status','usage','available','reque
 const extensionPathAllowed = (path: string) => ACCOUNT_ROUTES.has(path) || ['/health', '/local/pair/challenge', '/local/pair/consume', '/local/status', '/local/client/rotate', '/local/client/revoke', '/local/workspace/session/challenge', '/local/workspace/session/complete', '/v1/models', '/v1/chat/completions'].includes(path) || path.startsWith('/v1/workspace/');
 const BROWSER_RESPONSE_HEADERS = 'x-uptokey-provider,x-uptokey-model,x-uptokey-fallback,x-uptokey-cache,x-uptokey-failed-provider,x-uptokey-switch-reason,x-uptokey-warnings,x-uptokey-cost-class,x-uptokey-cost-estimate-micros,x-request-id,x-provider-request-id';
 const LOCAL_UI_ORIGIN_PATHS = new Set(["/local/efficiency/preview", "/local/efficiency/cache/invalidate", "/local/efficiency/metrics", "/local/efficiency/policy", "/local/provider/save", "/local/provider/configure-optional", "/local/provider/revoke", "/local/client/provision", "/local/client/revoke", "/local/ui/status", "/v1/chat/completions", "/v1/messages", "/v1/responses", "/v1/models", "/v1/sources/search", "/v1/usage", "/v1/usage/estimation", "/v1/connections", "/v1/local-models", "/v1/local-models/install", "/local/client-keys", "/local/openrouter/management/keys", "/local/openrouter/management/config", "/local/openrouter/credits", "/local/remote-access/discover", "/local/remote-access/plan", "/local/remote-access/start", "/local/remote-access/stop", "/local/remote-access/observe", "/local/remote-access/revoke", "/local/remote-access/grants", "/v1/completions", "/v1/messages/count_tokens"]);
+LOCAL_UI_ORIGIN_PATHS.add('/local/workspace/session/context/key');
 for(const path of ['/local/provider/setup/presets','/local/provider/setup/prepare','/local/provider/setup/commit','/local/provider/setup/dispose','/local/provider/credits'])LOCAL_UI_ORIGIN_PATHS.add(path);
 // E2-03 dynamic local routes (client-keys CRUD + OpenRouter management) share the
 // loopback UI origin policy; exact path is checked by matchLocalRoute below.
@@ -167,6 +168,7 @@ const LOCAL_ROUTE_METHODS = new Map<string, "GET" | "POST">([
   ["/v1/sources/search", "POST"], ["/v1/usage", "GET"], ["/v1/usage/estimation", "GET"],
   ["/health", "GET"], ["/v1/connections", "GET"], ["/v1/local-models", "GET"],
   ["/local/pair/challenge", "POST"], ["/local/pair/approve", "POST"], ["/local/pair/consume", "POST"],
+  ["/local/workspace/session/context/key", "POST"],
   ["/local/control-pair/approve", "POST"], ["/local/control-pair/revoke", "POST"],
   ["/local/config/reload", "POST"], ["/local/update/authorize-stop", "POST"],
   ["/local/cache/invalidate/groq", "POST"], ["/local/cache/invalidate/gemini", "POST"], ["/local/cache/invalidate/ollama", "POST"], ["/local/cache/invalidate/vllm", "POST"], ["/local/cache/invalidate/custom", "POST"], ["/local/cache/invalidate/deepseek", "POST"], ["/local/cache/invalidate/mistral", "POST"], ["/local/cache/invalidate/cerebras", "POST"], ["/local/cache/invalidate/together", "POST"], ["/local/cache/invalidate/anthropic", "POST"], ["/local/cache/invalidate/openrouter", "POST"],
@@ -183,6 +185,7 @@ const LOCAL_ROUTE_METHODS = new Map<string, "GET" | "POST">([
 ]);
 const LOCAL_JSON_ROUTES = new Set(["/local/efficiency/preview", "/local/efficiency/policy", "/local/efficiency/cache/invalidate", 
   "/local/pair/challenge", "/local/pair/approve", "/local/pair/consume", "/local/control-pair/approve",
+  "/local/workspace/session/context/key",
   "/local/update/authorize-stop", "/local/client/provision", "/local/client/revoke", "/local/client/rotate", "/local/provider/save", "/local/provider/configure-optional", "/local/provider/revoke", "/v1/chat/completions", "/v1/messages", "/v1/responses", "/v1/sources/search", "/v1/local-models/install",
   "/local/remote-access/plan", "/local/remote-access/start", "/local/remote-access/stop", "/local/remote-access/revoke",
   "/v1/completions", "/v1/messages/count_tokens"
@@ -1766,6 +1769,13 @@ export function createApp(
       if (!workspaceStore) throw new ContextLinkError('context_not_owned',404);
       await workspaceStore.getProject(owner,id);
     });
+  app.post('/local/workspace/session/context/key',async c=>{
+    await combinedReady;
+    if (!pairingRateLimiter.take('workspace-context-key',10,60_000).ok) return c.json({error:{type:'local_auth_rate_limited'}},429);
+    const parsed = await readBoundedJson(c.req.raw,MAX_LOCAL_CONTROL_REQUEST_BYTES);
+    if (!parsed.ok || !hasExactKeys(parsed.value,['publicJwk','signature'])) return c.json({error:{type:'context_link_invalid_request'}},400);
+    return c.json(await contextLinks.enrollRecipientKey(c.req.header('authorization'),parsed.value.publicJwk,parsed.value.signature));
+  });
   app.get('/local/workspace/session/context',async c=>c.json(await contextLinks.status(c.req.header('authorization'))));
   app.get('/local/workspace/session/context/owned',async c=>{
     await combinedReady;
@@ -2150,14 +2160,32 @@ export function createApp(
         if(!(await authorizeClientKeyManagement(c.req.header('origin'),header,secrets,authRateLimiter)).allowed)return null;
         const token=parseLocalBearer(header),resolved=await resolveBearer(secrets,token);
         if(!resolved.ok||resolved.resolved.delegation)return null;
-        return createHash('sha256').update(JSON.stringify([token,resolved.resolved.policy??null,resolved.resolved.registration??null,identityEpoch?.()??null])).digest('hex');
+        return 'manage:'+createHash('sha256').update(JSON.stringify([token,resolved.resolved.policy??null,resolved.resolved.registration??null,identityEpoch?.()??null])).digest('hex');
+    };
+    const providerSetupAuthority = async (c: Context): Promise<string|null> => {
+        if(identityEpochMismatch(config,identityEpoch?.()))return null;
+        const token=parseLocalBearer(c.req.header('authorization'));
+        if(token){
+          const resolved=await resolveBearer(secrets,token);
+          if(resolved.ok&&resolved.resolved.kind==='client'&&!resolved.resolved.delegation){
+            const registration=resolved.resolved.registration,policy=resolved.resolved.policy;
+            if(registration?.audience==='tauri'&&registration.enrolledVia==='pairing'&&registration.projects==='*'
+              &&policy&&policy.retentionMode!=='ephemeral'&&policy.expiresAt===null
+              &&policy.projectIds.length===0&&policy.providerIds.length===0&&policy.modelIds.length===0
+              &&(!policy.limits||Object.keys(policy.limits).length===0)
+              &&policy.scopes.includes('models:read')&&policy.scopes.includes('inference:chat')){
+              return 'refresh:'+createHash('sha256').update(JSON.stringify([token,policy,registration,identityEpoch?.()??null])).digest('hex');
+            }
+          }
+        }
+        return providerManagementAuthority(c);
     };
     const providerManagementRate = (key:string,limit:number,windowMs:number) => {const decision=pairingRateLimiter.take(key,limit,windowMs);return decision.ok?{ok:true,retryAfter:0}:decision;};
     registerProviderSetupRoutes(app, {
       secrets,profiles:profileService,getConfig:()=>config,persist:persistRuntimeConfig,
       invalidate:provider=>router.invalidateProviderCache(provider),fetchImpl:connectionServices?.fetchImpl,
       ...(connectionServices?.now?{now:connectionServices.now}:{}),
-      checkRate:providerManagementRate,authority:providerManagementAuthority,
+      checkRate:providerManagementRate,authority:providerSetupAuthority,
     });
     registerProviderCreditRoutes(app,{profiles:profileService,getConfig:()=>config,authority:providerManagementAuthority,checkRate:providerManagementRate,fetchImpl:connectionServices?.fetchImpl});
     if(config.efficiencyPolicy)setActiveEfficiencyPolicy(config.efficiencyPolicy);else ensureDefaultEfficiencyPolicy();

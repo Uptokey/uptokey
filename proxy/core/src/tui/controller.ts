@@ -2941,7 +2941,7 @@ export class TuiController extends EventEmitter {
       check();
       for await (const event of this.client.chatStream(model, [{ role: "user", content: prompt }], conversationId, processingPolicy, abort.signal, destination)) {
         check();
-        if (event.type === "hosted_receipt") await this.conversations.appendAtTip(conversationId, "assistant", [{ type: "status", text: `hosted:v1 ${JSON.stringify({ ...JSON.parse(event.data), destination: destination.hosted })}` }], `${destination.hostedRequestId}:result`, undefined, check).catch(() => undefined);
+        if (event.type === "hosted_receipt") {const {providerReplay,...receipt}=JSON.parse(event.data);await this.conversations.appendAtTip(conversationId, "assistant", [{ type: "status", text: `hosted:v1 ${JSON.stringify({ ...receipt, destination: destination.hosted })}` }], `${destination.hostedRequestId}:result`, undefined, check).catch(() => undefined);}
         check();
         if (event.type === "text") summary += event.data;
         if (event.type === "done") break;

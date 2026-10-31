@@ -12,8 +12,9 @@ import { readBoundedJson } from "@uptokey/sync-contract/limits";
 import { isProvider } from "../provider-registry.ts";
 import { inferenceFetch } from "../streaming-transport.ts";
 import { MAX_INFERENCE_REQUEST_BYTES } from "@uptokey/sync-contract/limits";
+import { readAccountConnectionResponse, readAccountLoginResponse } from "@uptokey/sync-contract/account-native";
 import type { MediaDispatchPart } from "./media-input.ts";
-import { ACCOUNT_ID, ACCOUNT_MAX_RESPONSE_BYTES, ACCOUNT_MAX_CLIENT_RESPONSE_BYTES, readAccountPublicSession, readAccountPublicUsage, readAccountAvailable, readAccountAdoption, readAccountShareChallenge, readAccountShareRequests, readAccountShareApproval, type AccountPublicSession, type AccountPublicUsage, type AccountAvailable, type AccountAdoption, type AccountShareChallenge, type AccountShareRequest } from "../account-login-protocol.ts";
+import { ACCOUNT_MAX_RESPONSE_BYTES, ACCOUNT_MAX_CLIENT_RESPONSE_BYTES, readAccountPublicSession, readAccountPublicUsage, readAccountAvailable, readAccountAdoption, readAccountShareChallenge, readAccountShareRequests, readAccountShareApproval, type AccountPublicSession, type AccountPublicUsage, type AccountAvailable, type AccountAdoption, type AccountShareChallenge, type AccountShareRequest } from "../account-login-protocol.ts";
 import { HOSTED_PROVIDER, validateHostedDestination, loadHostedModels, hostedInput, sendHosted, getHostedReceipt, type TuiHostedDestination } from "./hosted.ts";
 import { readAccountPlan, type AccountPlan } from "./account-plan.ts";
 
@@ -284,7 +285,7 @@ export class TuiClient extends EventEmitter {
     if (destination.providerId !== undefined && !isProvider(destination.providerId)) throw new Error("tui_provider_invalid");
     if (destination.routingComboId !== undefined && (!destination.providerId || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(destination.routingComboId))) throw new Error("tui_routing_combo_invalid");
     // Ask for the provider's own usage frame; absence is recorded as unavailable, never as zero.
-    const body: Record<string, unknown> = { model, messages, stream: true, stream_options: { include_usage: true } };
+    const body: Record<string, unknown> = { model, messages:messages.map(message=>{const {providerReplay,providerReplayModelId,...rest}=message as typeof message & {providerReplay?:unknown;providerReplayModelId?:unknown};return rest;}), stream: true, stream_options: { include_usage: true } };
     const media = messages.flatMap(message => Array.isArray(message.content) ? message.content : []);
     const required = [...new Set(media.flatMap(part => part.type === "image_url" ? ["image"] : part.type === "input_audio" ? ["audio"] : []))];
     if (required.length) body.uptokey_require_input = required;
@@ -339,13 +340,8 @@ export class TuiClient extends EventEmitter {
   }
 
   async startAccountLogin(signal?: AbortSignal): Promise<TuiAccountLogin> {
-    const row = await this.accountRequest("login", {}, signal);
-    if (row.session !== undefined) return { session: readAccountPublicSession(row.session) };
-    if (typeof row.loginUrl !== "string" || typeof row.userCode !== "string" || !/^[A-Z0-9]{8}$/.test(row.userCode) || !Number.isSafeInteger(row.expiresAt) || Number(row.expiresAt) <= Date.now() || Number(row.expiresAt) > Date.now() + 6 * 60_000) throw new Error("account_response_invalid");
-    let url: URL;
-    try { url = new URL(row.loginUrl); } catch { throw new Error("account_response_invalid"); }
-    if (url.username || url.password || url.hash || url.pathname !== "/api/account/native/authorize" || [...url.searchParams.keys()].length !== 1 || !ACCOUNT_ID.test(url.searchParams.get("id") ?? "") || url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw new Error("account_response_invalid");
-    return { loginUrl: url.href, userCode: row.userCode, expiresAt: Number(row.expiresAt) };
+    const row = readAccountLoginResponse(await this.accountRequest("login", {}, signal));
+    return "session" in row ? { session: readAccountPublicSession(row.session) } : row;
   }
 
   async adoptAccount(accountRef: string, expectedRevision: number, signal?: AbortSignal): Promise<TuiAccountMutation> {
@@ -353,12 +349,7 @@ export class TuiClient extends EventEmitter {
   }
 
   async getAccountConnection(signal?: AbortSignal): Promise<TuiAccountConnection> {
-    const row = await this.accountRequest("login", { purpose: "hosted-admission" }, signal);
-    if (Object.keys(row).sort().join(",") !== "expiresAt,loginUrl" || typeof row.loginUrl !== "string" || !Number.isSafeInteger(row.expiresAt) || Number(row.expiresAt) <= Date.now()) throw Error("account_response_invalid");
-    let url: URL;
-    try { url = new URL(row.loginUrl); } catch { throw Error("account_response_invalid"); }
-    if (url.username || url.password || url.hash || url.pathname !== "/api/account/native/authorize" || [...url.searchParams.keys()].length !== 1 || !ACCOUNT_ID.test(url.searchParams.get("id") ?? "") || url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw Error("account_response_invalid");
-    return { loginUrl: url.href, expiresAt: Number(row.expiresAt) };
+    return readAccountConnectionResponse(await this.accountRequest("login", { purpose: "hosted-admission" }, signal));
   }
 
   async unlinkAccount(expectedRevision: number, signal?: AbortSignal): Promise<TuiAccountMutation> {
@@ -410,7 +401,7 @@ export class TuiClient extends EventEmitter {
       if (!destination.hostedRequestId) throw Error("hosted_request_not_recorded");
       const result = await sendHosted(this.fetchRaw.bind(this), destination.hosted, destination.hostedRequestId, messages as never, processingPolicy, signal, tools);
       yield { type: "hosted_receipt", data: JSON.stringify({ requestId: result.requestId, state: result.status,
-        ...(result.status === "completed" ? { chargedMicros: result.chargedMicros, priceVersion: result.priceVersion, usage: result.usage } : {}) }) };
+        ...(result.status === "completed" ? { chargedMicros: result.chargedMicros, priceVersion: result.priceVersion, usage: result.usage,...(result.providerReplay?{providerReplay:result.providerReplay}:{}) } : {}) }) };
       if (result.status !== "completed") throw Object.assign(Error(result.status === "rejected" ? result.error : `hosted_${result.status}`), { requestId: result.requestId });
       if (result.content) yield { type: "text", data: result.content };
       // Proposed calls enter the same native loop as any provider's: executed locally, under approvals, with receipts.

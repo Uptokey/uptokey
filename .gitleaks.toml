@@ -27,3 +27,22 @@ condition = "AND"
 regexTarget = "line"
 paths = ['''proxy/core/src/tui/messages/(?:de|es|it)\.ts$''']
 regexes = ['''PgUp/PgDn''']
+
+# Root-reviewed exact public metadata, bound by rule, path, and literal.
+
+[[allowlists]]
+description = "Deterministic idempotency-key test input, not authentication"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ["(?:^|/)proxy/contratos/test/settings\\.test\\.mjs$"]
+regexes = ["^12345678-purge$"]
+
+[[allowlists]]
+description = "Public Anthropic protocol-version header, not authentication"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ["(?:^|/)proxy/integracoes/9router/app/open-sse/providers/shared\\.js$"]
+regexes = ["^interleaved-thinking-2025-05-14$"]
+

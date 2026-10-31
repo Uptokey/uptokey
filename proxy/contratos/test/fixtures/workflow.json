@@ -1,0 +1,799 @@
+{
+  "notice": "Synthetic fixture only. No live calls or actual market prices.",
+  "capabilities": [
+    {
+      "schemaVersion": 1,
+      "id": "sources.crossref.search",
+      "createdAt": "2026-09-16T12:00:00.000Z",
+      "version": 1,
+      "titleKey": "workflow.sources.crossref.search.title",
+      "descriptionKey": "workflow.sources.crossref.search.description",
+      "tags": [
+        "research"
+      ],
+      "inputSchemaId": "sources.crossref.search.input.v1",
+      "outputSchemaId": "sources.crossref.search.output.v1",
+      "effect": "read_external",
+      "dataDestination": {
+        "kind": "public_source",
+        "id": "crossref"
+      },
+      "availability": "executable",
+      "supportLevel": "experimental",
+      "requiredScopes": [
+        "run:execute"
+      ],
+      "retryClass": "read_only",
+      "limits": {
+        "maxSteps": 12,
+        "maxCalls": 12,
+        "maxOutputTokens": 4096,
+        "timeoutMs": 120000,
+        "maxOutputBytes": 1048576
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "sources.open-library.search",
+      "createdAt": "2026-09-16T12:00:00.000Z",
+      "version": 1,
+      "titleKey": "workflow.sources.open-library.search.title",
+      "descriptionKey": "workflow.sources.open-library.search.description",
+      "tags": [
+        "research"
+      ],
+      "inputSchemaId": "sources.open-library.search.input.v1",
+      "outputSchemaId": "sources.open-library.search.output.v1",
+      "effect": "read_external",
+      "dataDestination": {
+        "kind": "public_source",
+        "id": "open-library"
+      },
+      "availability": "executable",
+      "supportLevel": "experimental",
+      "requiredScopes": [
+        "run:execute"
+      ],
+      "retryClass": "read_only",
+      "limits": {
+        "maxSteps": 12,
+        "maxCalls": 12,
+        "maxOutputTokens": 4096,
+        "timeoutMs": 120000,
+        "maxOutputBytes": 1048576
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "inference.report",
+      "createdAt": "2026-09-16T12:00:00.000Z",
+      "version": 1,
+      "titleKey": "workflow.inference.report.title",
+      "descriptionKey": "workflow.inference.report.description",
+      "tags": [
+        "research"
+      ],
+      "inputSchemaId": "inference.report.input.v1",
+      "outputSchemaId": "inference.report.output.v1",
+      "effect": "inference",
+      "dataDestination": {
+        "kind": "provider",
+        "id": "configured-provider"
+      },
+      "availability": "executable",
+      "supportLevel": "experimental",
+      "requiredScopes": [
+        "run:execute"
+      ],
+      "retryClass": "never_automatic",
+      "limits": {
+        "maxSteps": 12,
+        "maxCalls": 12,
+        "maxOutputTokens": 4096,
+        "timeoutMs": 120000,
+        "maxOutputBytes": 1048576
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "artifacts.markdown.create",
+      "createdAt": "2026-09-16T12:00:00.000Z",
+      "version": 1,
+      "titleKey": "workflow.artifacts.markdown.create.title",
+      "descriptionKey": "workflow.artifacts.markdown.create.description",
+      "tags": [
+        "research"
+      ],
+      "inputSchemaId": "artifacts.markdown.create.input.v1",
+      "outputSchemaId": "artifacts.markdown.create.output.v1",
+      "effect": "produce_artifact",
+      "dataDestination": {
+        "kind": "local",
+        "id": "project-store"
+      },
+      "availability": "executable",
+      "supportLevel": "experimental",
+      "requiredScopes": [
+        "run:execute"
+      ],
+      "retryClass": "idempotent_local",
+      "limits": {
+        "maxSteps": 12,
+        "maxCalls": 12,
+        "maxOutputTokens": 4096,
+        "timeoutMs": 120000,
+        "maxOutputBytes": 1048576
+      }
+    }
+  ],
+  "project": {
+    "schemaVersion": 1,
+    "id": "project_demo",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "ownerPrincipalId": "principal_demo",
+    "revision": 1,
+    "name": "Research demo",
+    "goal": "Create a sourced report",
+    "constraints": [
+      "Use selected public sources only"
+    ],
+    "entries": [
+      {
+        "id": "entry_goal",
+        "kind": "decision",
+        "origin": "user",
+        "content": "Produce a short Markdown report.",
+        "sourceRefs": [],
+        "status": "confirmed",
+        "createdAt": "2026-09-16T12:00:00.000Z",
+        "supersedes": null
+      }
+    ],
+    "sources": [],
+    "artifactRefs": [],
+    "updatedAt": "2026-09-16T12:00:00.000Z"
+  },
+  "snapshot": {
+    "schemaVersion": 1,
+    "id": "snapshot_demo",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "projectId": "project_demo",
+    "projectRevision": 1,
+    "entries": [
+      {
+        "id": "entry_goal",
+        "sha256": "6b1774a208e5681ae6c6e85a33345bb58495969ed54a48b91b90b26105e7b9ae"
+      }
+    ],
+    "artifacts": [],
+    "sourceRefs": [],
+    "allowedDestinations": [
+      {
+        "kind": "public_source",
+        "id": "crossref"
+      },
+      {
+        "kind": "public_source",
+        "id": "open-library"
+      },
+      {
+        "kind": "provider",
+        "id": "configured-provider"
+      },
+      {
+        "kind": "local",
+        "id": "project-store"
+      }
+    ],
+    "maxContextBytes": 64000,
+    "excludedEntryIds": []
+  },
+  "plan": {
+    "schemaVersion": 1,
+    "id": "plan_demo",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "projectId": "project_demo",
+    "projectRevision": 1,
+    "contextSnapshotId": "snapshot_demo",
+    "contextSnapshotDigest": "f7301d397879504cc2cc500c905e3732a27c137221c1f13a068f8581e85886b0",
+    "steps": [
+      {
+        "id": "search_papers",
+        "capabilityId": "sources.crossref.search",
+        "capabilityVersion": 1,
+        "arguments": {
+          "query": {
+            "kind": "literal",
+            "value": "open knowledge"
+          }
+        }
+      },
+      {
+        "id": "search_books",
+        "capabilityId": "sources.open-library.search",
+        "capabilityVersion": 1,
+        "arguments": {
+          "query": {
+            "kind": "literal",
+            "value": "open knowledge"
+          }
+        }
+      },
+      {
+        "id": "write_report",
+        "capabilityId": "inference.report",
+        "capabilityVersion": 1,
+        "arguments": {
+          "papers": {
+            "kind": "step_output",
+            "stepId": "search_papers",
+            "output": "records"
+          },
+          "books": {
+            "kind": "step_output",
+            "stepId": "search_books",
+            "output": "records"
+          }
+        }
+      },
+      {
+        "id": "save_report",
+        "capabilityId": "artifacts.markdown.create",
+        "capabilityVersion": 1,
+        "arguments": {
+          "content": {
+            "kind": "step_output",
+            "stepId": "write_report",
+            "output": "text"
+          }
+        }
+      }
+    ],
+    "limits": {
+      "maxSteps": 12,
+      "maxCalls": 12,
+      "maxOutputTokens": 4096,
+      "timeoutMs": 120000,
+      "maxOutputBytes": 1048576
+    },
+    "digest": "7102ddd64604628313ace2deee715878f1852211558e4bbce92a971dcbdda412"
+  },
+  "grant": {
+    "schemaVersion": 1,
+    "id": "grant_demo",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "principalId": "principal_demo",
+    "projectId": "project_demo",
+    "revision": 1,
+    "scopes": [
+      "project:read",
+      "project:write",
+      "plan:create",
+      "run:execute",
+      "run:cancel",
+      "artifact:read",
+      "recipe:write"
+    ],
+    "capabilityIds": [
+      "sources.crossref.search",
+      "sources.open-library.search",
+      "inference.report",
+      "artifacts.markdown.create"
+    ],
+    "destinations": [
+      {
+        "kind": "public_source",
+        "id": "crossref"
+      },
+      {
+        "kind": "public_source",
+        "id": "open-library"
+      },
+      {
+        "kind": "provider",
+        "id": "configured-provider"
+      },
+      {
+        "kind": "local",
+        "id": "project-store"
+      }
+    ],
+    "limits": {
+      "maxSteps": 12,
+      "maxCalls": 12,
+      "maxOutputTokens": 4096,
+      "timeoutMs": 120000,
+      "maxOutputBytes": 1048576
+    },
+    "expiresAt": "2026-09-17T12:00:00.000Z",
+    "revokedAt": null
+  },
+  "run": {
+    "schemaVersion": 1,
+    "id": "run_demo",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "projectId": "project_demo",
+    "principalId": "principal_demo",
+    "planId": "plan_demo",
+    "planDigest": "7102ddd64604628313ace2deee715878f1852211558e4bbce92a971dcbdda412",
+    "policyRevision": 1,
+    "requestId": "request_demo",
+    "status": "succeeded",
+    "stepStates": [
+      {
+        "stepId": "search_papers",
+        "status": "succeeded",
+        "attemptIds": [
+          "attempt_search_papers"
+        ],
+        "receiptIds": [
+          "receipt_search_papers"
+        ]
+      },
+      {
+        "stepId": "search_books",
+        "status": "succeeded",
+        "attemptIds": [
+          "attempt_search_books"
+        ],
+        "receiptIds": [
+          "receipt_search_books"
+        ]
+      },
+      {
+        "stepId": "write_report",
+        "status": "succeeded",
+        "attemptIds": [
+          "attempt_write_report"
+        ],
+        "receiptIds": [
+          "receipt_write_report"
+        ]
+      },
+      {
+        "stepId": "save_report",
+        "status": "succeeded",
+        "attemptIds": [
+          "attempt_save_report"
+        ],
+        "receiptIds": [
+          "receipt_save_report"
+        ]
+      }
+    ],
+    "updatedAt": "2026-09-16T12:00:10.000Z",
+    "finishedAt": "2026-09-16T12:00:10.000Z"
+  },
+  "receipts": [
+    {
+      "schemaVersion": 1,
+      "id": "receipt_search_papers",
+      "createdAt": "2026-09-16T12:00:00.000Z",
+      "projectId": "project_demo",
+      "runId": "run_demo",
+      "stepId": "search_papers",
+      "attemptId": "attempt_search_papers",
+      "capabilityId": "sources.crossref.search",
+      "capabilityVersion": 1,
+      "status": "succeeded",
+      "startedAt": "2026-09-16T12:00:00.000Z",
+      "finishedAt": "2026-09-16T12:00:10.000Z",
+      "inputArtifactRefs": [],
+      "outputArtifactRefs": [],
+      "sources": [
+        {
+          "id": "source_paper",
+          "sourceId": "crossref",
+          "externalId": "fixture-paper",
+          "title": "Synthetic research record",
+          "url": "https://example.org/paper",
+          "retrievedAt": "2026-09-16T12:00:00.000Z",
+          "receiptId": "receipt_search_papers"
+        }
+      ],
+      "errorCode": null,
+      "usage": {
+        "basis": "unknown",
+        "inputTokens": null,
+        "outputTokens": null,
+        "cachedInputTokens": null
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "receipt_search_books",
+      "createdAt": "2026-09-16T12:00:00.000Z",
+      "projectId": "project_demo",
+      "runId": "run_demo",
+      "stepId": "search_books",
+      "attemptId": "attempt_search_books",
+      "capabilityId": "sources.open-library.search",
+      "capabilityVersion": 1,
+      "status": "succeeded",
+      "startedAt": "2026-09-16T12:00:00.000Z",
+      "finishedAt": "2026-09-16T12:00:10.000Z",
+      "inputArtifactRefs": [],
+      "outputArtifactRefs": [],
+      "sources": [
+        {
+          "id": "source_book",
+          "sourceId": "open-library",
+          "externalId": "fixture-book",
+          "title": "Synthetic book record",
+          "url": "https://example.org/book",
+          "retrievedAt": "2026-09-16T12:00:00.000Z",
+          "receiptId": "receipt_search_books"
+        }
+      ],
+      "errorCode": null,
+      "usage": {
+        "basis": "unknown",
+        "inputTokens": null,
+        "outputTokens": null,
+        "cachedInputTokens": null
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "receipt_write_report",
+      "createdAt": "2026-09-16T12:00:00.000Z",
+      "projectId": "project_demo",
+      "runId": "run_demo",
+      "stepId": "write_report",
+      "attemptId": "attempt_write_report",
+      "capabilityId": "inference.report",
+      "capabilityVersion": 1,
+      "status": "succeeded",
+      "startedAt": "2026-09-16T12:00:00.000Z",
+      "finishedAt": "2026-09-16T12:00:10.000Z",
+      "inputArtifactRefs": [],
+      "outputArtifactRefs": [],
+      "sources": [],
+      "errorCode": null,
+      "usage": {
+        "basis": "provider_reported",
+        "inputTokens": 1000000,
+        "outputTokens": 200000,
+        "cachedInputTokens": 0
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "receipt_save_report",
+      "createdAt": "2026-09-16T12:00:00.000Z",
+      "projectId": "project_demo",
+      "runId": "run_demo",
+      "stepId": "save_report",
+      "attemptId": "attempt_save_report",
+      "capabilityId": "artifacts.markdown.create",
+      "capabilityVersion": 1,
+      "status": "succeeded",
+      "startedAt": "2026-09-16T12:00:00.000Z",
+      "finishedAt": "2026-09-16T12:00:10.000Z",
+      "inputArtifactRefs": [],
+      "outputArtifactRefs": [
+        "artifact_report"
+      ],
+      "sources": [],
+      "errorCode": null,
+      "usage": {
+        "basis": "unknown",
+        "inputTokens": null,
+        "outputTokens": null,
+        "cachedInputTokens": null
+      }
+    }
+  ],
+  "artifact": {
+    "schemaVersion": 1,
+    "id": "artifact_report",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "projectId": "project_demo",
+    "runId": "run_demo",
+    "version": 1,
+    "mediaType": "text/markdown",
+    "filename": "report.md",
+    "byteLength": 59,
+    "sha256": "401833790564f1103b515f234120bb32aab4511b08eaeb2ec26b22691ea89d62",
+    "receiptRefs": [
+      "receipt_search_papers",
+      "receipt_search_books",
+      "receipt_write_report",
+      "receipt_save_report"
+    ],
+    "sourceRefs": [
+      "source_paper",
+      "source_book"
+    ]
+  },
+  "artifactContent": "# Synthetic report\n\nFixture content, not a model response.\n",
+  "recipe": {
+    "schemaVersion": 1,
+    "id": "recipe_demo",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "version": 1,
+    "title": "Repeat sourced research",
+    "description": "Synthetic example",
+    "parameters": [
+      {
+        "name": "topic",
+        "type": "string",
+        "required": true
+      }
+    ],
+    "steps": [
+      {
+        "id": "search_papers",
+        "capabilityId": "sources.crossref.search",
+        "capabilityVersion": 1,
+        "arguments": {
+          "query": {
+            "kind": "parameter",
+            "parameter": "topic"
+          }
+        }
+      },
+      {
+        "id": "search_books",
+        "capabilityId": "sources.open-library.search",
+        "capabilityVersion": 1,
+        "arguments": {
+          "query": {
+            "kind": "parameter",
+            "parameter": "topic"
+          }
+        }
+      },
+      {
+        "id": "write_report",
+        "capabilityId": "inference.report",
+        "capabilityVersion": 1,
+        "arguments": {
+          "papers": {
+            "kind": "step_output",
+            "stepId": "search_papers",
+            "output": "records"
+          },
+          "books": {
+            "kind": "step_output",
+            "stepId": "search_books",
+            "output": "records"
+          }
+        }
+      },
+      {
+        "id": "save_report",
+        "capabilityId": "artifacts.markdown.create",
+        "capabilityVersion": 1,
+        "arguments": {
+          "content": {
+            "kind": "step_output",
+            "stepId": "write_report",
+            "output": "text"
+          }
+        }
+      }
+    ],
+    "limits": {
+      "maxSteps": 12,
+      "maxCalls": 12,
+      "maxOutputTokens": 4096,
+      "timeoutMs": 120000,
+      "maxOutputBytes": 1048576
+    },
+    "expectedOutputs": [
+      "report.markdown"
+    ]
+  },
+  "tariff": {
+    "schemaVersion": 1,
+    "id": "tariff_demo",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "version": 1,
+    "provider": "configured-provider",
+    "model": "synthetic-model",
+    "accessMode": "byok",
+    "currency": "USD",
+    "unit": "million_tokens",
+    "inputMicrosPerMillion": "200000",
+    "outputMicrosPerMillion": "800000",
+    "cachedInputMicrosPerMillion": null,
+    "sourceUrl": "https://example.org/synthetic-prices",
+    "checkedAt": "2026-09-16T12:00:00.000Z",
+    "validFrom": "2026-09-16T12:00:00.000Z",
+    "validUntil": null,
+    "comparisonBasis": "same_service"
+  },
+  "valueReceipt": {
+    "schemaVersion": 1,
+    "id": "value_demo",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "projectId": "project_demo",
+    "runId": "run_demo",
+    "stepId": "write_report",
+    "attemptId": "attempt_write_report",
+    "provider": "configured-provider",
+    "model": "synthetic-model",
+    "accessMode": "byok",
+    "cache": "none",
+    "usage": {
+      "basis": "provider_reported",
+      "inputTokens": 1000000,
+      "outputTokens": 200000,
+      "cachedInputTokens": 0
+    },
+    "tariffId": "tariff_demo",
+    "tariffVersion": 1,
+    "referenceValue": {
+      "numeratorMicros": "360000000000",
+      "denominator": "1000000"
+    },
+    "estimatedProviderCharge": null,
+    "confirmedUptokeyCharge": {
+      "numeratorMicros": "0",
+      "denominator": "1"
+    },
+    "coverage": "included"
+  },
+  "updatedProject": {
+    "schemaVersion": 1,
+    "id": "project_demo",
+    "createdAt": "2026-09-16T12:00:00.000Z",
+    "ownerPrincipalId": "principal_demo",
+    "revision": 2,
+    "name": "Research demo",
+    "goal": "Create a sourced report",
+    "constraints": [
+      "Use selected public sources only"
+    ],
+    "entries": [
+      {
+        "id": "entry_goal",
+        "kind": "decision",
+        "origin": "user",
+        "content": "Produce a short Markdown report.",
+        "sourceRefs": [],
+        "status": "confirmed",
+        "createdAt": "2026-09-16T12:00:00.000Z",
+        "supersedes": null
+      }
+    ],
+    "sources": [
+      {
+        "id": "source_paper",
+        "sourceId": "crossref",
+        "externalId": "fixture-paper",
+        "title": "Synthetic research record",
+        "url": "https://example.org/paper",
+        "retrievedAt": "2026-09-16T12:00:00.000Z",
+        "receiptId": "receipt_search_papers"
+      },
+      {
+        "id": "source_book",
+        "sourceId": "open-library",
+        "externalId": "fixture-book",
+        "title": "Synthetic book record",
+        "url": "https://example.org/book",
+        "retrievedAt": "2026-09-16T12:00:00.000Z",
+        "receiptId": "receipt_search_books"
+      }
+    ],
+    "artifactRefs": [
+      "artifact_report"
+    ],
+    "updatedAt": "2026-09-16T12:00:10.000Z"
+  },
+  "nextSnapshot": {
+    "schemaVersion": 1,
+    "id": "snapshot_update",
+    "createdAt": "2026-09-16T12:00:10.000Z",
+    "projectId": "project_demo",
+    "projectRevision": 2,
+    "entries": [
+      {
+        "id": "entry_goal",
+        "sha256": "6b1774a208e5681ae6c6e85a33345bb58495969ed54a48b91b90b26105e7b9ae"
+      }
+    ],
+    "artifacts": [
+      {
+        "id": "artifact_report",
+        "sha256": "401833790564f1103b515f234120bb32aab4511b08eaeb2ec26b22691ea89d62"
+      }
+    ],
+    "sourceRefs": [
+      "source_paper",
+      "source_book"
+    ],
+    "allowedDestinations": [
+      {
+        "kind": "public_source",
+        "id": "crossref"
+      },
+      {
+        "kind": "public_source",
+        "id": "open-library"
+      },
+      {
+        "kind": "provider",
+        "id": "configured-provider"
+      },
+      {
+        "kind": "local",
+        "id": "project-store"
+      }
+    ],
+    "maxContextBytes": 64000,
+    "excludedEntryIds": []
+  },
+  "updatePlan": {
+    "schemaVersion": 1,
+    "id": "plan_update",
+    "createdAt": "2026-09-16T12:00:10.000Z",
+    "projectId": "project_demo",
+    "projectRevision": 2,
+    "contextSnapshotId": "snapshot_update",
+    "contextSnapshotDigest": "0a87d34c8db27fabb96f006f3ade2947b4d0931ffaf13717cdcbf65b26ad833b",
+    "steps": [
+      {
+        "id": "search_papers",
+        "capabilityId": "sources.crossref.search",
+        "capabilityVersion": 1,
+        "arguments": {
+          "query": {
+            "kind": "literal",
+            "value": "open knowledge"
+          }
+        }
+      },
+      {
+        "id": "search_books",
+        "capabilityId": "sources.open-library.search",
+        "capabilityVersion": 1,
+        "arguments": {
+          "query": {
+            "kind": "literal",
+            "value": "open knowledge"
+          }
+        }
+      },
+      {
+        "id": "write_report",
+        "capabilityId": "inference.report",
+        "capabilityVersion": 1,
+        "arguments": {
+          "papers": {
+            "kind": "step_output",
+            "stepId": "search_papers",
+            "output": "records"
+          },
+          "books": {
+            "kind": "step_output",
+            "stepId": "search_books",
+            "output": "records"
+          }
+        }
+      },
+      {
+        "id": "save_report",
+        "capabilityId": "artifacts.markdown.create",
+        "capabilityVersion": 1,
+        "arguments": {
+          "content": {
+            "kind": "step_output",
+            "stepId": "write_report",
+            "output": "text"
+          }
+        }
+      }
+    ],
+    "limits": {
+      "maxSteps": 12,
+      "maxCalls": 12,
+      "maxOutputTokens": 4096,
+      "timeoutMs": 120000,
+      "maxOutputBytes": 1048576
+    },
+    "digest": "2bc97855d5665e2d9f2fee7ea8939abea903aee45b8792982d0027f7eaafb37f"
+  }
+}

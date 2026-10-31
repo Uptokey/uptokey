@@ -30,10 +30,26 @@ export function buildTimestamp(now = Date.now(), env = process.env) {
   return new Date(ms).toISOString();
 }
 
+/** Select the existing Debian vault contract at build time, never by runtime env. */
+export function nodeBundleProfile(args) {
+  const deb = args[0] === "--linux-deb";
+  const macos = args[0] === "--macos-native";
+  const rest = deb || macos ? args.slice(1) : args;
+  if ((deb || macos || rest.length) && (rest.length !== 2 || rest[0] !== "--out-dir" || !rest[1] || rest[1].startsWith("--"))) {
+    throw new Error("build_arguments_invalid");
+  }
+  return {
+    args: rest,
+    distributionChannel: deb || macos ? "native" : "npm",
+    linuxPackageChannel: deb ? "deb" : "development",
+  };
+}
+
 export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROOT) {
   // Review builds can be exercised without replacing the installed executable.
   // Only a fresh artifact directory under workspace/output is accepted.
-  if (args.length && (args.length !== 2 || args[0] !== "--out-dir")) throw new Error("build_arguments_invalid");
+  const profile = nodeBundleProfile(args);
+  args = profile.args;
   const dist = args.length ? resolve(args[1]) : resolve(root, "dist");
   if (args.length) {
     const inside = relative(resolve(root, "../../output"), dist);
@@ -112,7 +128,9 @@ export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROO
       "--define",
       `UPTOKEY_BUILD_VERSION=${JSON.stringify(buildVersion)}`,
       "--define",
-      'UPTOKEY_DISTRIBUTION_CHANNEL="npm"',
+      `UPTOKEY_DISTRIBUTION_CHANNEL=${JSON.stringify(profile.distributionChannel)}`,
+      "--define",
+      `UPTOKEY_LINUX_PACKAGE_CHANNEL=${JSON.stringify(profile.linuxPackageChannel)}`,
       "--define",
       'UPTOKEY_REPO_MAP_WORKER_PATH="./tui/repo-map-worker.js"',
       `--metafile=${metafile}`,
@@ -158,6 +176,8 @@ export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROO
     builtAt: buildTimestamp(),
     version: buildVersion,
     target: "node",
+    distributionChannel: profile.distributionChannel,
+    linuxPackageChannel: profile.linuxPackageChannel,
     entry: "src/cli.ts",
     compositionWorker: "composition-worker.js",
     serviceSchemaWorker: "service-schema-worker.js",

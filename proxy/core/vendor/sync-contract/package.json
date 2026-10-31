@@ -8,6 +8,16 @@
     "test": "node --test test/*.test.mjs"
   },
   "exports": {
+    "./hosted-provider-replay": {
+      "types": "./hosted-provider-replay.d.ts",
+      "import": "./hosted-provider-replay.js",
+      "default": "./hosted-provider-replay.js"
+    },
+    "./account-native": {
+      "types": "./account-native.d.ts",
+      "import": "./account-native.js",
+      "default": "./account-native.js"
+    },
     "./hosted-catalog": {
       "types": "./hosted-catalog.d.ts",
       "import": "./hosted-catalog.js",
@@ -134,6 +144,11 @@
       "types": "./connections.d.ts",
       "import": "./connections.js",
       "default": "./connections.js"
+    },
+    "./provider-setup": {
+      "types": "./provider-setup.d.ts",
+      "import": "./provider-setup.js",
+      "default": "./provider-setup.js"
     },
     "./recipe": {
       "types": "./recipe.d.ts",
