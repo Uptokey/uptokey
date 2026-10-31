@@ -27,7 +27,7 @@ class SetupHttpError extends Error {readonly code:string;readonly status:400|401
 const fail=(code:string,status?:ConstructorParameters<typeof SetupHttpError>[1]):never=>{throw new SetupHttpError(code,status);};
 const record=(v:unknown):Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:fail('provider_setup_invalid_request');
 const exact=(v:Record<string,unknown>,required:string[],optional:string[]=[])=>required.every(k=>k in v)&&Object.keys(v).every(k=>required.includes(k)||optional.includes(k));
-interface Pending {id:string;owner:string;expires:number;controller:AbortController;prepared?:PreparedProviderSetup;key:string;label?:string;operationId:string;created?:StoredProfile;committing?:boolean;result?:{providerId:string;modelId:string;connectionId:string;accountLabel:string;reloaded:true};timer:ReturnType<typeof setTimeout>}
+interface Pending {id:string;owner:string;expires:number;controller:AbortController;prepared?:PreparedProviderSetup;key:string;label?:string;operationId:string;existing?:StoredProfile;updated?:StoredProfile;created?:StoredProfile;committing?:boolean;result?:{providerId:string;modelId:string;connectionId:string;accountLabel:string;reloaded:true};timer:ReturnType<typeof setTimeout>}
 export interface ProviderSetupHttpDeps {
  secrets:SecretStore;profiles:ConnectionProfileService;getConfig:()=>ProxyConfig;
  persist:(mutator:(next:ProxyConfig)=>void,admit?:()=>Promise<void>)=>Promise<ProxyConfig>;
@@ -42,29 +42,47 @@ export function registerProviderSetupRoutes(app:Hono,deps:ProviderSetupHttpDeps)
  const now=deps.now??Date.now,pending=new Map<string,Pending>();
  function close(item:Pending,remove=true){clearTimeout(item.timer);item.controller.abort();item.prepared?.dispose();item.key='';if(remove)pending.delete(item.id);}
  async function authority(c:Context){const value=await deps.authority(c);if(!value)return fail('unauthorized',401);return value;}
- async function current(c:Context,item:Pending){if(now()>=item.expires){close(item);return fail('provider_setup_expired',410);}if(await authority(c)!==item.owner)return fail('provider_setup_expired',403);if(item.controller.signal.aborted)return fail('provider_setup_expired',410);}
- async function currentCreated(item:Pending){if(!item.created)return;const actual=await deps.profiles.get(item.created.id);if(!actual||actual.revision!==item.created.revision||!actual.enabled||!await deps.profiles.credentialPresent(actual))return fail('provider_setup_expired',410);}
+ async function currentTarget(item:Pending){
+  const expected=item.updated??item.existing??item.created;if(!expected)return;
+  const actual=await deps.profiles.get(expected.id);
+  if(!actual||actual.revision!==expected.revision||!actual.enabled||actual.providerId!==expected.providerId||!await deps.profiles.credentialPresent(actual))return fail('provider_setup_expired',410);
+ }
+ async function current(c:Context,item:Pending){if(now()>=item.expires){close(item);return fail('provider_setup_expired',410);}if(await authority(c)!==item.owner)return fail('provider_setup_expired',403);if(item.controller.signal.aborted)return fail('provider_setup_expired',410);await currentTarget(item);}
  async function body(c:Context){const parsed=await readBoundedJson(c.req.raw,MAX_LOCAL_CONTROL_REQUEST_BYTES);if(!parsed.ok)return fail('provider_setup_invalid_request');return record(parsed.value);}
  function rate(c:Context){const decision=deps.checkRate('localhost-provider-setup',20,60_000);if(!decision.ok){c.header('Retry-After',String(Math.max(1,Math.min(300,Math.ceil(decision.retryAfter)))));return fail('provider_setup_rate_limited',429);}}
  const route=(fn:(c:Context)=>Promise<Response>)=>async(c:Context)=>{try{await authority(c);return await fn(c);}catch(error){const code=error instanceof SetupHttpError?error.code:error instanceof ProviderSetupError&&SAFE.has(error.code)?error.code:error instanceof Error&&SAFE.has(error.message)?error.message:'provider_setup_failed';const status=error instanceof SetupHttpError?error.status:code==='provider_setup_failed'?502:400;return c.json({error:{type:code}},status);}};
  app.get(BASE+'/presets',route(async c=>c.json({presets:[...PROVIDER_SETUP_PRESETS.map(p=>({id:p.id,label:p.id==='custom'?'Custom endpoint':p.label,protocol:p.protocol,local:p.local,endpointUrl:p.endpointUrl,...(p.discovery?{discovery:p.discovery}:{}),...(p.documentationUrl?{documentationUrl:p.documentationUrl}:{}),...(p.getKeyUrl?{getKeyUrl:p.getKeyUrl}:{}),...(p.endpointRequired?{endpointRequired:true,endpointPlaceholder:p.endpointPlaceholder,endpointHostSuffix:p.endpointHostSuffix}:{}),...(p.modelIds?{modelIds:p.modelIds,modelsReviewedAt:p.modelsReviewedAt}:{})})),...LOCAL_COMPAT]})));
  app.post(BASE+'/prepare',route(async c=>{
   rate(c);const owner=await authority(c),input=await body(c);
-  if(!exact(input,['providerId'],['apiKey','customEndpoint','manualModel','label'])||typeof input.providerId!=='string'||input.providerId.length>64||input.apiKey!==undefined&&(typeof input.apiKey!=='string'||input.apiKey.length>512)||input.customEndpoint!==undefined&&(typeof input.customEndpoint!=='string'||input.customEndpoint.length>2048)||input.manualModel!==undefined&&(typeof input.manualModel!=='string'||input.manualModel.length>200)||input.label!==undefined&&(typeof input.label!=='string'||input.label.trim().length>80))return fail('provider_setup_invalid_request');
+  if(!exact(input,['providerId'],['apiKey','customEndpoint','manualModel','label','connectionId','expectedRevision'])||typeof input.providerId!=='string'||input.providerId.length>64||input.apiKey!==undefined&&(typeof input.apiKey!=='string'||input.apiKey.length>512)||input.customEndpoint!==undefined&&(typeof input.customEndpoint!=='string'||input.customEndpoint.length>2048)||input.manualModel!==undefined&&(typeof input.manualModel!=='string'||input.manualModel.length>200)||input.label!==undefined&&(typeof input.label!=='string'||input.label.trim().length>80))return fail('provider_setup_invalid_request');
+  const existingRequest=input.connectionId!==undefined||input.expectedRevision!==undefined;
+  // A paired first-party Tauri shell may refresh one existing BYOK account,
+  // but it never inherits the broader local management authority used to add
+  // credentials, endpoints, labels or models. The pending owner binds the
+  // following commit/dispose calls to this exact restricted session.
+  if(owner.startsWith('refresh:')&&!existingRequest)return fail('unauthorized',401);
+  if(existingRequest&&(!(typeof input.connectionId==='string'&&UUID.test(input.connectionId))||!Number.isSafeInteger(input.expectedRevision)||input.apiKey!==undefined||input.customEndpoint!==undefined||input.manualModel!==undefined||input.label!==undefined))return fail('provider_setup_invalid_request');
   const catalog=PROVIDER_SETUP_CATALOG_PRESETS.find(p=>p.id===input.providerId);
   const compatible=LOCAL_COMPAT.find(p=>p.id===input.providerId)??catalog,preset=PROVIDER_SETUP_PRESETS.find(p=>p.id===input.providerId)??compatible;
+  const existing=existingRequest?await deps.profiles.get(input.connectionId as string):undefined;
+  if(existingRequest&&(!existing||existing.providerId!==input.providerId||existing.revision!==input.expectedRevision||existing.accessMode==='oauth'||!existing.enabled))return fail('provider_setup_expired',existing?.revision!==input.expectedRevision?409:410);
+  if(owner.startsWith('refresh:')&&existing?.accessMode!=='byok')return fail('unauthorized',401);
+  if(existing&&catalog?.discovery==='manual')return fail('provider_discovery_unsupported');
   if(compatible&&!catalog?.endpointRequired&&input.customEndpoint!==undefined&&input.customEndpoint!==compatible.endpointUrl)return fail('provider_endpoint_fixed');
   if(catalog?.discovery==='manual'&&(!(typeof input.manualModel==='string')||!input.manualModel.trim()))return fail('provider_model_invalid');
-  const customEndpoint=catalog?.endpointRequired?input.customEndpoint as string|undefined:compatible?.endpointUrl??input.customEndpoint as string|undefined;
+  const customEndpoint=existing
+   ? (catalog?.endpointRequired||input.providerId==='custom'||!preset?existing.endpointUrl??undefined:compatible?.endpointUrl)
+   : catalog?.endpointRequired?input.customEndpoint as string|undefined:compatible?.endpointUrl??input.customEndpoint as string|undefined;
   // New accounts never copy a legacy or another account's saved credential.
-  if(!preset?.local&&!(typeof input.apiKey==='string'&&input.apiKey.trim()))return fail('provider_key_required');
+  const existingKey=existing?await deps.profiles.readCredential(existing):undefined;
+  if(!preset?.local&&!(existingKey||(typeof input.apiKey==='string'&&input.apiKey.trim())))return fail('provider_key_required');
   for(const item of pending.values())if(now()>=item.expires)close(item);
   if(pending.size>=MAX_PENDING)return fail('provider_setup_capacity',429);
   const id=randomUUID(),controller=new AbortController(),expires=now()+TTL;
-  const item:Pending={id,owner,expires,controller,key:'',label:typeof input.label==='string'?input.label.trim()||undefined:undefined,operationId:randomUUID(),timer:setTimeout(()=>{const item=pending.get(id);if(item)close(item);},TTL)};item.timer.unref?.();pending.set(id,item);
+  const item:Pending={id,owner,expires,controller,key:'',label:existing?.label??(typeof input.label==='string'?input.label.trim()||undefined:undefined),operationId:randomUUID(),...(existing?{existing}:{}),timer:setTimeout(()=>{const item=pending.get(id);if(item)close(item);},TTL)};item.timer.unref?.();pending.set(id,item);
   const aborted=()=>close(item);c.req.raw.signal.addEventListener('abort',aborted,{once:true});
   try{
-   item.key=normalizeProviderKey(typeof input.apiKey==='string'?input.apiKey.trim():'',input.providerId as ProviderName,Boolean(preset?.local));
+   item.key=normalizeProviderKey(existingKey??(typeof input.apiKey==='string'?input.apiKey.trim():''),input.providerId as ProviderName,Boolean(preset?.local));
    if(item.key&&item.label?.includes(item.key))return fail('provider_credential_in_metadata');
    const guardedFetch:typeof fetch=async(input,init)=>{
     await current(c,item);
@@ -77,24 +95,27 @@ export function registerProviderSetupRoutes(app:Hono,deps:ProviderSetupHttpDeps)
    item.prepared=input.manualModel===undefined?await discovery.prepare(input.providerId,item.key,customEndpoint,controller.signal):await discovery.prepareManual(input.providerId,item.key,customEndpoint,input.manualModel as string,controller.signal);
    if(catalog)item.prepared={...item.prepared,label:catalog.label};
    await current(c,item);
+   if(existing)item.key='';
    const notices=PROVIDER_NOTICE_MESSAGES[item.prepared.providerId as keyof typeof PROVIDER_NOTICE_MESSAGES];
-   return c.json({id,providerId:item.prepared.providerId,label:item.prepared.label,models:item.prepared.models,source:item.prepared.source,notice:notices?.en??null,noticeByLocale:notices??null,expiresAt:new Date(expires).toISOString()});
+   return c.json({id,providerId:item.prepared.providerId,label:item.prepared.label,models:item.prepared.models,source:item.prepared.source,notice:notices?.en??null,noticeByLocale:notices??null,expiresAt:new Date(expires).toISOString(),...(existing?{connectionId:existing.id,expectedRevision:existing.revision,reusingStoredCredential:true}:{})});
   }catch(error){try{await current(c,item);}catch(currentError){error=currentError;}close(item);throw error;}finally{c.req.raw.signal.removeEventListener('abort',aborted);}
  }));
  app.post(BASE+'/commit',route(async c=>{
   rate(c);const input=await body(c);if(!exact(input,['id','modelId','acceptNotice'])||typeof input.id!=='string'||!UUID.test(input.id)||typeof input.modelId!=='string'||input.acceptNotice!==true)return fail('provider_setup_invalid_request');
   const item=pending.get(input.id);if(!item)return fail('provider_setup_expired',410);await current(c,item);
-  if(item.result){if(item.result.modelId!==input.modelId)return fail('provider_model_not_discovered');await currentCreated(item);await current(c,item);return c.json(item.result);}
+  if(item.result){if(item.result.modelId!==input.modelId)return fail('provider_model_not_discovered');await currentTarget(item);await current(c,item);return c.json(item.result);}
   if(item.committing)return fail('provider_setup_busy',409);item.committing=true;
   try {
   const prepared=item.prepared;if(!prepared||!prepared.models.some(m=>m.id===input.modelId))return fail('provider_model_not_discovered');
   if(item.created&&item.created.modelIds[0]!==input.modelId)return fail('provider_model_not_discovered');
   const providerId=prepared.providerId,modelId=input.modelId,endpoint=prepared.endpointUrl,local=(PROVIDER_SETUP_PRESETS.find(p=>p.id===providerId)??LOCAL_COMPAT.find(p=>p.id===providerId)??PROVIDER_SETUP_CATALOG_PRESETS.find(p=>p.id===providerId))?.local===true;
+  const otherProviderModels=item.existing?(await deps.profiles.list()).filter(profile=>profile.id!==item.existing!.id&&profile.providerId===providerId&&profile.enabled).flatMap(profile=>profile.modelIds):[];
+  const discoveredModels=prepared.models.map(model=>model.id);
   const patch=(next:ProxyConfig)=>{
    if(isOptionalProvider(providerId))ensureProviderEntry(next,providerId);else if(isUserDefinedProvider(providerId))ensureUserDefinedProviderEntry(next,providerId);else if(!isCoreProvider(providerId))return fail('provider_unknown');
    const entry=next.providers[providerId as ProviderName]!;
    if(entry.configured&&entry.endpointUrl&&entry.endpointUrl!==endpoint)return fail('provider_endpoint_conflict',409);
-   const models=[...new Set([...(entry.configured?entry.models:[]),modelId])];if(models.length>256)return fail('provider_model_limit');
+   const models=item.existing?[...new Set([...otherProviderModels,...discoveredModels])]:[...new Set([...(entry.configured?entry.models:[]),modelId])];if(models.length>256)return fail('provider_model_limit');
    const alreadyConfigured=entry.configured;entry.models=models;if(!alreadyConfigured||!entry.models.includes(entry.defaultModel))entry.defaultModel=modelId;
    if(!isCoreProvider(providerId))entry.endpointUrl=endpoint;entry.enabled=true;entry.configured=true;
    if(isNamedExperimentalProvider(providerId))acceptNamedProviderRisk(entry,providerId);
@@ -102,10 +123,13 @@ export function registerProviderSetupRoutes(app:Hono,deps:ProviderSetupHttpDeps)
    // No provider-wide secret/default selection/routing combo is written here.
   };
   patch(structuredClone(deps.getConfig()));await current(c,item);
-  item.created??=await deps.profiles.create({schemaVersion:1,providerId,label:item.label??prepared.label,accessMode:local?'local':'byok',enabled:true,...(isCoreProvider(providerId)?{}:{endpointUrl:endpoint}),modelIds:[modelId]},item.key||undefined,item.operationId,()=>current(c,item));
+  if(item.existing){
+   item.updated??=await deps.profiles.update(item.existing.id,{revision:item.existing.revision,modelIds:[modelId],...(item.existing.modelIds.includes(modelId)?{}:{imageInputModels:null,audioInputModels:null,toolModels:null,jsonSchemaModels:null})});
+  }else item.created??=await deps.profiles.create({schemaVersion:1,providerId,label:item.label??prepared.label,accessMode:local?'local':'byok',enabled:true,...(isCoreProvider(providerId)?{}:{endpointUrl:endpoint}),modelIds:[modelId]},item.key||undefined,item.operationId,()=>current(c,item));
   item.key='';
-  await currentCreated(item);await deps.persist(patch,async()=>{await current(c,item);await currentCreated(item);});await deps.invalidate(providerId as ProviderName);await current(c,item);await currentCreated(item);
-  item.result={providerId,modelId,connectionId:item.created.id,accountLabel:item.created.label,reloaded:true};prepared.dispose();item.prepared=undefined;return c.json(item.result);
+  await currentTarget(item);await deps.persist(patch,async()=>{await current(c,item);await currentTarget(item);});await deps.invalidate(providerId as ProviderName);await current(c,item);await currentTarget(item);
+  const target=item.updated??item.created!;
+  item.result={providerId,modelId,connectionId:target.id,accountLabel:target.label,reloaded:true};prepared.dispose();item.prepared=undefined;return c.json(item.result);
   } finally {item.committing=false;}
  }));
  app.post(BASE+'/dispose',route(async c=>{

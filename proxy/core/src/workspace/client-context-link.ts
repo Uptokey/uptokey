@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey, verify } from 'node:crypto';
 import type { SecretStore } from '../secret-store.ts';
 import { resolveBearer, type ResolvedClient } from '../client-keys.ts';
 import { serialClientAuthority } from '../client-authority-lock.ts';
@@ -13,6 +13,8 @@ const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 const PROJECT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 const FIRST_PARTY = new Set(['pwa', 'tauri', 'tui']);
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+const keyProofPayload = (clientId: string, key: ReturnType<typeof parseWorkspacePublicJwk>) =>
+  `uptokey-context-identity-v1:${clientId}:${digest(JSON.stringify(key))}`;
 export const contextEpoch = (epoch: IdentityEpoch) => digest(JSON.stringify(epoch ? [epoch.tenantId, epoch.deviceId] : ['local'])).slice(0, 24);
 export const clientContextKey = (clientId: string) => `local:client-context:${clientId}`;
 export class ContextLinkError extends Error {
@@ -175,6 +177,43 @@ export class ClientContextLinkService {
       if (!(error instanceof ContextLinkError)) throw error;
       return {clientId:id,linked:false,revision:stored?.revision ?? 0,reason:'context_link_invalid'};
     }
+  }
+  /**
+   * Repairs a legacy keyless Tauri pairing in place. The bearer may bind one key
+   * to its own already-approved identity, but can neither replace that key nor
+   * gain another owner's context without the separate context-link approval.
+   */
+  async enrollRecipientKey(header: string | undefined, publicJwk: unknown, signature: unknown) {
+    const admitted = await authenticateContextCredential(header,this.secrets,this.now()), id = recipient(admitted);
+    if (admitted.registration?.audience !== 'tauri') return fail('context_scope_denied');
+    let key: ReturnType<typeof parseWorkspacePublicJwk>;
+    try { key = parseWorkspacePublicJwk(publicJwk); } catch { return fail('context_key_invalid',400); }
+    if (typeof signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return fail('context_key_proof_invalid');
+    const bytes = Buffer.from(signature,'base64url');
+    if (bytes.length !== 64 || bytes.toString('base64url') !== signature ||
+      !verify('sha256',Buffer.from(keyProofPayload(id,key)),{key:createPublicKey({key:{...key},format:'jwk'}),dsaEncoding:'ieee-p1363'},bytes))
+      return fail('context_key_proof_invalid');
+    // Context mutations share this queue. Credential authentication owns the
+    // separate client queue internally, so using it here would self-deadlock.
+    return serialClientAuthority(this.secrets,`context:${id}`,async () => {
+      const current = await authenticateContextCredential(header,this.secrets,this.now());
+      if (recipient(current) !== id || current.registration?.audience !== 'tauri' ||
+        current.policy?.revision !== admitted.policy?.revision || current.registration.policyRevision !== admitted.registration?.policyRevision)
+        return fail('context_link_invalid');
+      const account = `local:client:${id}:workspace-key`, canonical = JSON.stringify(key), raw = await this.secrets.get(account);
+      if (raw !== undefined) {
+        let existing: ReturnType<typeof parseWorkspacePublicJwk>;
+        try { existing = parseWorkspacePublicJwk(JSON.parse(raw)); } catch { return fail('context_link_invalid'); }
+        if (JSON.stringify(existing) !== canonical) return fail('context_identity_conflict',409);
+        return {enrolled:true as const,clientId:id,keyId:digest(canonical),existing:true as const};
+      }
+      // A stored link without its bound key is damaged authority. Never repair it
+      // by silently selecting a different identity.
+      if (await readClientContextLink(this.secrets,id)) return fail('context_identity_conflict',409);
+      await this.secrets.set(account,canonical);
+      if (await this.secrets.get(account) !== canonical) return fail('context_link_invalid');
+      return {enrolled:true as const,clientId:id,keyId:digest(canonical),existing:false as const};
+    });
   }
   async challenge(header: string | undefined) {
     const client = await authenticateContextCredential(header,this.secrets,this.now()), id = recipient(client);

@@ -17,6 +17,7 @@ import { fitContextBudget, type BudgetOutcome, type ContextBudget } from "./cont
 import type { MediaDispatchPart, PreparedMediaInput } from "./media-input.ts";
 import { contextRanges } from "./context-ranges.ts";
 import { validateHostedDestination, type TuiHostedDestination } from "./hosted.ts";
+import {hostedReceiptParts,hostedReplayForHistory} from './hosted-replay.ts';
 
 export interface ConversationMeta {
   id: string;
@@ -36,6 +37,8 @@ export interface DispatchMessage {
   content: string | MediaDispatchPart[];
   tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
+  providerReplay?: import('@uptokey/sync-contract/hosted-provider-replay').HostedProviderReplay;
+  providerReplayModelId?: string;
 }
 
 export interface ComposedHistory {
@@ -252,11 +255,12 @@ export function composeHistory(thread: readonly ThreadMessage[], options: { tool
     let text = textOf(message);
     if (refs.length) text += `${text ? "\n" : ""}[contexto anexado a esta mensagem: ${refs.map((r) => `${r.relativePath} (sha256 ${r.sha256.slice(0, 12)})`).join(", ")}]`;
     if (interrupted && message.role === "assistant") text += `${text ? "\n" : ""}[resposta interrompida]`;
+    const replay=message.role==='assistant'?hostedReplayForHistory(message.parts,text,calls.length?calls.map(call=>({id:call.callId,name:call.name,arguments:JSON.stringify(call.arguments)})):undefined):{};
     // Native read rounds store closed call/result pairs in a single CAS append:
     // a crash or cancellation cannot leave half a tool exchange in history.
     if (calls.length && results.length) {
       for (const call of calls) pending.set(call.callId, call.name);
-      if (toolMode === "native") messages.push({ role: "assistant", content: text, tool_calls: calls.map((c) => ({ id: c.callId, type: "function", function: { name: c.name, arguments: JSON.stringify(c.arguments) } })) });
+      if (toolMode === "native") messages.push({ role: "assistant", content: text, tool_calls: calls.map((c) => ({ id: c.callId, type: "function", function: { name: c.name, arguments: JSON.stringify(c.arguments) } })),...replay });
       else messages.push({ role: "assistant", content: `${text}${text ? "\n" : ""}${calls.map((c) => `[chamada de ferramenta ${c.name}(${JSON.stringify(c.arguments)})]`).join("\n")}` });
       text = "";
     }
@@ -276,7 +280,7 @@ export function composeHistory(thread: readonly ThreadMessage[], options: { tool
     if (calls.length) {
       for (const call of calls) pending.set(call.callId, call.name);
       if (toolMode === "native") {
-        messages.push({ role: "assistant", content: text, tool_calls: calls.map((c) => ({ id: c.callId, type: "function", function: { name: c.name, arguments: JSON.stringify(c.arguments) } })) });
+        messages.push({ role: "assistant", content: text, tool_calls: calls.map((c) => ({ id: c.callId, type: "function", function: { name: c.name, arguments: JSON.stringify(c.arguments) } })),...replay });
       } else {
         messages.push({ role: "assistant", content: `${text}${text ? "\n" : ""}${calls.map((c) => `[chamada de ferramenta ${c.name}(${JSON.stringify(c.arguments)})]`).join("\n")}` });
       }
@@ -284,7 +288,7 @@ export function composeHistory(thread: readonly ThreadMessage[], options: { tool
     }
     const media = message.parts.flatMap((part) => options.media?.has(part.id) ? [options.media.get(part.id)!] : []);
     if (!text && !media.length) continue;
-    messages.push({ role: message.role === "user" ? "user" : "assistant", content: media.length ? [...(text ? [{ type: "text" as const, text }] : []), ...media] : text });
+    messages.push({ role: message.role === "user" ? "user" : "assistant", content: media.length ? [...(text ? [{ type: "text" as const, text }] : []), ...media] : text,...replay });
   }
   if (pending.size) throw new ConversationServiceError("conversation_tool_result_pending");
   return { messages, compaction };
@@ -538,7 +542,7 @@ export class ConversationService {
       }
     } finally {
       const parts: Array<Record<string, unknown>> = text ? [{ type: "text", text }] : [];
-      if (hostedReceipt) parts.push({ type: "status", text: `hosted:v1 ${JSON.stringify({ ...JSON.parse(hostedReceipt), destination: destination.hosted })}` });
+      if (hostedReceipt) parts.push(...hostedReceiptParts(hostedReceipt,destination.hosted));
       if (completed) for (const call of calls.values()) parts.push({ type: "tool_call", text: { callId: call.callId, name: call.name, arguments: JSON.parse(call.arguments || "{}") } });
       if (!completed) parts.push({ type: "status", text: "interrupted" });
       if (!completed && signal?.aborted) parts.push({ type: "status", text: "cancelled_by_user" });
@@ -672,17 +676,17 @@ export class ConversationService {
           const parts: Array<Record<string, unknown>> = text ? [{ type: "text", text }] : [];
           parts.push({ type: "status", text: "interrupted" });
           if (signal?.aborted) parts.push({ type: "status", text: "cancelled_by_user" });
-          if (hostedReceipt) parts.push({ type: "status", text: `hosted:v1 ${JSON.stringify({ ...JSON.parse(hostedReceipt), destination: destination.hosted })}` });
+          if (hostedReceipt) parts.push(...hostedReceiptParts(hostedReceipt,destination.hosted));
           const measured = destination.hosted ? null : usageStatusPart(usage, route, destination, false);
           if (measured) parts.push(measured);
           await this.appendMessage(input.conversationId, "assistant", parts, parentId, revision, randomUUID());
         }
       }
       // The broker receipt carries a hosted round's measurement; other routes record theirs as usage:v1.
-      const roundUsage = hostedReceipt ? { type: "status", text: `hosted:v1 ${JSON.stringify({ ...JSON.parse(hostedReceipt), destination: destination.hosted })}` }
-        : destination.hosted ? null : usageStatusPart(usage, route, destination, true);
+      const measuredUsage=destination.hosted?null:usageStatusPart(usage,route,destination,true);
+      const roundUsage=hostedReceipt?hostedReceiptParts(hostedReceipt,destination.hosted):measuredUsage?[measuredUsage]:[];
       if (!deltas.size) {
-        await this.appendMessage(input.conversationId, "assistant", [...(text ? [{ type: "text", text }] : [{ type: "status", text: "completed" }]), ...(roundUsage ? [roundUsage] : [])], parentId, revision, randomUUID());
+        await this.appendMessage(input.conversationId, "assistant", [...(text ? [{ type: "text", text }] : [{ type: "status", text: "completed" }]), ...roundUsage], parentId, revision, randomUUID());
         yield { type: "done", data: "" }; return;
       }
       const calls: NativeReadToolCall[] = [];
@@ -699,8 +703,8 @@ export class ConversationService {
       }
       const parts: Array<Record<string, unknown>> = text ? [{ type: "text", text }] : [];
       for (const call of calls) parts.push({ type: "tool_call", text: call });
-      if (roundUsage) parts.push(roundUsage);
-      messages.push({ role: "assistant", content: text, tool_calls: calls.map(call => ({ id: call.callId, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) } })) });
+      parts.push(...roundUsage);
+      messages.push({ role: "assistant", content: text, tool_calls: calls.map(call => ({ id: call.callId, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) } })),...hostedReplayForHistory(parts,text,calls.map(call=>({id:call.callId,name:call.name,arguments:JSON.stringify(call.arguments)}))) });
       let stopped: unknown;
       const savedReferences = new Map<string, ContextReference>();
       const resultEvents: StreamEvent[] = [];

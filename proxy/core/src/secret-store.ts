@@ -3,6 +3,7 @@ import type { LinuxPortalSecretStore } from "./linux-portal-secret-store.ts";
 import { LINUX_PACKAGE_CHANNEL, type LinuxPackageChannel } from "./linux-distribution.ts";
 import { QUIMERA_SECRET_SERVICE } from "./paths.ts";
 import { DISTRIBUTION_CHANNEL, type DistributionChannel } from "./distribution-channel.ts";
+import { macProtectedEntryFactory, type ProtectedEntry } from "./macos-protected-secret-store.ts";
 
 const service = QUIMERA_SECRET_SERVICE;
 
@@ -70,12 +71,6 @@ export class NativeSecretStore implements SecretStore {
   }
 }
 
-interface ProtectedEntry {
-  getSecret(): Uint8Array | number[] | null;
-  setSecret(secret: Uint8Array): void;
-  deleteSecret(): boolean;
-}
-
 interface PasswordEntry {
   getPassword(): string | null;
   setPassword(value: string): void;
@@ -122,9 +117,9 @@ export function createOfficialSecretStore(platform = process.platform, executabl
   }
   if (platform !== "darwin") throw new Error("official_secret_store_platform_unsupported");
   
-  // The inherited Protected Data binding targets the legacy service namespace.
-  // Generic Keychain is not an equivalent substitute for the signed app boundary.
-  throw new Error("quimera_macos_protected_keyring_not_isolated");
+  // An npm runtime cannot opt into the signed desktop identity by renaming Node.
+  if (distribution !== "native") throw new Error("quimera_macos_protected_keyring_not_isolated");
+  return new MacProtectedSecretStore(macProtectedEntryFactory(serviceId, executable));
 }
 
 export function assertSecretStoreBoundary(

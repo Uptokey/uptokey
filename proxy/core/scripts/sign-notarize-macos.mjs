@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -25,15 +25,7 @@ export function signAndNotarizeMacos({ appPath, identity, notaryProfile, provisi
   try {
     const profile = realpathSync(provisioningProfile);
     const decodedProfile = resolve(temporary, "profile.plist");
-    run("security", ["cms", "-D", "-i", profile, "-o", decodedProfile]);
-    const profileEntitlements = parseObject(run("plutil", ["-extract", "Entitlements", "json", "-o", "-", decodedProfile]));
-    validateProvisioningProfileClaims({
-      teamIds: parseStringArray(run("plutil", ["-extract", "TeamIdentifier", "json", "-o", "-", decodedProfile])),
-      applicationIdentifier: profileEntitlements["application-identifier"],
-      keychainAccessGroups: profileEntitlements["keychain-access-groups"],
-      getTaskAllow: profileEntitlements["get-task-allow"],
-      expirationDate: run("plutil", ["-extract", "ExpirationDate", "raw", decodedProfile]).trim()
-    }, teamId);
+    validateMacosProvisioningFile(profile, teamId, decodedProfile);
     copyFileSync(profile, resolve(app, "Contents", "embedded.provisionprofile"), 0);
     const entitlements = resolve(temporary, "Uptokey.entitlements.plist");
     writeFileSync(entitlements, entitlementPlist(teamId), { flag: "wx", mode: 0o600 });
@@ -56,6 +48,71 @@ export function signAndNotarizeMacos({ appPath, identity, notaryProfile, provisi
   }
 }
 
+/** Sign the native computer helper before its resource manifest is generated. */
+export function signMacosComputer({ executable, identity, teamId }) {
+  if (process.platform !== "darwin") throw new Error("macos_signing_requires_macos");
+  validateValue(identity, /^[^\r\n]{3,160}$/, "signing_identity_invalid");
+  validateValue(teamId, /^[A-Z0-9]{10}$/, "apple_team_id_invalid");
+  const path = resolve(executable), stat = lstatSync(path);
+  if (basename(path) !== "uptokey-computer-mcp" || !stat.isFile() || stat.isSymbolicLink() || stat.size === 0) throw new Error("macos_computer_binary_invalid");
+  const fingerprint = assertIdentityAvailable(identity, teamId);
+  signMacosTarget(path, fingerprint);
+  run("codesign", ["--verify", "--strict", "--verbose=2", path]);
+}
+/** Sign the canonical embedded core before its containing sidecar is hashed. */
+export function signMacosEmbeddedCore({ appPath, identity, provisioningProfile, teamId }) {
+  if (process.platform !== "darwin") throw new Error("macos_signing_requires_macos");
+  validateValue(identity, /^[^\r\n]{3,160}$/, "signing_identity_invalid");
+  validateValue(teamId, /^[A-Z0-9]{10}$/, "apple_team_id_invalid");
+  if (typeof provisioningProfile !== "string" || !existsSync(provisioningProfile)) throw new Error("provisioning_profile_missing");
+  const app = resolve(appPath);
+  if (basename(app) !== "UptokeyCore.app" || realpathSync(app) !== app) throw new Error("macos_core_bundle_invalid");
+  const contents = resolve(app, "Contents"), executable = resolve(contents, "MacOS", "uptokey");
+  const binding = resolve(contents, "MacOS", "uptokey-macos-protected-keyring.node");
+  for (const path of [resolve(contents, "Info.plist"), executable, binding]) {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0) throw new Error("macos_core_bundle_incomplete");
+  }
+  const info = resolve(contents, "Info.plist");
+  if (run("plutil", ["-extract", "CFBundleIdentifier", "raw", info]).trim() !== bundleId
+      || run("plutil", ["-extract", "CFBundleExecutable", "raw", info]).trim() !== "uptokey") {
+    throw new Error("macos_core_bundle_identity_invalid");
+  }
+  const identityFingerprint = assertIdentityAvailable(identity, teamId);
+  const temporary = mkdtempSync(resolve(tmpdir(), "uptokey-core-sign-"));
+  try {
+    const profile = realpathSync(provisioningProfile);
+    validateMacosProvisioningFile(profile, teamId, resolve(temporary, "profile.plist"));
+    copyFileSync(profile, resolve(contents, "embedded.provisionprofile"), 0);
+    const entitlements = resolve(temporary, "core.entitlements.plist");
+    writeFileSync(entitlements, embeddedCoreEntitlementPlist(teamId), { flag: "wx", mode: 0o600 });
+    for (const file of embeddedNativeModules(resolve(contents, "MacOS"))) {
+      sign(file, identityFingerprint);
+      run("codesign", ["--verify", "--strict", "--verbose=2", file]);
+    }
+    sign(executable, identityFingerprint, entitlements);
+    sign(app, identityFingerprint, entitlements);
+    run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
+    return { app, teamId };
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+export function embeddedNativeModules(directory) {
+  const found = [];
+  function visit(path) {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const target = resolve(path, entry.name);
+      if (entry.isSymbolicLink()) throw new Error("macos_core_bundle_symlink_forbidden");
+      if (entry.isDirectory()) visit(target);
+      else if (!entry.isFile()) throw new Error("macos_core_bundle_file_invalid");
+      else if (entry.name.endsWith(".node") || entry.name.endsWith(".dylib") || entry.name === "spawn-helper") found.push(target);
+    }
+  }
+  visit(directory);
+  return found.sort();
+}
 export function validateProvisioningProfileClaims(claims, teamId, now = Date.now()) {
   const application = `${teamId}.${bundleId}`;
   if (!Array.isArray(claims?.teamIds) || claims.teamIds.length !== 1 || claims.teamIds[0] !== teamId || claims.applicationIdentifier !== application) {
@@ -69,7 +126,7 @@ export function validateProvisioningProfileClaims(claims, teamId, now = Date.now
   if (!Number.isFinite(expiry) || expiry <= now) throw new Error("provisioning_profile_expired");
 }
 
-function assertIdentityAvailable(identity, teamId) {
+export function assertIdentityAvailable(identity, teamId) {
   const listed = run("security", ["find-identity", "-v", "-p", "codesigning"]);
   const fingerprint = selectSigningIdentityFingerprint(listed, identity);
   const certificate = runCombined("security", ["find-certificate", "-c", identity, "-p"]);
@@ -100,16 +157,48 @@ export function assertCertificateTeam(subject, teamId) {
   if (organizationUnit !== teamId) throw new Error("signing_identity_team_mismatch");
 }
 
-function sign(target, identity, entitlements) {
+export function signMacosTarget(target, identity, entitlements) {
   const args = ["--force", "--sign", identity, "--options", "runtime", "--timestamp"];
   if (entitlements) args.push("--entitlements", entitlements);
   args.push(target);
   run("codesign", args);
 }
 
-function entitlementPlist(teamId) {
+const sign = signMacosTarget;
+
+/** Shared by the CLI app and the canonical Tauri core's nested app bundle. */
+export function validateMacosProvisioningFile(profile, teamId, decodedProfile) {
+  run("security", ["cms", "-D", "-i", profile, "-o", decodedProfile]);
+  const values = parseObject(run("plutil", ["-extract", "Entitlements", "json", "-o", "-", decodedProfile]));
+  const appleApplication = values["com.apple.application-identifier"];
+  const legacyApplication = values["application-identifier"];
+  if (appleApplication !== undefined && legacyApplication !== undefined && appleApplication !== legacyApplication) throw Error("provisioning_profile_identity_mismatch");
+  validateProvisioningProfileClaims({
+    teamIds: parseStringArray(run("plutil", ["-extract", "TeamIdentifier", "json", "-o", "-", decodedProfile])),
+    applicationIdentifier: appleApplication ?? legacyApplication,
+    keychainAccessGroups: values["keychain-access-groups"],
+    getTaskAllow: validateDebugClaims(values),
+    expirationDate: run("plutil", ["-extract", "ExpirationDate", "raw", decodedProfile]).trim()
+  }, teamId);
+}
+
+export function validateDebugClaims(values) {
+  for (const key of ["com.apple.security.get-task-allow", "get-task-allow"]) {
+    if (values[key] !== undefined && values[key] !== false) throw new Error("provisioning_profile_debug_forbidden");
+  }
+  return false;
+}
+export function embeddedCoreEntitlementPlist(teamId) {
+  validateValue(teamId, /^[A-Z0-9]{10}$/, "apple_team_id_invalid");
+  // Node/V8 uses MAP_JIT under the hardened runtime. Grant only this narrow
+  // runtime capability; do not retain the upstream development entitlements
+  // for unsigned memory, library-validation bypasses or debugging.
+  return entitlementPlist(teamId, true);
+}
+
+function entitlementPlist(teamId, allowJit = false) {
   const application = `${teamId}.${bundleId}`;
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>application-identifier</key><string>${application}</string>\n<key>keychain-access-groups</key><array><string>${application}</string></array>\n</dict></plist>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>com.apple.application-identifier</key><string>${application}</string>\n<key>keychain-access-groups</key><array><string>${application}</string></array>\n${allowJit ? '<key>com.apple.security.cs.allow-jit</key><true/>\n' : ''}</dict></plist>\n`;
 }
 
 function parseStringArray(value) {

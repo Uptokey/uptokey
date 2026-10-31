@@ -1,3 +1,4 @@
+import {parseHostedProviderReplay} from './hosted-provider-replay.js';
 const safeCount=(n,max)=>typeof n==="number"&&Number.isSafeInteger(n)&&n>=0&&n<=max;
 export const HOSTED_CLIENT_ERRORS=Object.freeze({account_chat_scope_changed:409,hosted_price_changed:409,account_not_configured:503,account_reauthentication_required:401,account_origin_invalid:403,
   hosted_not_configured:503,hosted_execution_disabled:503,hosted_authorization_required:401,hosted_json_required:415,
@@ -39,7 +40,9 @@ export function parseHostedClientResult(value,httpStatus,requestId) {
     (value.finishReason!==undefined&&!["stop","length","tool_calls"].includes(value.finishReason)))return unknown;
   const toolCalls=parseHostedToolCalls(value.toolCalls);
   if(toolCalls===null||(value.finishReason==="tool_calls")!==(toolCalls!==undefined))return unknown;
+  const providerReplay=parseHostedProviderReplay(value.providerReplay,value.content,toolCalls);
+  if(providerReplay===null)return unknown;
   return {status:"completed",requestId,content:value.content,currency:"USD",chargedMicros:value.chargedMicros,priceVersion:value.priceVersion,
     usage:{inputTokens:value.usage.inputTokens,outputTokens:value.usage.outputTokens,...(value.usage.cachedInputTokens!==undefined?{cachedInputTokens:value.usage.cachedInputTokens}:{})},
-    ...(value.finishReason!==undefined?{finishReason:value.finishReason}:{}),...(toolCalls?{toolCalls}:{})};
+    ...(value.finishReason!==undefined?{finishReason:value.finishReason}:{}),...(toolCalls?{toolCalls}:{}),...(providerReplay?{providerReplay}:{})};
 }

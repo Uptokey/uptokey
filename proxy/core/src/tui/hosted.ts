@@ -71,12 +71,12 @@ export async function loadHostedModels(transport: HostedTransport, accountRef: s
       priceVersion: model.price.version, maxOutputTokens: Math.min(model.limits.outputTokens, 4096) }), contextTokens: model.limits.contextTokens, label: catalogLabel(model.id, model.price.version),
       toolCalls: (model as { toolCalls?: true }).toolCalls === true }));
 }
-type HostedDispatch = { role: string; content: unknown; tool_calls?: unknown; tool_call_id?: unknown };
+type HostedDispatch = { role: string; content: unknown; tool_calls?: unknown; tool_call_id?: unknown;providerReplay?:unknown;providerReplayModelId?:string };
 /** Text and declared tool exchanges only; media parts are refused by the contract, never dropped. */
 export function hostedInput(destination: TuiHostedDestination, requestId: string, messages: ReadonlyArray<HostedDispatch>, tools?: readonly unknown[]) {
   const target = validateHostedDestination(destination);
   const wire = messages.map((message) => ({ role: message.role, content: message.content ?? "",
-    ...(message.tool_calls !== undefined ? { tool_calls: message.tool_calls } : {}), ...(message.tool_call_id !== undefined ? { tool_call_id: message.tool_call_id } : {}) }));
+    ...(message.tool_calls !== undefined ? { tool_calls: message.tool_calls } : {}), ...(message.tool_call_id !== undefined ? { tool_call_id: message.tool_call_id } : {}),...(message.providerReplay!==undefined&&message.providerReplayModelId===target.modelId?{providerReplay:message.providerReplay}:{}) }));
   return parseHostedRequest({ requestId, model: target.modelId, messages: wire, expectedPriceVersion: target.priceVersion, maxOutputTokens: target.maxOutputTokens, ...(tools?.length ? { tools } : {}) });
 }
 export async function sendHosted(transport: HostedTransport, destination: TuiHostedDestination, requestId: string,
