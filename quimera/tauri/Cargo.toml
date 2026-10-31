@@ -3,7 +3,7 @@ name = "uptokey_tauri"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.90"
-description = "Uptokey desktop shell (Tauri) — supervisor do proxy-local canônico"
+description = "Uptokey desktop coding assistant"
 license = "AGPL-3.0-or-later"
 
 [lib]

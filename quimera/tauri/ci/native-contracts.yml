@@ -39,4 +39,4 @@ jobs:
         with:
           node-version: 24.21.0
       - name: Verify native source contracts without starting the application
-        run: node --test quimera/tauri/scripts/native-contracts-policy.test.mjs quimera/tauri/scripts/build-release.test.mjs quimera/tauri/scripts/release-cargo.test.mjs quimera/tauri/scripts/verify-native-build-identity.test.mjs proxy/core/scripts/native-artifact-version-evidence.test.mjs
+        run: node --test quimera/tauri/scripts/native-contracts-policy.test.mjs quimera/tauri/scripts/build-release.test.mjs quimera/tauri/scripts/release-cargo.test.mjs quimera/tauri/scripts/verify-native-build-identity.test.mjs proxy/core/scripts/native-artifact-version-evidence.test.mjs quimera/tauri/scripts/check-native-source.test.mjs

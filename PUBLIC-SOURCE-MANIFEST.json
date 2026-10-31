@@ -1,6 +1,6 @@
 {
   "schema": "uptokey-public-source-v2",
-  "generatedAtUtc": "2026-10-31T14:18:08.7675362Z",
+  "generatedAtUtc": "2026-10-31T14:38:03.385Z",
   "sourceCommit": null,
   "sourceWorkingTree": "not-inspected",
   "files": [
@@ -19,8 +19,8 @@
     {
       "Source": "quimera/tauri/ci/native-contracts.yml",
       "Destination": ".github/workflows/native-contracts.yml",
-      "SourceSha256": "e06703871047cbb96900024cb5ec8cdc9095a4df29822679de3c15b2d14e8fd2",
-      "Sha256": "e06703871047cbb96900024cb5ec8cdc9095a4df29822679de3c15b2d14e8fd2"
+      "SourceSha256": "307406f1d005e84666cb0dea8cca50257f447015eae5b1f05305e8d4055f3a10",
+      "Sha256": "307406f1d005e84666cb0dea8cca50257f447015eae5b1f05305e8d4055f3a10"
     },
     {
       "Source": "quimera/tauri/ci/native-source-check.yml",
@@ -11467,14 +11467,14 @@
     {
       "Source": "quimera/tauri/Cargo.toml",
       "Destination": "quimera/tauri/Cargo.toml",
-      "SourceSha256": "87bbb8bb5ddc40137185c32a3789afc851df43a2491e6b73a91576cfd669cf30",
-      "Sha256": "87bbb8bb5ddc40137185c32a3789afc851df43a2491e6b73a91576cfd669cf30"
+      "SourceSha256": "1ea24a5268aa7e15b583a81e15c12ed97251fe4c48ae61fd18d820874653588c",
+      "Sha256": "1ea24a5268aa7e15b583a81e15c12ed97251fe4c48ae61fd18d820874653588c"
     },
     {
       "Source": "quimera/tauri/ci/native-contracts.yml",
       "Destination": "quimera/tauri/ci/native-contracts.yml",
-      "SourceSha256": "e06703871047cbb96900024cb5ec8cdc9095a4df29822679de3c15b2d14e8fd2",
-      "Sha256": "e06703871047cbb96900024cb5ec8cdc9095a4df29822679de3c15b2d14e8fd2"
+      "SourceSha256": "307406f1d005e84666cb0dea8cca50257f447015eae5b1f05305e8d4055f3a10",
+      "Sha256": "307406f1d005e84666cb0dea8cca50257f447015eae5b1f05305e8d4055f3a10"
     },
     {
       "Source": "quimera/tauri/ci/native-source-check.yml",
@@ -11953,8 +11953,8 @@
     {
       "Source": "quimera/tauri/scripts/native-contracts-policy.mjs",
       "Destination": "quimera/tauri/scripts/native-contracts-policy.mjs",
-      "SourceSha256": "b942247e4c4b6579a4c5b424b88d6da66a7d7f08dbd0110d538fe7d9ce4fc1da",
-      "Sha256": "b942247e4c4b6579a4c5b424b88d6da66a7d7f08dbd0110d538fe7d9ce4fc1da"
+      "SourceSha256": "03ce1e06d31b72edc12293a59802da8b02dcfc2a17269e19ed1b29a791b1cd37",
+      "Sha256": "03ce1e06d31b72edc12293a59802da8b02dcfc2a17269e19ed1b29a791b1cd37"
     },
     {
       "Source": "quimera/tauri/scripts/native-contracts-policy.test.mjs",

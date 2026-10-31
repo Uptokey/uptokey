@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const NATIVE_CONTRACT_POLICY_COMMAND = 'node quimera/tauri/scripts/native-contracts-policy.mjs .github/workflows/native-contracts.yml';
-export const NATIVE_CONTRACT_TEST_COMMAND = 'node --test quimera/tauri/scripts/native-contracts-policy.test.mjs quimera/tauri/scripts/build-release.test.mjs quimera/tauri/scripts/release-cargo.test.mjs quimera/tauri/scripts/verify-native-build-identity.test.mjs proxy/core/scripts/native-artifact-version-evidence.test.mjs';
+export const NATIVE_CONTRACT_TEST_COMMAND = 'node --test quimera/tauri/scripts/native-contracts-policy.test.mjs quimera/tauri/scripts/build-release.test.mjs quimera/tauri/scripts/release-cargo.test.mjs quimera/tauri/scripts/verify-native-build-identity.test.mjs proxy/core/scripts/native-artifact-version-evidence.test.mjs quimera/tauri/scripts/check-native-source.test.mjs';
 const checkout = 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262';
 const node = 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020';
 const keys = new Set(['name', 'on', 'pull_request', 'push', 'branches', 'permissions', 'contents', 'jobs', 'policy', 'contracts',
