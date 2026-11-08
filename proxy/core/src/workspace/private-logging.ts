@@ -25,9 +25,45 @@ const CANARY_PATTERNS: readonly RegExp[] = [
   /api[_-]?key\s*[:=]\s*\S+/gi,
 ];
 
+/** Scan disjoint PEM blocks without a backtracking multiline expression.
+ * Missing/mismatched or nested delimiters redact the remainder conservatively.
+ */
+function scrubPrivateKeyBlocks(text: string): { text: string; redacted: number } {
+  const marker = "-----BEGIN ";
+  const output: string[] = [];
+  let search = 0, copied = 0, redacted = 0;
+  for (;;) {
+    const start = text.indexOf(marker, search);
+    if (start < 0) break;
+    // PEM labels are small; bound candidate parsing even for malformed input.
+    const candidate = text.slice(start + marker.length, start + marker.length + 85);
+    const delimiter = candidate.indexOf("-----");
+    const label = delimiter < 0 ? "" : candidate.slice(0, delimiter);
+    if (!label || label.length > 80 || !/^[A-Z0-9 ]+$/.test(label) || !label.endsWith("PRIVATE KEY")) {
+      search = start + marker.length;
+      continue;
+    }
+    const content = start + marker.length + label.length + 5;
+    const endMarker = `-----END ${label}-----`;
+    const end = text.indexOf(endMarker, content);
+    const nested = text.indexOf(marker, content);
+    output.push(text.slice(copied, start), "[REDACTED]");
+    redacted++;
+    if (end < 0 || (nested >= 0 && nested < end)) {
+      copied = text.length;
+      break;
+    }
+    copied = end + endMarker.length;
+    search = copied;
+  }
+  output.push(text.slice(copied));
+  return { text: output.join(""), redacted };
+}
+
 export function scrubCanaries(text: string): { text: string; redacted: number } {
-  let out = text;
-  let redacted = 0;
+  const privateKeys = scrubPrivateKeyBlocks(text);
+  let out = privateKeys.text;
+  let redacted = privateKeys.redacted;
   for (const re of CANARY_PATTERNS) {
     out = out.replace(re, () => {
       redacted++;
