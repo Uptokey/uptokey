@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 304" role="img" aria-labelledby="title description">
+  <title id="title">Uptokey at a glance</title>
+  <desc id="description">The terminal, desktop app, web dashboard, Chrome and VS Code connect to the Uptokey local service, which keeps API keys in the operating system vault.</desc>
+  <rect width="960" height="304" rx="24" fill="#f5f4fa"/>
+  <g font-family="system-ui, sans-serif" fill="#181625">
+    <text x="32" y="46" font-size="26" font-weight="700">Uptokey</text>
+    <text x="32" y="72" font-size="16" fill="#555164">Work from the interface you already use.</text>
+    <g fill="#fff" stroke="#ddd9e9">
+      <rect x="32" y="96" width="168" height="88" rx="14"/>
+      <rect x="214" y="96" width="168" height="88" rx="14"/>
+      <rect x="396" y="96" width="168" height="88" rx="14"/>
+      <rect x="578" y="96" width="168" height="88" rx="14"/>
+      <rect x="760" y="96" width="168" height="88" rx="14"/>
+    </g>
+    <g fill="none" stroke="#6539ee" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <g transform="translate(104 111)">
+        <rect x="0" y="0" width="24" height="20" rx="4"/>
+        <path d="m6 6 4 4-4 4m8 0h4"/>
+      </g>
+      <g transform="translate(286 111)">
+        <rect x="0" y="0" width="24" height="17" rx="3"/>
+        <path d="M12 17v5m-6 0h12"/>
+      </g>
+      <g transform="translate(468 111)">
+        <rect x="0" y="0" width="24" height="20" rx="3"/>
+        <path d="M0 6h24m-16 0v14"/>
+      </g>
+      <g transform="translate(650 111)">
+        <rect x="0" y="0" width="24" height="20" rx="3"/>
+        <path d="M0 6h24m-8 0v14"/>
+      </g>
+      <g transform="translate(832 111)">
+        <path d="m8 5-6 5 6 5m8-10 6 5-6 5m-2-13-4 16"/>
+      </g>
+    </g>
+    <g text-anchor="middle" font-size="17" font-weight="650">
+      <text x="116" y="160">Terminal</text>
+      <text x="298" y="160">Desktop</text>
+      <text x="480" y="160">Web dashboard</text>
+      <text x="662" y="160">Chrome</text>
+      <text x="844" y="160">VS Code</text>
+    </g>
+    <path d="M116 184v16h728v-16m-546 0v16m182-16v36m182-36v16" fill="none" stroke="#b7a8e8" stroke-width="2"/>
+    <rect x="222" y="220" width="516" height="54" rx="14" fill="#5b31d9"/>
+    <text x="480" y="254" fill="#fff" text-anchor="middle" font-size="17" font-weight="650">Local AI proxy · API keys in your operating system vault</text>
+  </g>
+</svg>

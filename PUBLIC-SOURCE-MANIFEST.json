@@ -51,6 +51,12 @@
       "Sha256": "e163ff68ffa1831cba50ef52d57f1aa308601c2679b4245a17e407d47dd1dc5c"
     },
     {
+      "Source": "packaging/public-source/docs/images/uptokey-surfaces.svg",
+      "Destination": "docs/images/uptokey-surfaces.svg",
+      "SourceSha256": "2a78625218e7f78bd88bb9eefefd186a5ce6d32d323493e66d72552cfc6da8ba",
+      "Sha256": "2a78625218e7f78bd88bb9eefefd186a5ce6d32d323493e66d72552cfc6da8ba"
+    },
+    {
       "Source": "LICENSE",
       "Destination": "LICENSE",
       "SourceSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
@@ -11767,8 +11773,8 @@
     {
       "Source": "packaging/public-source/README.md",
       "Destination": "README.md",
-      "SourceSha256": "874c66326a0181a493b3e427b39175ce33a8dd633b2a25b73d0e7ed4aa9a4932",
-      "Sha256": "874c66326a0181a493b3e427b39175ce33a8dd633b2a25b73d0e7ed4aa9a4932"
+      "SourceSha256": "1ac26781c93052a00cefaac4b1f2abb6bcc48dc60dc4146bbe8b5997387eb837",
+      "Sha256": "1ac26781c93052a00cefaac4b1f2abb6bcc48dc60dc4146bbe8b5997387eb837"
     },
     {
       "Source": "packaging/public-source/scripts/verify-public-source.mjs",
