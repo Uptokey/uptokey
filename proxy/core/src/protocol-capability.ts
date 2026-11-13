@@ -50,11 +50,12 @@ export function firstUnsupportedField(body: Record<string, unknown>, allowlist: 
 }
 
 /** Chat Completions: unknown fields fail explicitly; never silently drop tools/schema. */
-export function validateChatBody(body: unknown): { ok: true } | { ok: false; field: string } {
+export function validateChatBody(body: unknown, allowLocalOllamaEffort = false): { ok: true } | { ok: false; field: string } {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false, field: "(body)" };
   const record = body as Record<string, unknown>;
   for (const key of Object.keys(record)) {
     if (CHAT_ALLOWLIST.has(key)) continue;
+    if (key === "reasoning_effort" && allowLocalOllamaEffort) continue;
     // Credential-looking roots stay visible to the dedicated 400 credential check.
     if (FORBIDDEN_INFERENCE_ROOTS.has(key.toLowerCase().replace(/[-_]/g, ""))) continue;
     return { ok: false, field: key };

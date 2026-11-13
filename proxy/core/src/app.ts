@@ -8,13 +8,14 @@ import {LocalDelegatedKeys} from './delegated-access.ts';
 import {delegatedMethod,mountDelegatedRoutes} from './delegated-access-http.ts';
 import { mountClientAndManagementRoutes } from "./client-keys-http.ts";
 import { isLocalEndpointUrl } from "./endpoint-policy.ts";
+import { hasOllamaStarterControl, isOllamaStarterEffort, OLLAMA_STARTER_CONTROL } from "./local-runtime/ollama-chat-control.ts";
 import { isLocalModelAlias } from "./local-model-aliases.ts";
 import { Hono, type Context } from "hono";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { createParser } from "eventsource-parser";
 import type { DispatchContext, ProviderName, ProxyConfig } from "./types.ts";
-import type { SecretStore } from "./secret-store.ts";
+import { secretStoreFailureCode, type SecretStore } from "./secret-store.ts";
 import { guardOffline, type OfflineDecision } from "./offline-policy.ts";
 import { Router, buildDispatchBudgetAttempt, buildUnitBudgetAttempt, type MediaBillingUsage } from "./router.ts";
 import { conservativeTokenEstimate, planAttemptAccounting } from './token-estimate.ts';
@@ -27,7 +28,7 @@ import { ControlCapabilityService } from "./control-capability.ts";
 import { RELEASE_VERSION } from "./version.ts";
 import { MAX_INFERENCE_REQUEST_BYTES, MAX_LOCAL_CONTROL_REQUEST_BYTES, readBoundedBody, readBoundedJson } from "@uptokey/sync-contract/limits";
 import { releaseWithResponse, RequestAdmission } from "./request-admission.ts";
-import { hasForbiddenInferenceCredentialField, projectInferenceRequest } from "./inference-request-policy.ts";
+import { hasForbiddenInferenceCredentialField, prepareInferenceRequest } from "./inference-request-policy.ts";
 import { assertProxyConfig, loadConfig, saveConfig } from "./config.ts";
 import { GEMINI_FREE_PRIVACY_NOTICE_VERSION, geminiPrivacyAccepted } from "./privacy.ts";
 import type { ControlIdentity } from "./control-capability.ts";
@@ -35,9 +36,10 @@ import { LocalControlRateLimiter } from "./local-control-rate-limit.ts";
 import { normalizeClientName } from "./client-name.ts";
 import { configureAndEnableOptionalProvider, configureAndEnableUserDefinedProvider, enableProvider, MAX_PROVIDER_KEY_LENGTH, revokeProvider } from "./provider-lifecycle.ts";
 import { localUiHtml } from "./local-ui.ts";
-import { parseSourceSearch, searchPublicSource } from "./public-sources.ts";
-import {localSetupModel,localSetupProvider,localSetupConnection} from "./local-setup-handoff.ts";
+import { BIBLIOGRAPHY_ACCEPT, parseSourceSearch, searchPublicSource } from "./public-sources.ts";
+import {localSetupModel,localSetupProvider,localSetupConnection,standaloneLocalUiQuery} from "./local-setup-handoff.ts";
 import { createDefaultLocalRuntimeRegistry } from "./local-runtime/default.ts";
+import { DEFAULT_OLLAMA_CHAT_ENDPOINT, isOllamaChatCandidateId, runningDefaultOllamaModels, verifyDefaultOllamaChat } from "./local-model-discovery.ts";
 import { detectHardwareProfile } from "./local-runtime/hardware-profile.ts";
 import { estimateModelFit } from "./local-runtime/fit.ts";
 import { LOCAL_MODEL_SUGGESTIONS } from "./local-runtime/catalog.ts";
@@ -74,8 +76,8 @@ import { resolveLocalPrincipal, localPrincipalId, isLocalPrincipalActive, resolv
 import { GovernanceStore } from './workspace/governance-store.ts';
 import { WorkspacePolicyService } from './workspace/governance-service.ts';
 import { governanceMethod, governanceQueryAllowed, mountGovernanceRoutes } from './workspace/governance-http.ts';
-import { BrowserSessionService } from './workspace/browser-session.ts';
-import {isApprovedPwaRegistration,isPublicPwaOrigin,PUBLIC_PWA_ORIGIN} from './workspace/browser-enrollment.ts';
+import { BrowserSessionService, parseWorkspacePublicJwk } from './workspace/browser-session.ts';
+import {BROWSER_APPROVAL_CHOICES_ACCEPT,BROWSER_APPROVAL_EXTENSIONS_ACCEPT,EDITOR_PAIRING_APPROVAL_ACCEPT,EXTENSION_PAIRING_APPROVAL_ACCEPT,NATIVE_CLIENT_APPROVAL_ACCEPT,isApprovedPwaRegistration,isPublicPwaOrigin,PUBLIC_PWA_ORIGIN} from './workspace/browser-enrollment.ts';
 import { ClientContextLinkService, ContextLinkError, authenticateContextCredential, credentialProjectGrant, rawCredentialPrincipal, resolveClientContextLink, guardContextResponse } from './workspace/client-context-link.ts';
 import { readClientRegistration, ClientRegistrationError } from './workspace/client-registration.ts';
 import { CLIENT_KEY_SCOPES } from '@uptokey/sync-contract/client-keys';
@@ -103,9 +105,12 @@ import { ModelInstallJobService, fileInstallJobsStorage, type InstallJobsStorage
 import { OAuthConnectionService } from "./oauth-connection.ts";
 import { matchConnectionRoute, registerConnectionRoutes } from "./connection-http.ts";
 import { registerProviderSetupRoutes } from './provider-setup-http.ts';
+import { nativeByokDestination } from './native-byok-routing.ts';
+import { registerStarterDownloadRoutes } from './starter-download-http.ts';
 import { registerProviderCreditRoutes } from './provider-credit-http.ts';
 import { AccountLoginService } from './account-login.ts';
 import { AccountShareService, AccountShareError, ACCOUNT_SHARE_AUDIENCES } from './account-share.ts';
+import {harnessCollaborationMethod,harnessCollaborationQuery,registerHarnessCollaborationRoutes} from './harness-collaboration.ts';
 import { matchEfficiencyLocalRoute, registerEfficiencyRoutes, ensureDefaultEfficiencyPolicy } from "./efficiency-http.ts";
 import { setActiveEfficiencyPolicy } from './workspace/efficiency-pipeline.ts';
 import { registerRemoteAccessRoutes, REMOTE_ACCESS_LOCAL_ROUTES, remoteAccessQueryAllowed } from "./remote-access-http.ts";
@@ -148,7 +153,7 @@ const LOCAL_UI_ORIGINS = new Set(["http://127.0.0.1:21435", "http://localhost:21
 const isExtensionOrigin = (origin: string | undefined): origin is string => typeof origin === 'string' && /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
 const ACCOUNT_ROUTES = new Set(['capability','status','usage','available','requests','login','logout','request','adopt','unlink','approve','consume','control'].map(action=>`/local/account/${action}`));
 const extensionPathAllowed = (path: string) => ACCOUNT_ROUTES.has(path) || ['/health', '/local/pair/challenge', '/local/pair/consume', '/local/status', '/local/client/rotate', '/local/client/revoke', '/local/workspace/session/challenge', '/local/workspace/session/complete', '/v1/models', '/v1/chat/completions'].includes(path) || path.startsWith('/v1/workspace/');
-const BROWSER_RESPONSE_HEADERS = 'x-uptokey-provider,x-uptokey-model,x-uptokey-fallback,x-uptokey-cache,x-uptokey-failed-provider,x-uptokey-switch-reason,x-uptokey-warnings,x-uptokey-cost-class,x-uptokey-cost-estimate-micros,x-request-id,x-provider-request-id';
+const BROWSER_RESPONSE_HEADERS = 'x-uptokey-provider,x-uptokey-model,x-uptokey-fallback,x-uptokey-cache,x-uptokey-local-route,x-uptokey-failed-provider,x-uptokey-switch-reason,x-uptokey-warnings,x-uptokey-cost-class,x-uptokey-cost-estimate-micros,x-request-id,x-provider-request-id';
 const LOCAL_UI_ORIGIN_PATHS = new Set(["/local/efficiency/preview", "/local/efficiency/cache/invalidate", "/local/efficiency/metrics", "/local/efficiency/policy", "/local/provider/save", "/local/provider/configure-optional", "/local/provider/revoke", "/local/client/provision", "/local/client/revoke", "/local/ui/status", "/v1/chat/completions", "/v1/messages", "/v1/responses", "/v1/models", "/v1/sources/search", "/v1/usage", "/v1/usage/estimation", "/v1/connections", "/v1/local-models", "/v1/local-models/install", "/local/client-keys", "/local/openrouter/management/keys", "/local/openrouter/management/config", "/local/openrouter/credits", "/local/remote-access/discover", "/local/remote-access/plan", "/local/remote-access/start", "/local/remote-access/stop", "/local/remote-access/observe", "/local/remote-access/revoke", "/local/remote-access/grants", "/v1/completions", "/v1/messages/count_tokens"]);
 LOCAL_UI_ORIGIN_PATHS.add('/local/workspace/session/context/key');
 for(const path of ['/local/provider/setup/presets','/local/provider/setup/prepare','/local/provider/setup/commit','/local/provider/setup/dispose','/local/provider/credits'])LOCAL_UI_ORIGIN_PATHS.add(path);
@@ -168,6 +173,7 @@ const LOCAL_ROUTE_METHODS = new Map<string, "GET" | "POST">([
   ["/v1/sources/search", "POST"], ["/v1/usage", "GET"], ["/v1/usage/estimation", "GET"],
   ["/health", "GET"], ["/v1/connections", "GET"], ["/v1/local-models", "GET"],
   ["/local/pair/challenge", "POST"], ["/local/pair/approve", "POST"], ["/local/pair/consume", "POST"],
+  ["/local/pair/browser-offer", "GET"],
   ["/local/workspace/session/context/key", "POST"],
   ["/local/control-pair/approve", "POST"], ["/local/control-pair/revoke", "POST"],
   ["/local/config/reload", "POST"], ["/local/update/authorize-stop", "POST"],
@@ -292,6 +298,7 @@ function originPathAllowedFor(pathname: string): boolean {
 }
 
 function localListQueryAllowed(pathname: string, search: URLSearchParams): boolean {
+  if (pathname === "/v1/local-models") return search.size === 1 && isOllamaChatCandidateId(search.get("verifyLocalChat"));
   if(pathname==='/local/provider/credits')return [...search.keys()].every(key=>key==='connectionId')&&search.getAll('connectionId').length===1;
   if (pathname === "/local/client-keys" || pathname.startsWith("/local/openrouter/management/keys")) {
     const keys = [...search.keys()];
@@ -345,7 +352,8 @@ export function createApp(
   workspaceEmbeddings?: ConstructorParameters<typeof WorkspaceRuntime>[1]['embeddings'],
   workspaceWebSources?: ConstructorParameters<typeof WorkspaceRuntime>[1]['webSources'],
   workspaceProjectRunner?: ConstructorParameters<typeof WorkspaceRuntime>[1]['projectRunner'],
-  workspaceMediaLaunch?: MediaLaunchDependencies
+  workspaceMediaLaunch?: MediaLaunchDependencies,
+  harnessCollaborationFetch?: typeof fetch
 ) {
   const app = new Hono();
   const startedAt = new Date().toISOString();
@@ -524,6 +532,8 @@ export function createApp(
     if (error instanceof ClientRegistrationError) return c.json({ error: { type: "client_registration_invalid" } }, 403);
     if (error instanceof SinkAccessDeniedError)
       return c.json({ error: { type: error.code } }, 403);
+    const storageFailure = secretStoreFailureCode(error);
+    if (storageFailure) return c.json({ error: { type: storageFailure } }, 503);
     return c.json({ error: { type: "proxy_unavailable" } }, 503);
   });
 
@@ -568,7 +578,7 @@ export function createApp(
     const usageObservabilityRouteMethod = usageObservabilityMethod(url.pathname, effectiveMethod);
     const combinedWorkspaceMethod = delegatedMethod(url.pathname) ?? workspaceRouteMethod ?? governanceRouteMethod ?? conversationRouteMethod ?? automationRouteMethod ?? settingsRouteMethod ?? agentsCliRouteMethod ?? usageObservabilityRouteMethod;
     const remoteConfigMethod = ['/local/remote-access/config','/local/routing'].includes(url.pathname) && ['GET', 'POST'].includes(effectiveMethod) ? effectiveMethod : undefined;
-    const expectedMethod = remoteConfigMethod ?? LOCAL_ROUTE_METHODS.get(url.pathname) ?? localRouteMethod(url.pathname, effectiveMethod) ?? combinedWorkspaceMethod;
+    const expectedMethod = harnessCollaborationMethod(url.pathname) ?? remoteConfigMethod ?? LOCAL_ROUTE_METHODS.get(url.pathname) ?? localRouteMethod(url.pathname, effectiveMethod) ?? combinedWorkspaceMethod;
     const originPathAllowed = originPathAllowedFor(url.pathname) || combinedWorkspaceMethod !== undefined || governanceQueryAllowed(url);
     const origin = c.req.header("origin");
     if (c.req.header('x-uptokey-account-token') !== undefined && !url.pathname.startsWith('/v1/workspace/mobility/')) return c.json({ error: { type: 'account_credential_boundary' } }, 400);
@@ -633,7 +643,7 @@ export function createApp(
     // E2-02: retorno OAuth loopback carrega ?code&state do provedor oficial.
     const oauthReturnQuery = c.req.method === "GET" && url.pathname.startsWith("/local/oauth/return/");
     const canonicalChatQuery = c.req.method === "GET" && url.pathname === "/chat" && [...url.searchParams.keys()].join(',') === 'lang' && /^[a-z]{2}(?:-[A-Za-z]{2,4})?$/.test(url.searchParams.get('lang') ?? '');
-    if (url.search !== "" && !(c.req.method === "GET" && (workspaceUsageQuery(url) || governanceQueryAllowed(url) || conversationQueryAllowed(url) || settingsQueryAllowed(url) || localListQueryAllowed(url.pathname, url.searchParams) || remoteAccessQueryAllowed(url) || oauthReturnQuery || canonicalChatQuery || agentsCliQueryAllowed(url) || usageObservabilityQueryAllowed(url) || url.pathname === "/ui" && (localSetupModel(url.searchParams) !== undefined || localSetupProvider(url.searchParams) !== undefined || localSetupConnection(url.searchParams) !== undefined)))) return c.json({ error: { type: "query_rejected" } }, 400);
+    if (url.search !== "" && !(c.req.method === "GET" && (harnessCollaborationQuery(url) || workspaceUsageQuery(url) || governanceQueryAllowed(url) || conversationQueryAllowed(url) || settingsQueryAllowed(url) || localListQueryAllowed(url.pathname, url.searchParams) || remoteAccessQueryAllowed(url) || oauthReturnQuery || canonicalChatQuery || agentsCliQueryAllowed(url) || usageObservabilityQueryAllowed(url) || url.pathname === "/ui" && (standaloneLocalUiQuery(url.searchParams) || localSetupModel(url.searchParams) !== undefined || localSetupProvider(url.searchParams) !== undefined || localSetupConnection(url.searchParams) !== undefined)))) return c.json({ error: { type: "query_rejected" } }, 400);
     if (!expectedMethod) return c.json({ error: { type: "route_not_found" } }, 404);
     if (c.req.method !== expectedMethod) { c.header("Allow", expectedMethod); return c.json({ error: { type: "method_not_allowed" } }, 405); }
     if ((isLocalJsonRoute(url.pathname, c.req.method) || combinedWorkspaceMethod === 'POST') && c.req.header("content-type") !== "application/json") return c.json({ error: { type: "unsupported_media_type" } }, 415);
@@ -669,7 +679,39 @@ export function createApp(
     }
   });
 
-  app.get("/health", (c) => c.json({ status: "ok", data_plane: "local", version: RELEASE_VERSION, started_at: startedAt }));
+  app.get("/health", (c) => {
+    c.header("X-Uptokey-Local-UI", "standalone");
+    return c.json({ status: "ok", data_plane: "local", version: RELEASE_VERSION, started_at: startedAt });
+  });
+  function startPairing(c:Context, clientName:string, audience:PairingAudience, origin?:string, publicJwk?:unknown, negotiated=false) {
+    const respond=(challenge:ReturnType<PairingService['create']>)=>{
+      if (audience === 'vscode' && challenge.nonce && c.req.header('accept') === EDITOR_PAIRING_APPROVAL_ACCEPT) {
+        return c.json({ ...challenge, editorApprovalWait: true }, 201);
+      }
+      if (audience === 'browser-extension' && challenge.nonce && c.req.header('accept') === EXTENSION_PAIRING_APPROVAL_ACCEPT) {
+        return c.json({ ...challenge, approvalWait: true }, 201);
+      }
+      if(audience!=='pwa')return c.json(challenge,201);
+      const approval={...challenge,waitForApproval:true};
+      return c.json(negotiated?{approval:{...approval,cancelSupported:true}}:approval,201);
+    };
+    try {
+      if(negotiated&&origin){
+        const pending=pairing.findUnapprovedBrowserChallenge(origin,publicJwk);
+        if(pending)return respond(pending);
+      }
+      const rate=pairingRateLimiter.take("localhost-pairing-creation",LOCAL_PAIRING_CHALLENGE_LIMIT,LOCAL_PAIRING_CHALLENGE_WINDOW_MS);
+      if(!rate.ok){c.header("Retry-After",String(rate.retryAfter));return c.json({error:{type:"local_pairing_rate_limited"}},429);}
+      return respond(pairing.create(clientName,audience,origin,publicJwk,negotiated));
+    }catch(error){
+      if(error instanceof Error&&error.message==="pairing_capacity_exceeded"){
+        c.header("Retry-After","300");
+        return c.json({error:{type:"pairing_capacity_exceeded"}},429);
+      }
+      if(error instanceof Error&&['browser_key_invalid','pairing_key_required','pairing_origin_invalid'].includes(error.message))return c.json({error:{type:'invalid_request'}},400);
+      throw error;
+    }
+  }
   for(const action of ['challenge','complete'] as const) app.post(`/local/workspace/session/${action}`,async c=>{
     const origin=c.req.header('origin');
     if(!origin||!LOCAL_UI_ORIGINS.has(origin)&&!isExtensionOrigin(origin)&&!isPublicPwaOrigin(origin))return c.json({error:{type:'origin_rejected'}},403);
@@ -680,17 +722,33 @@ export function createApp(
     try {
       if(action==='challenge') {
         if(!hasExactKeys(parsed.value,['publicJwk']))return c.json({error:{type:'invalid_request'}},400);
+        if(isPublicPwaOrigin(origin)&&c.req.header('accept')==='application/vnd.uptokey.workspace-approval+json'){
+          try{return c.json(await browserSessions.challengePublicPwa(parsed.value.publicJwk,origin));}
+          catch(error){
+            if(!(error instanceof Error)||error.message!=='browser_enrollment_rejected')throw error;
+            const attempt=pairingRateLimiter.take("localhost-pairing-attempt",LOCAL_PAIRING_ATTEMPT_LIMIT,LOCAL_PAIRING_ATTEMPT_WINDOW_MS);
+            if(!attempt.ok){c.header("Retry-After",String(attempt.retryAfter));return c.json({error:{type:"local_pairing_rate_limited"}},429);}
+            return startPairing(c,'Uptokey Web','pwa',origin,parsed.value.publicJwk,true);
+          }
+        }
         return c.json(isPublicPwaOrigin(origin)?await browserSessions.challengePublicPwa(parsed.value.publicJwk,origin):isExtensionOrigin(origin)?await browserSessions.challengeExtension(parsed.value.publicJwk,origin):browserSessions.challenge(parsed.value.publicJwk));
       }
       if(!hasExactKeys(parsed.value,['challengeId','signature']))return c.json({error:{type:'invalid_request'}},400);
-      return c.json(await browserSessions.complete(parsed.value.challengeId,parsed.value.signature,origin));
+      const session=await browserSessions.complete(parsed.value.challengeId,parsed.value.signature,origin);
+      if(isPublicPwaOrigin(origin)&&c.req.header('accept')==='application/vnd.uptokey.workspace-session+json'){
+        // The signed proof has already rotated the bearer. If the context
+        // lookup fails, return the lease so the client can use its usual GET.
+        const context=await contextLinks.status(`Bearer ${session.token}`).catch(()=>undefined);
+        if(context?.clientId===session.clientId)return c.json({...session,context});
+      }
+      return c.json(session);
     }catch{return c.json({error:{type:'workspace_session_rejected'}},403);}
   });
   app.get("/", (c) => c.redirect("/ui"));
   app.get("/v1", (c) => c.redirect("/ui"));
   app.get("/ui", (c) => {
     const incoming = new URL(c.req.url);
-    if ((c.req.header("accept") ?? "").includes("text/html")) {
+    if (!standaloneLocalUiQuery(incoming.searchParams) && (c.req.header("accept") ?? "").includes("text/html")) {
       const target = new URL("http://127.0.0.1:5273/design/#connections");
       for (const key of ["lang", "provider", "connection", "model"]) {
         const value = incoming.searchParams.get(key);
@@ -796,23 +854,47 @@ export function createApp(
     const pairingOrigin = c.req.header('origin');
     const publicPwaPairing=isPublicPwaOrigin(pairingOrigin);
     if(!isJsonObject(body))return c.json({error:{type:'invalid_request'}},400);
-    if (publicPwaPairing?(!hasExactKeys(body,['clientName','audience','publicJwk'])||body.audience!=='pwa'):
-      ((!hasExactKeys(body, ["clientName"]) && !hasExactKeys(body, ["clientName", "audience"])) || ("audience" in body && (!PAIRING_AUDIENCES.includes(body.audience as PairingAudience)||body.audience==='pwa')))) return c.json({ error: { type: "invalid_request" } }, 400);
+    const audience = body.audience;
+    const boundEditor = pairingOrigin === undefined && audience === 'vscode' &&
+      hasExactKeys(body, ['clientName', 'audience', 'publicJwk']);
+    const boundExtension = isExtensionOrigin(pairingOrigin) && audience === 'browser-extension' &&
+      hasExactKeys(body, ['clientName', 'audience', 'publicJwk']);
+    if (boundEditor) {
+      try { parseWorkspacePublicJwk(body.publicJwk); }
+      catch { return c.json({error:{type:'pairing_editor_key_invalid'}},422); }
+    }
+    if (boundExtension) {
+      try { parseWorkspacePublicJwk(body.publicJwk); }
+      catch { return c.json({error:{type:'pairing_extension_key_invalid'}},422); }
+    }
+    const legacyRequest = hasExactKeys(body, ["clientName"]) ||
+      hasExactKeys(body, ["clientName", "audience"]) && audience !== 'pwa' &&
+        PAIRING_AUDIENCES.includes(audience as PairingAudience);
+    const validRequest = publicPwaPairing
+      ? hasExactKeys(body, ['clientName', 'audience', 'publicJwk']) && audience === 'pwa'
+      : boundEditor || boundExtension || legacyRequest;
+    if (!validRequest) return c.json({ error: { type: "invalid_request" } }, 400);
     const clientName = normalizeClientName(body.clientName);
     if (!clientName) return c.json({ error: { type: "invalid_request" } }, 400);
-    if (isExtensionOrigin(pairingOrigin) && (!('audience' in body) || body.audience !== 'browser-extension')) return c.json({ error: { type: 'pairing_audience_invalid' } }, 400);
-    const creationRate = pairingRateLimiter.take("localhost-pairing-creation", LOCAL_PAIRING_CHALLENGE_LIMIT, LOCAL_PAIRING_CHALLENGE_WINDOW_MS);
-    if (!creationRate.ok) { c.header("Retry-After", String(creationRate.retryAfter)); return c.json({ error: { type: "local_pairing_rate_limited" } }, 429); }
-    try {
-      return c.json(pairing.create(clientName, parsePairingAudience("audience" in body ? body.audience : undefined), isExtensionOrigin(pairingOrigin)||publicPwaPairing ? pairingOrigin : undefined,publicPwaPairing?body.publicJwk:undefined), 201);
-    } catch (error) {
-      if (error instanceof Error && error.message === "pairing_capacity_exceeded") {
-        c.header("Retry-After", "300");
-        return c.json({ error: { type: "pairing_capacity_exceeded" } }, 429);
-      }
-      if(error instanceof Error&&['browser_key_invalid','pairing_key_required','pairing_origin_invalid'].includes(error.message))return c.json({error:{type:'invalid_request'}},400);
-      throw error;
+    if (isExtensionOrigin(pairingOrigin) && audience !== 'browser-extension') return c.json({ error: { type: 'pairing_audience_invalid' } }, 400);
+    return startPairing(c,clientName,parsePairingAudience(audience),
+      isExtensionOrigin(pairingOrigin)||publicPwaPairing?pairingOrigin:undefined,publicPwaPairing||boundEditor||boundExtension?body.publicJwk:undefined);
+  });
+
+  // Owner-side review never runs with a browser origin or a paired client bearer.
+  app.get("/local/pair/browser-offer", async (c) => {
+    if (c.req.header("origin") !== undefined) return c.json({ error: { type: "origin_rejected" } }, 403);
+    if (new URL(c.req.url).search) return c.json({ error: { type: "invalid_request" } }, 400);
+    const auth = await administrativeAuth(c.req.header("authorization"), secrets, authRateLimiter);
+    if (!auth.allowed) {
+      if (auth.rateLimited) c.header("Retry-After", String(auth.retryAfterSeconds));
+      return auth.rateLimited ? c.json({ error: { type: "local_auth_rate_limited" } }, 429) :
+        c.json({ error: { type: "unauthorized" } }, 401);
     }
+    const accept = c.req.header("accept");
+    const includeEditor = accept === NATIVE_CLIENT_APPROVAL_ACCEPT;
+    const includeExtensions = includeEditor || accept === BROWSER_APPROVAL_EXTENSIONS_ACCEPT;
+    return c.json(pairing.browserApprovalOffer(includeExtensions || accept === BROWSER_APPROVAL_CHOICES_ACCEPT, includeExtensions, includeEditor));
   });
 
   app.post("/local/pair/approve", async (c) => {
@@ -833,15 +915,41 @@ export function createApp(
     if(publicPwaPairing){const rate=pairingRateLimiter.take('public-pwa-pairing-consume',LOCAL_PAIRING_CONSUME_LIMIT,LOCAL_PAIRING_CONSUME_WINDOW_MS);if(!rate.ok){c.header('Retry-After',String(rate.retryAfter));return c.json({error:{type:'local_pairing_rate_limited'}},429);}}
     const parsed = await readBoundedJson(c.req.raw, MAX_LOCAL_CONTROL_REQUEST_BYTES);
     if (!parsed.ok) return c.json({ error: { type: parsed.reason === "too_large" ? "request_too_large" : "invalid_request" } }, parsed.reason === "too_large" ? 413 : 400);
-    const body = parsed.value as Record<string, unknown>;
-    if (!isUuidV4(body.id)) return c.json({ error: { type: "invalid_request" } }, 400);
-    if(publicPwaPairing&&!hasExactKeys(body,['id','publicJwk','signature']))return c.json({error:{type:'invalid_request'}},400);
-    const extraKeys = Object.keys(body).filter((key) => key !== "id" && key !== "publicJwk" && !(publicPwaPairing&&key==='signature'));
+    const body = parsed.value;
+    if (!isJsonObject(body) || !isUuidV4(body.id)) return c.json({ error: { type: "invalid_request" } }, 400);
+    const waitsForApproval = publicPwaPairing && body.waitForApproval === true;
+    const cancelsBrowserPairing = publicPwaPairing && body.cancel === true;
+    const editorProof = origin === undefined && body.editorSignature !== undefined;
+    const extensionProof = isExtensionOrigin(origin) && body.extensionSignature !== undefined;
+    const observesEditorApproval = editorProof && body.editorApprovalWait === true;
+    const observesExtensionApproval = extensionProof && body.extensionApprovalWait === true;
+    if(publicPwaPairing&&!hasExactKeys(body,['id','publicJwk','signature',...(cancelsBrowserPairing?['cancel']:waitsForApproval?['waitForApproval']:[])]))return c.json({error:{type:'invalid_request'}},400);
+    const extraKeys = Object.keys(body).filter((key) => key !== "id" && key !== "publicJwk" && !(publicPwaPairing&&key==='signature') &&
+      !(editorProof&&key==='editorSignature') && !(extensionProof&&key==='extensionSignature') && !(waitsForApproval&&key==='waitForApproval') &&
+      !(observesEditorApproval&&key==='editorApprovalWait') && !(observesExtensionApproval&&key==='extensionApprovalWait') && !(cancelsBrowserPairing&&key==='cancel'));
     if (extraKeys.length > 0) return c.json({ error: { type: "invalid_request" } }, 400);
+    if (observesEditorApproval || observesExtensionApproval) {
+      const rate = pairingRateLimiter.take(observesEditorApproval?'editor-pairing-approval-wait':'extension-pairing-approval-wait', LOCAL_PAIRING_CONSUME_LIMIT, LOCAL_PAIRING_CONSUME_WINDOW_MS);
+      if (!rate.ok) {
+        c.header('Retry-After', String(rate.retryAfter));
+        return c.json({error:{type:'local_pairing_rate_limited'}},429);
+      }
+    }
     // Optional native-client consent key enrollment, bound to the approved pairing.
     let client;
     try {
-      client = await pairing.consume(body.id, body.publicJwk, isExtensionOrigin(origin)||publicPwaPairing ? origin : undefined,publicPwaPairing?body.signature:undefined);
+      if (cancelsBrowserPairing) {
+        await pairing.cancelBrowserPairing(body.id, body.publicJwk, origin, body.signature);
+        return c.json({cancelled:true});
+      }
+      if (observesEditorApproval || observesExtensionApproval) {
+        const approved = observesExtensionApproval
+          ? await pairing.waitForExtensionApproval(body.id, body.publicJwk, origin, body.extensionSignature, c.req.raw.signal)
+          : await pairing.waitForEditorApproval(body.id, body.publicJwk, body.editorSignature, c.req.raw.signal);
+        return approved ? c.json({approved:true}) : c.json({error:{type:'pairing_pending_or_expired'}},409);
+      }
+      client = await pairing.consume(body.id, body.publicJwk, isExtensionOrigin(origin)||publicPwaPairing ? origin : undefined,
+        publicPwaPairing?body.signature:editorProof?body.editorSignature:extensionProof?body.extensionSignature:undefined,waitsForApproval?c.req.raw.signal:undefined);
     } catch (enrollmentError) {
       if (enrollmentError instanceof Error && enrollmentError.message === "browser_key_invalid") return c.json({ error: { type: "invalid_request" } }, 400);
       // The approved challenge is kept: the client may retry consume with its public key.
@@ -850,7 +958,9 @@ export function createApp(
       if(enrollmentError instanceof Error&&enrollmentError.message==='pairing_invalid_or_expired')return c.json({error:{type:'pairing_pending_or_expired'}},409);
       throw enrollmentError;
     }
-    if (client) return c.json(client);
+    // The signed public consume has already committed the browser key,
+    // exact origin and 12-hour bearer. Other pairing audiences keep their wire shape.
+    if (client) return c.json(publicPwaPairing ? { ...client, workspaceSession: 'browser-bound-v1' } : client);
     const rate = pairingRateLimiter.take("localhost-pairing-consume-invalid", LOCAL_PAIRING_CONSUME_LIMIT, LOCAL_PAIRING_CONSUME_WINDOW_MS);
     if (!rate.ok) { c.header("Retry-After", String(rate.retryAfter)); return c.json({ error: { type: "local_pairing_rate_limited" } }, 429); }
     return c.json({ error: { type: "pairing_pending_or_expired" } }, 409);
@@ -1140,6 +1250,10 @@ export function createApp(
     c.header("Cache-Control", "no-store");
   });
 
+  // These separate, explicitly consented Harness resources retain /v1 bearer,
+  // scope, RPM/concurrency and ephemeral checks above. They are not W5 file routes.
+  registerHarnessCollaborationRoutes(app,{secrets,epoch:()=>identityEpoch?.(),fetcher:harnessCollaborationFetch});
+
   /** Read the E2-03 principal resolved by the /v1/* middleware. */
   function requestClient(c: { get: (key: never) => unknown }): ResolvedClient {
     return (c.get("client" as never) as ResolvedClient | undefined) ?? { kind: "admin" };
@@ -1148,7 +1262,8 @@ export function createApp(
   // This is shared by protocol adapters before their provider dispatch. An explicit
   // conversation id binds the request to its owner's stored policy; request headers
   // may tighten it, but cannot grant permission revoked in the repository.
-  async function processingScope(c: Context, body: unknown, externalOperation = false, governedOperation = false): Promise<Pick<DispatchContext, 'allowedProviders' | 'cachePartition' | 'allowCache' | 'tenantId' | 'retentionMode' | 'reserveBudget'> | Response> {
+  async function processingScope(c: Context, body: unknown, options: { externalOperation?: boolean; governedOperation?: boolean; requiredLocalProvider?: ProviderName } = {}): Promise<Pick<DispatchContext, 'allowedProviders' | 'localProcessingOnly' | 'cachePartition' | 'allowCache' | 'tenantId' | 'retentionMode' | 'reserveBudget'> | Response> {
+    const { externalOperation, governedOperation, requiredLocalProvider } = options;
     const raw = isJsonObject(body) ? body : {};
     const headerPolicy = c.req.header('x-uptokey-processing-policy');
     const bodyPolicy = raw.processing_policy;
@@ -1160,7 +1275,10 @@ export function createApp(
     if (headerPolicy !== undefined && bodyPolicy !== undefined && headerPolicy !== bodyPolicy) {
       return c.json({ error: { type: 'processing_policy_conflict' } }, 409);
     }
-    let localOnly = headerPolicy === 'local_only' || bodyPolicy === 'local_only';
+    if (requiredLocalProvider && (headerPolicy === 'external_allowed' || bodyPolicy === 'external_allowed')) {
+      return c.json({ error: { type: 'processing_policy_conflict' } }, 409);
+    }
+    let localOnly = requiredLocalProvider !== undefined || headerPolicy === 'local_only' || bodyPolicy === 'local_only';
     const currentRetention = await resolveLocalRetentionMode(c.req.header('authorization'), secrets);
     // Delegation has a separate inference authority and never gains workspace access.
     if (currentRetention === undefined && !requestClient(c).delegation) return c.json({error:{type:'unauthorized'}},401);
@@ -1276,9 +1394,13 @@ export function createApp(
       },
     } : {};
     if (!localOnly) return {...cacheScope,...budgetScope,...(delegatedProviders?{allowedProviders:delegatedProviders}:{}),retentionMode:retentionModeScope};
-    const allowedProviders = externalOperation ? [] : localProcessingProviders(config, String(raw.model ?? 'uptokey-auto')).filter(p=>!delegatedProviders||delegatedProviders.includes(p));
+    const clientProviders = requestClient(c).policy?.providerIds;
+    const allowedProviders = externalOperation ? [] : localProcessingProviders(config, String(raw.model ?? 'uptokey-auto')).filter(provider =>
+      (!delegatedProviders || delegatedProviders.includes(provider))
+      && (!requiredLocalProvider || provider === requiredLocalProvider && (!clientProviders?.length || clientProviders.includes(provider))),
+    );
     if (!allowedProviders.length) return c.json({ error: { type: 'local_processing_denied' } }, 403);
-    return { allowedProviders, ...cacheScope, ...budgetScope, retentionMode: retentionModeScope };
+    return { allowedProviders, localProcessingOnly: true, ...cacheScope, ...budgetScope, retentionMode: retentionModeScope };
   }
 
   app.post("/v1/chat/completions", async (c) => {
@@ -1290,16 +1412,24 @@ export function createApp(
     const release = inferenceAdmission.tryAcquire();
     if (!release) {
       c.header("Retry-After", "1");
-      return c.json({ error: { type: "local_capacity_exceeded" } }, 429);
+      // This is the admission gate, before a provider or reservation is started.
+      return c.json({ error: { type: "local_capacity_exceeded", dispatched: false } }, 429);
     }
     try {
     const parsed = await readBoundedJson(c.req.raw, MAX_INFERENCE_REQUEST_BYTES);
     if (!parsed.ok) { release(); return c.json({ error: { type: parsed.reason === "too_large" ? "inference_request_too_large" : "invalid_request" } }, parsed.reason === "too_large" ? 413 : 400); }
-      const privacyScope = await processingScope(c, parsed.value);
+    const body = parsed.value;
+    const localOllamaEffort = isJsonObject(body) && isOllamaStarterEffort(body.reasoning_effort)
+      && hasOllamaStarterControl(config, body.model)
+      && (body.uptokey_provider === undefined || body.uptokey_provider === "ollama")
+      && (body.uptokey_require_model === undefined || body.uptokey_require_model === true);
+      const privacyScope = await processingScope(c, body, localOllamaEffort ? { requiredLocalProvider: "ollama" } : {});
       if (privacyScope instanceof Response) { release(); return privacyScope; }
-    const fieldCheck = validateChatBody(parsed.value);
+    const fieldCheck = validateChatBody(body, localOllamaEffort);
     if (!fieldCheck.ok) { release(); return c.json({ error: { type: "protocol_field_unsupported", field: fieldCheck.field } }, 422); }
-    const request = projectInferenceRequest(parsed.value);
+    const request = prepareInferenceRequest(localOllamaEffort
+      ? { ...body, uptokey_provider: "ollama", uptokey_require_model: true }
+      : body);
     if (!request) { release(); return c.json({ error: { type: "invalid_request", message: "schema de Chat Completions inválido" } }, 400); }
     if (hasForbiddenInferenceCredentialField(request)) { release(); return c.json({ error: { type: "credential_field_forbidden" } }, 400); }
     const client = requestClient(c);
@@ -1307,8 +1437,14 @@ export function createApp(
     if (modelDenied) { release(); return c.json({ error: { type: "model_scope_denied" } }, 403); }
     const limitDenied = checkOutputLimit(client, request.max_tokens ?? request.max_completion_tokens);
     if (limitDenied) { release(); return c.json({ error: { type: "key_limit_exceeded" } }, 429); }
+    const nativeDestination = privacyScope.localProcessingOnly ? undefined : await nativeByokDestination(request, client, config, connectionProfiles);
+    if (nativeDestination === 'ambiguous') { release(); return c.json({ error: { type: 'model_destination_ambiguous' } }, 409); }
+    if (nativeDestination === 'unavailable') { release(); return c.json({ error: { type: 'model_destination_unavailable' } }, 409); }
+    const dispatchedRequest = nativeDestination
+      ? { ...request, uptokey_provider: nativeDestination.providerId, uptokey_account: nativeDestination.accountId, uptokey_require_model: true }
+      : request;
     const cacheTenantId = currentIdentity?.tenantId ?? config.appliedConfigTenantId;
-    let response = await dispatchInference(router, request, { requestId: randomUUID(), ...(cacheTenantId ? { tenantId: cacheTenantId } : {}), ...privacyScope }, c.req.raw.signal);
+    let response = await dispatchInference(router, dispatchedRequest, { requestId: randomUUID(), ...(cacheTenantId ? { tenantId: cacheTenantId } : {}), ...privacyScope }, c.req.raw.signal);
     if (response.status === 429 && !offline.allowed && offline.code === "offline_grace_expired") {
       const cloned = response.clone();
       const body = await cloned.json().catch(() => null);
@@ -1345,7 +1481,7 @@ export function createApp(
         return c.json({ error: { type: "invalid_request", message: "schema de Anthropic Messages inválido" } }, 400);
       }
       if (hasForbiddenInferenceCredentialField(converted as Record<string, unknown>)) { release(); return c.json({ error: { type: "credential_field_forbidden" } }, 400); }
-      const request = projectInferenceRequest(converted);
+      const request = prepareInferenceRequest(converted);
       if (!request) { release(); return c.json({ error: { type: "invalid_request", message: "schema de Anthropic Messages inválido" } }, 400); }
       const client = requestClient(c);
       const modelDenied = checkModelScope(client, request.model ?? (typeof parsed.value === "object" && parsed.value !== null ? String((parsed.value as Record<string, unknown>).model ?? "") || undefined : undefined));
@@ -1366,7 +1502,7 @@ export function createApp(
       if (request.stream === true && contentType === "text/event-stream") {
         if (!response.body) { release(); return c.json({ error: { type: "provider_response_invalid" } }, 502); }
         const headers = new Headers({ "content-type": "text/event-stream", "cache-control": "no-store" });
-        for (const name of ["x-uptokey-provider", "x-uptokey-model", "x-uptokey-fallback", "x-uptokey-cache", "x-request-id", "x-provider-request-id"]) {
+        for (const name of ["x-uptokey-provider", "x-uptokey-model", "x-uptokey-fallback", "x-uptokey-cache", "x-uptokey-local-route", "x-request-id", "x-provider-request-id"]) {
           const value = response.headers.get(name);
           if (value) headers.set(name, value);
         }
@@ -1381,7 +1517,7 @@ export function createApp(
         return c.json({ error: { type: "provider_response_invalid" } }, 502);
       }
       const headers = new Headers({ "content-type": "application/json", "cache-control": "no-store" });
-      for (const name of ["x-uptokey-provider", "x-uptokey-model", "x-uptokey-fallback", "x-uptokey-cache", "x-request-id", "x-provider-request-id"]) {
+      for (const name of ["x-uptokey-provider", "x-uptokey-model", "x-uptokey-fallback", "x-uptokey-cache", "x-uptokey-local-route", "x-request-id", "x-provider-request-id"]) {
         const value = response.headers.get(name);
         if (value) headers.set(name, value);
       }
@@ -1416,7 +1552,7 @@ export function createApp(
         return c.json({ error: { type: "invalid_request", message: "schema de Responses inválido" } }, 400);
       }
       if (hasForbiddenInferenceCredentialField(converted as Record<string, unknown>)) { release(); return c.json({ error: { type: "credential_field_forbidden" } }, 400); }
-      const request = projectInferenceRequest(converted);
+      const request = prepareInferenceRequest(converted);
       if (!request) { release(); return c.json({ error: { type: "invalid_request", message: "schema de Responses inválido" } }, 400); }
       const client = requestClient(c);
       const modelDenied = checkModelScope(client, request.model ?? (typeof parsed.value === "object" && parsed.value !== null ? String((parsed.value as Record<string, unknown>).model ?? "") || undefined : undefined));
@@ -1437,7 +1573,7 @@ export function createApp(
       if (request.stream === true && contentType === "text/event-stream") {
         if (!response.body) { release(); return c.json({ error: { type: "provider_response_invalid" } }, 502); }
         const headers = new Headers({ "content-type": "text/event-stream", "cache-control": "no-store" });
-        for (const name of ["x-uptokey-provider", "x-uptokey-model", "x-uptokey-fallback", "x-uptokey-cache", "x-request-id", "x-provider-request-id"]) {
+        for (const name of ["x-uptokey-provider", "x-uptokey-model", "x-uptokey-fallback", "x-uptokey-cache", "x-uptokey-local-route", "x-request-id", "x-provider-request-id"]) {
           const value = response.headers.get(name);
           if (value) headers.set(name, value);
         }
@@ -1452,7 +1588,7 @@ export function createApp(
         return c.json({ error: { type: "provider_response_invalid" } }, 502);
       }
       const headers = new Headers({ "content-type": "application/json", "cache-control": "no-store" });
-      for (const name of ["x-uptokey-provider", "x-uptokey-model", "x-uptokey-fallback", "x-uptokey-cache", "x-request-id", "x-provider-request-id"]) {
+      for (const name of ["x-uptokey-provider", "x-uptokey-model", "x-uptokey-fallback", "x-uptokey-cache", "x-uptokey-local-route", "x-request-id", "x-provider-request-id"]) {
         const value = response.headers.get(name);
         if (value) headers.set(name, value);
       }
@@ -1464,13 +1600,13 @@ export function createApp(
   mountClientAndManagementRoutes(app, {
     config, secrets, identityEpoch, offlineGuard, inferenceAdmission, authRateLimiter,
     pairingRateLimiter, openRouterManagement, router, identityEpochMismatch,
-    administrativeAuth, authorizeClientKeyManagement, projectInferenceRequest,
+    administrativeAuth, authorizeClientKeyManagement, prepareInferenceRequest,
     requestClient, checkModelScope, checkOutputLimit, dispatchInference, processingScope,
     openAiChatSseToTextCompletionSse
   });
 
   app.get("/v1/models", (c) => {
-    return c.json(localModelsProjection(config));
+    return c.json(localModelsProjection(config, requestClient(c)));
   });
 
   app.get("/v1/usage", (c) => c.json(router.usageMetrics()));
@@ -1480,6 +1616,7 @@ export function createApp(
   let legacyConnectionsMigratedFor: string | undefined;
   app.get("/v1/connections", async (c) => {
     let profileInventory: Array<{ profile: import('./connection-profiles.ts').StoredProfile; hasCredential: boolean }> = [];
+    let modelRoutesKnown = !connectionProfiles;
     if (connectionProfiles) {
       try {
         // Providers configured through the CLI/TUI become default connections;
@@ -1489,8 +1626,9 @@ export function createApp(
           await connectionProfiles.migrateFromLegacy(config).then(() => { legacyConnectionsMigratedFor = legacyKey; }, () => undefined);
         }
         profileInventory = await Promise.all((await connectionProfiles.list()).filter(profile => !profile.providerId.startsWith('service-')).map(async profile => ({
-          profile, hasCredential: await connectionProfiles!.credentialPresent(profile),
+          profile, hasCredential: profile.enabled && await connectionProfiles!.credentialPresent(profile).catch(() => false),
         })));
+        modelRoutesKnown = legacyConnectionsMigratedFor === legacyKey;
       } catch { profileInventory = []; }
     }
     const configuredProfiles = new Set(profileInventory.filter(({profile, hasCredential}) => profile.enabled && hasCredential).map(({profile}) => profile.providerId));
@@ -1518,12 +1656,30 @@ export function createApp(
       return { id: p.id, revision: p.revision, providerId: p.providerId, accessMode: p.accessMode, label: p.label || p.providerId,
         models: [...p.modelIds], enabled: p.enabled, eligible: p.enabled && hasCredential && (provider?.admission?.eligible !== false) };
     });
-    return c.json({...inventory, providers: projectedProviders, connections: exposedConnections, deviceAccess});
+    const localChatConfigured = modelRoutesKnown ? localProcessingProviders(config, 'uptokey-auto').some(name => {
+      const provider = config.providers[name]!;
+      const accounts = profileInventory.filter(({profile})=>profile.providerId===name);
+      return accounts.length
+        ? accounts.some(({profile})=>profile.enabled&&profile.accessMode==='local'&&(profile.modelIds.length>0||provider.models.length>0))
+        : provider.configured===true&&provider.models.length>0;
+    }) : undefined;
+    return c.json({...inventory, providers: projectedProviders, connections: exposedConnections, deviceAccess, localChatConfigured,
+      ...(connectionProfiles && modelRoutesKnown ? {firstLocalSetup:true} : {})});
   });
   app.get("/v1/local-models", async (c) => {
     const release = inferenceAdmission.tryAcquire();
     if (!release) {c.header("Retry-After", "1"); return c.json({error: {type: "local_capacity"}}, 429);}
+    const stop = c.req.header("accept") === "application/x-ndjson" ? new AbortController() : undefined;
+    const signal = stop ? AbortSignal.any([c.req.raw.signal, stop.signal]) : c.req.raw.signal;
+    let streamed = false;
     try {
+      const defaultOllama = (config.providers.ollama?.endpointUrl ?? DEFAULT_OLLAMA_CHAT_ENDPOINT) === DEFAULT_OLLAMA_CHAT_ENDPOINT;
+      const verifyModel = c.req.query("verifyLocalChat");
+      if (verifyModel !== undefined) {
+        const rate = pairingRateLimiter.take("ollama-first-model-check", 12, 60_000);
+        if (!rate.ok) { c.header("Retry-After",String(rate.retryAfter)); return c.json({error:{type:"local_model_check_rate_limited"}},429); }
+        return c.json({verifiedLocalChat:defaultOllama && await verifyDefaultOllamaChat(verifyModel,c.req.raw.signal)});
+      }
       const runtimes = createDefaultLocalRuntimeRegistry({
         ollamaEndpoint: config.providers.ollama?.endpointUrl,
         vllmEndpoint: config.providers.vllm?.endpointUrl,
@@ -1531,26 +1687,60 @@ export function createApp(
       // Totalidade de runtimes locais (visão do Autor 30/09): loopback conhecido apenas;
       // cada runtime tem caminho configurável pela conexão local e detecção fail-closed.
       const runtimeIds = ["ollama", "vllm", "lm-studio", "jan", "llama.cpp"] as const;
-      const statuses = await Promise.all(runtimeIds.map(async (id) => {
-        const adapter = runtimes.get(id);
-        if (!adapter) return { id, status: "unreachable" as const, endpoint: null as string | null, models: [] as Array<{ id: string; sizeBytes: number | null }>, installSupported: false };
-        const probe = await adapter.detect(c.req.raw.signal);
-        const models = probe.available ? await adapter.listModels(c.req.raw.signal) : [];
-        return { id, status: probe.available ? ("available" as const) : ("unreachable" as const), endpoint: adapter.endpointUrl, models: models.map(m => ({ id: m.id, sizeBytes: m.sizeBytes ?? null })), installSupported: id === "ollama" };
-      }));
-      const byId = new Map(statuses.map(entry => [entry.id, entry]));
       const hardware = detectHardwareProfile();
-      const runtimeView = (id: (typeof runtimeIds)[number], nameField: "name" | "id") => {
-        const entry = byId.get(id)!;
+      const probes = runtimeIds.map(async (id) => {
+        const adapter = runtimes.get(id);
+        if (!adapter) return { id, status: "unreachable" as const, endpoint: null as string | null, models: [], installSupported: false };
+        const inventory = await adapter.inventory?.(signal);
+        const probe = inventory?.status ?? await adapter.detect(signal);
+        const models = inventory?.models ?? (probe.available ? await adapter.listModels(signal) : []);
+        const projected = models.map(m => ({ id: m.id, sizeBytes: m.sizeBytes ?? null, digest: m.digest,
+          fit: estimateModelFit(hardware, m.sizeBytes === undefined ? {} : { sizeBytes: m.sizeBytes }) }));
+        const candidates = id === "ollama" && defaultOllama && stop
+          ? projected.filter(m => m.digest && ['great_fit','good_fit'].includes(m.fit.label)) : [];
+        const running = candidates.length > 1 ? await runningDefaultOllamaModels(signal) : undefined;
+        return { id, status: probe.available ? ("available" as const) : ("unreachable" as const), endpoint: adapter.endpointUrl,
+          models: projected.map(({id,sizeBytes,fit,digest}) => ({id,sizeBytes,fit,resident: Boolean(digest && running?.get(id) === digest)})), installSupported: id === "ollama" };
+      });
+      const popularModels = LOCAL_MODEL_SUGGESTIONS.map(model=>({...model,fit:estimateModelFit(hardware,model)}));
+      c.header("Vary", c.req.header("origin") ? "Origin, Accept" : "Accept");
+      const runtimeView = (entry: Awaited<(typeof probes)[number]>) => {
+        const id = entry.id;
         return {
         status: entry.status,
         endpoint: entry.endpoint,
-        models: entry.models.map((m) => ({ [nameField]: m.id, sizeBytes: m.sizeBytes, capacityNote: id === "ollama" ? ("estimate" as const) : ("estimate_unavailable" as const), fit: estimateModelFit(hardware, m.sizeBytes === null ? {} : { sizeBytes: m.sizeBytes }) })),
+          models: entry.models.map((m) => ({ [id === "ollama" ? "name" : "id"]: m.id, sizeBytes: m.sizeBytes, capacityNote: id === "ollama" ? ("estimate" as const) : ("estimate_unavailable" as const), fit: m.fit,
+            ...(m.resident ? {resident:true} : {}) })),
         installSupported: entry.installSupported,
-        ...(id === "ollama" ? { suggestions: LOCAL_MODEL_SUGGESTIONS.map(model=>({...model,fit:estimateModelFit(hardware,model)})) } : {}),
+          ...(id === "ollama" ? { suggestions: popularModels } : {}),
         };
       };
-      const ollama = runtimeView("ollama", "name");
+      if (stop) {
+        const encoder = new TextEncoder();
+        let cancelled = false;
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const send = (value: unknown) => controller.enqueue(encoder.encode(JSON.stringify(value) + "\n"));
+            send({ type: "inventory", hardware, popularModels, ...(defaultOllama ? {ollamaLocalChatCheck:true} : {}) });
+            void Promise.all(probes.map(async probe => {
+              const entry = await probe;
+              if (!signal.aborted) send({ type: "runtime", id: entry.id, view: runtimeView(entry) });
+            })).then(() => {
+              if (!signal.aborted) send({ type: "complete" });
+              if (!cancelled) controller.close();
+            }).catch(() => {
+              stop.abort();
+              if (!cancelled) controller.error(new Error("local_models_failed"));
+            }).finally(release);
+          },
+          cancel() { cancelled = true; stop.abort(); release(); },
+        });
+        streamed = true;
+        return c.body(stream, 200, {"content-type": "application/x-ndjson", "x-content-type-options": "nosniff"});
+      }
+      const statuses = await Promise.all(probes);
+      const byId = new Map(statuses.map(entry => [entry.id, runtimeView(entry)]));
+      const ollama = byId.get("ollama")!;
       return c.json({
         installer: "uptokey-models-v1",
         // Backward-compatible ollama projection at top level
@@ -1558,18 +1748,19 @@ export function createApp(
         models: ollama.models,
         runtimes: {
           ollama,
-          vllm: runtimeView("vllm", "id"),
-          "lm-studio": runtimeView("lm-studio", "id"),
-          jan: runtimeView("jan", "id"),
-          "llama.cpp": runtimeView("llama.cpp", "id"),
+          vllm: byId.get("vllm"),
+          "lm-studio": byId.get("lm-studio"),
+          jan: byId.get("jan"),
+          "llama.cpp": byId.get("llama.cpp"),
         },
         // Totalidade de modelos (visão do Autor 30/09): catálogo ordenado por
         // popularidade entre desenvolvedores; instalação só por ação explícita.
         hardware,
-        popularModels: LOCAL_MODEL_SUGGESTIONS.map(model=>({...model,fit:estimateModelFit(hardware,model)})),
+        popularModels,
+        ...(defaultOllama ? {ollamaLocalChatCheck:true} : {}),
       });
     }
-    finally {release();}
+    finally {if (!streamed) release();}
   });
   app.post("/v1/local-models/install", async (c) => {
     const parsed = await readBoundedJson(c.req.raw, 8_192);
@@ -1595,7 +1786,7 @@ export function createApp(
     const rate = pairingRateLimiter.take("public-source-search", 20, 60_000);
     if (!rate.ok) { c.header("Retry-After", String(rate.retryAfter)); return c.json({ error: { type: "source_rate_limited" } }, 429); }
     const parsed = await readBoundedJson(c.req.raw, MAX_LOCAL_CONTROL_REQUEST_BYTES);
-    const privacyScope = await processingScope(c, parsed.ok ? parsed.value : {}, true);
+    const privacyScope = await processingScope(c, parsed.ok ? parsed.value : {}, { externalOperation: true });
     if (privacyScope instanceof Response) return privacyScope;
     const input = parsed.ok ? parseSourceSearch(parsed.value) : undefined;
     if (!input) return c.json({ error: { type: "invalid_request" } }, 400);
@@ -1603,7 +1794,10 @@ export function createApp(
     if (!sourceRate.ok) { c.header("Retry-After", String(sourceRate.retryAfter)); return c.json({ error: { type: "source_rate_limited" } }, 429); }
     const release = sourceAdmission.tryAcquire();
     if (!release) return c.json({ error: { type: "local_capacity_exceeded" } }, 429);
-    try { return c.json(await searchPublicSource(input, c.req.raw.signal)); }
+    try {
+      const bibliography = c.req.header('accept') === BIBLIOGRAPHY_ACCEPT;
+      return c.json(await searchPublicSource(input, c.req.raw.signal, undefined, {bibliography}));
+    }
     catch (error) {
       const type = error instanceof Error && error.message === "source_rate_limited" ? "source_rate_limited" : "source_unavailable";
       return c.json({ error: { type } }, type === "source_rate_limited" ? 429 : 502);
@@ -1615,7 +1809,7 @@ export function createApp(
   app.use('/v1/workspace/*', async (c, next) => {
     if (c.req.method !== 'GET' && !c.req.path.startsWith('/v1/workspace/conversations')
       && (requestClient(c).policy?.retentionMode === 'ephemeral' || c.req.header('x-uptokey-conversation-id') !== undefined || c.req.header('x-uptokey-processing-policy') !== undefined)) {
-      const scope = await processingScope(c, {}, false, true);
+      const scope = await processingScope(c, {}, { governedOperation: true });
       if (scope instanceof Response) return scope;
     }
     await next();
@@ -1756,7 +1950,7 @@ export function createApp(
         if(['account_challenge_consumed','account_challenge_pending','account_share_pending'].includes(code))return c.json({error:{type:code}},409);
         if(code==='account_share_conflict')return c.json({error:{type:code}},409);
         if(code==='account_share_denied')return c.json({error:{type:code}},403);
-        if(['account_broker_busy','account_broker_capacity','account_store_full','pairing_capacity_exceeded'].includes(code))return c.json({error:{type:code}},429);
+        if(['account_broker_busy','account_broker_capacity','account_store_admission_busy','account_store_full','pairing_capacity_exceeded'].includes(code))return c.json({error:{type:code}},429,{'cache-control':'no-store'});
         if(['account_client_invalid','account_request_invalid','account_response_invalid','account_store_invalid','account_service_origin_invalid'].includes(code))return c.json({error:{type:code}},400);
         return c.json({error:{type:'account_service_unavailable'}},503);
       }
@@ -2187,6 +2381,8 @@ export function createApp(
       ...(connectionServices?.now?{now:connectionServices.now}:{}),
       checkRate:providerManagementRate,authority:providerSetupAuthority,
     });
+    registerStarterDownloadRoutes(app, {authority:providerSetupAuthority,profiles:profileService,installs:installService,
+      getConfig:()=>config,checkRate:providerManagementRate,fetchImpl:connectionServices?.fetchImpl});
     registerProviderCreditRoutes(app,{profiles:profileService,getConfig:()=>config,authority:providerManagementAuthority,checkRate:providerManagementRate,fetchImpl:connectionServices?.fetchImpl});
     if(config.efficiencyPolicy)setActiveEfficiencyPolicy(config.efficiencyPolicy);else ensureDefaultEfficiencyPolicy();
     registerEfficiencyRoutes(app, {
@@ -2239,7 +2435,9 @@ export function createApp(
       }
     }
   })();
-  return Object.assign(app,{workspaceReady: combinedReady, closeWorkspace, governanceStore, governanceService, conversationStore: conversations.store});
+  // Internal host composition reuses this exact executor/store. This does not
+  // expose an HTTP endpoint or grant workspace/inference authority.
+  return Object.assign(app,{workspaceReady: combinedReady, closeWorkspace, workspaceRuntime: workspace, governanceStore, governanceService, conversationStore: conversations.store});
 }
 
 /** E2-03: OpenAI chat chunk SSE -> legacy text_completion chunk SSE, com IDs e uso preservados. */
@@ -2360,7 +2558,8 @@ function openAiChatSseToTextCompletionSse(body: ReadableStream<Uint8Array>): Rea
   });
 }
 
-function localModelsProjection(config: ProxyConfig) {  const models = [
+function localModelsProjection(config: ProxyConfig, client: ResolvedClient) {
+  const models = [
     {
       id: "auto",
       object: "model" as const,
@@ -2438,9 +2637,13 @@ function localModelsProjection(config: ProxyConfig) {  const models = [
     }
   }
 
+  const providerIds = client.policy?.providerIds;
   return {
     object: "list" as const,
-    data: models
+    data: models.map(model => model.owned_by === "ollama" && hasOllamaStarterControl(config, model.id)
+      && (!providerIds?.length || providerIds.includes("ollama")) && !client.delegation && !checkModelScope(client, model.id)
+      ? { ...model, uptokey_harness_reasoning: OLLAMA_STARTER_CONTROL }
+      : model)
   };
 }
 

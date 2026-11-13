@@ -7,6 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
 import { PACKAGE_VERSION } from "./version.ts";
+import { BROWSER_FILL_CONTRACT_VERSION } from "@uptokey/sync-contract/browser";
 import { McpSession, type McpSessionPublic } from "./mcp-session.ts";
 import { McpProxyClient } from "./mcp-proxy-client.ts";
 import { assertNoSecretMaterial, redactForAuditLog, redactForToolResult } from "./mcp-redact.ts";
@@ -15,6 +16,9 @@ import { integrationProfilesForUi, previewIntegrationCopy, doctorIntegrationSumm
 import { previewSkillInstall, loadInstalledManifest } from "./skill-install.ts";
 import { McpDiscoverySession } from "./mcp-tool-binding.ts";
 import type { WorkspaceBrowser } from "./browser-service.ts";
+
+// Bound combined array entries/object members before Zod validation, including raw tool schemas.
+export const MCP_MAX_TOOL_INPUT_ELEMENTS = 65_536;
 
 export interface McpServerHandles {
   server: McpServer;
@@ -32,6 +36,7 @@ export function createUptokeyMcpServer(
     version: PACKAGE_VERSION,
     websiteUrl: "https://uptokey.com",
   }, {
+    maxToolInputElements: MCP_MAX_TOOL_INPUT_ELEMENTS,
     instructions: [
       "Uptokey MCP exposes local proxy tools only.",
       `All inference traffic targets ${MCP_PROXY_ORIGIN}.`,
@@ -201,12 +206,12 @@ export function createUptokeyMcpServer(
       fields: z.array(z.object({
         label: z.string().min(1).max(200),
         value: z.string().max(2000),
-      })).min(1).describe("Form fields to fill"),
+      })).min(1).max(8).describe("Form fields to fill"),
     },
   }, async (args) => {
     const plan = await client.postJson(`/v1/workspace/projects/${encodeURIComponent(args.projectId)}/browser-fill-plans`, {
       expectedRevision: args.expectedRevision,
-      request: { url: args.url, fields: args.fields },
+      request: { schemaVersion: BROWSER_FILL_CONTRACT_VERSION, url: args.url, fields: args.fields },
     }, "browser");
     return textResult({ status: "awaiting_w5_consent", plan: redactForToolResult(plan) });
   });

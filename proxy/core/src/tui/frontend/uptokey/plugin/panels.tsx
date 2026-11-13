@@ -17,6 +17,7 @@ import { write as writeClipboard, clipboardErrorMessage } from "../../vendor/ope
 import { MORE_PANELS } from "../panels/more.tsx"
 import { ModelFollower, followAgent, followModel } from "../dialogs/model-follow.tsx"
 import { getBackend } from "../backend/registry.ts"
+import { AccountPanel } from "../panels/account.tsx"
 
 const PANELS: Record<string, (arg?: string) => unknown> = {
   models: () => <DialogModel />,
@@ -34,7 +35,12 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     if (event.properties.sessionID) api.route.navigate("session", { sessionID: event.properties.sessionID })
     else api.route.navigate("home")
   }) as never)
-  api.event.on("uptokey.panel.open" as never, ((event: { properties: { name: string; arg?: string } }) => {
+  api.event.on("uptokey.panel.open" as never, ((event: { properties: { name: string; arg?: string; returnTo?: string; query?: string } }) => {
+    if (event.properties.name === "account" && event.properties.returnTo === "models") {
+      const query = typeof event.properties.query === "string" ? event.properties.query : ""
+      api.ui.dialog.replace((() => <AccountPanel onSignedIn={() => api.ui.dialog.replace((() => <DialogModel initialQuery={query} />) as never)} />) as never)
+      return
+    }
     const factory = PANELS[event.properties.name]
     if (!factory) {
       api.ui.toast({ variant: "info", message: ui("panel_unavailable", { name: event.properties.name }) })

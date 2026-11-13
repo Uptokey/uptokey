@@ -1,4 +1,67 @@
+import { readBoundedJson } from "@uptokey/sync-contract/limits";
+import { ollamaLocalModelReference } from "./adapters.ts";
+import { inferenceFetch } from "./streaming-transport.ts";
+
 export type InstalledModel = {name: string; sizeBytes: number; digest?: string};
+export const DEFAULT_OLLAMA_CHAT_ENDPOINT = "http://127.0.0.1:11434/v1/chat/completions";
+export function isOllamaChatCandidateId(value: string | null): value is string {
+  return value !== null && value.length <= 200 && /^[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9._-]+)?$/.test(value);
+}
+
+const directOllamaFetch = (url: URL, init: RequestInit) => inferenceFetch(url, init, false, true);
+
+/** Runtime hint only. Match it against the current installed digest before use. */
+export async function runningDefaultOllamaModels(signal: AbortSignal, fetcher = directOllamaFetch): Promise<ReadonlyMap<string, string>> {
+  const models = new Map<string, string>();
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(350)]);
+  try {
+    const response = await fetcher(new URL("/api/ps", DEFAULT_OLLAMA_CHAT_ENDPOINT), {
+      redirect: "error", credentials: "omit", signal: deadline,
+    });
+    if (!response.ok) { void response.body?.cancel().catch(() => {}); return models; }
+    const parsed = await readBoundedJson(response, 128 * 1024, 350);
+    if (!parsed.ok || deadline.aborted) return models;
+    const rows = (parsed.value as { models?: unknown } | null)?.models;
+    if (!Array.isArray(rows) || rows.length > 64) return models;
+    const usefulUntil = Date.now() + 2000;
+    for (const row of rows) {
+      if (typeof row?.name !== "string" || !isOllamaChatCandidateId(row.name) || typeof row.digest !== "string" ||
+          !/^[a-f0-9]{64}$/i.test(row.digest) || typeof row.expires_at !== "string" || !(Date.parse(row.expires_at) > usefulUntil)) continue;
+      models.set(row.name, row.digest.toLowerCase());
+    }
+  } catch { /* An unavailable runtime hint leaves the normal ranking intact. */ }
+  return models;
+}
+
+/** Confirms local chat support without loading the model or sending a prompt. */
+export async function verifyDefaultOllamaChat(modelId: string, signal: AbortSignal, fetcher = directOllamaFetch): Promise<boolean> {
+  return await probeDefaultOllamaChat(modelId, signal, fetcher) === "verified";
+}
+
+export async function probeDefaultOllamaChat(modelId: string, signal: AbortSignal, fetcher = directOllamaFetch): Promise<"verified" | "retryable" | "rejected"> {
+  if (!isOllamaChatCandidateId(modelId)) return "rejected";
+  const model = ollamaLocalModelReference(modelId);
+  if (!model) return "rejected";
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(1500)]);
+  try {
+    const response = await fetcher(new URL("/api/show", DEFAULT_OLLAMA_CHAT_ENDPOINT), {
+      method: "POST", redirect: "error", credentials: "omit", signal: deadline,
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ model, verbose: false }),
+    });
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
+      return response.status >= 500 || [404, 408, 429].includes(response.status) ? "retryable" : "rejected";
+    }
+    const parsed = await readBoundedJson(response, 256 * 1024, 1500);
+    if (deadline.aborted) return "retryable";
+    if (!parsed.ok || !parsed.value || typeof parsed.value !== "object") return "rejected";
+    const details = parsed.value as Record<string, unknown>;
+    return Array.isArray(details.capabilities) && details.capabilities.includes("completion") &&
+      !details.capabilities.includes("image") && typeof details.template === "string" && details.template.trim().length > 0 &&
+      (details.remote_host === undefined || details.remote_host === "") && (details.remote_model === undefined || details.remote_model === "")
+      ? "verified" : "rejected";
+  } catch { return "retryable"; }
+}
 
 /** Discovers tags from a configured loopback Ollama endpoint. */
 export async function discoverLocalModels(signal?: AbortSignal, fetcher: typeof fetch = fetch, endpoint = "http://127.0.0.1:11434"): Promise<{status: "available" | "unreachable" | "invalid_response"; models: InstalledModel[]}> {

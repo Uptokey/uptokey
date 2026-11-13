@@ -13,7 +13,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { generateThirdPartyNotices, NOTICES_FILE } from "./generate-third-party-notices.mjs";
-import { assertPortableBuild } from "./build-npm-package.mjs";
+import { assertPortableBuild, resolveBuildVersion } from "./build-npm-package.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const frontend = join(root, "src", "tui", "frontend");
@@ -22,9 +22,10 @@ const outDir = resolve(flagIndex >= 0 ? process.argv[flagIndex + 1] : join(root,
 const bun = process.env.BUN_BIN || (process.platform === "win32" ? "bun.exe" : "bun");
 const portable = process.argv.includes("--portable");
 const portableArgs = portable ? ["--portable"] : [];
+const buildVersion = resolveBuildVersion(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version);
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { encoding: "utf8", windowsHide: true, ...options });
+  const result = spawnSync(command, command === bun ? ["--no-env-file", ...args] : args, { encoding: "utf8", windowsHide: true, ...options });
   if (result.status !== 0) {
     process.stderr.write(result.stderr || result.stdout || `${command}_failed\n`);
     process.exit(1);
@@ -52,7 +53,7 @@ for (const file of walk(outDir).filter(file => /\.(?:c|m)?js$/.test(file))) {
 }
 
 // Notices: exactly what the bundler inlined, plus what ships beside it (runtime and native library).
-const externals = ["@napi-rs/keyring", "tree-sitter-wasm", "web-tree-sitter", "js-tiktoken", "@opentui/core-*", "undici"];
+const externals = ["@napi-rs/keyring", "@repomix/tree-sitter-wasms", "web-tree-sitter", "js-tiktoken", "@opentui/core-*", "undici"];
 const generated = generateThirdPartyNotices({ root, bundles: [{ bundle: "dist/tui/main.js", metafile }, { bundle: "dist/tui/linear-entry.js", metafile: linearMetafile }], externals });
 const nativePackage = portable ? "@opentui/core" : `@opentui/core-${process.platform}-${process.arch}`;
 const nativeDir = join(frontend, "node_modules", nativePackage);
@@ -109,7 +110,7 @@ if (!parserRuntime) throw new Error("tui_parser_runtime_missing");
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "BUILD_INFO.json"), JSON.stringify({
   builtAt: new Date(Number.isFinite(Number(process.env.SOURCE_DATE_EPOCH)) && Number(process.env.SOURCE_DATE_EPOCH)>0 ? Number(process.env.SOURCE_DATE_EPOCH)*1000 : Date.now()).toISOString(),
-  version: JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version,
+  version: buildVersion,
   bun: bunVersion,
   entry: "main.js",
   accessibleEntry: "linear-entry.js",

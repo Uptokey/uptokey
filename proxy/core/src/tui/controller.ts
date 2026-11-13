@@ -288,7 +288,7 @@ export class TuiController extends EventEmitter {
       catch { this.notice("warning", t('identidade_nativa_indispon_vel'), t("ctl_doctor_hint")); }
     }
     let models = await this.client.getModels().catch(() => [] as Array<{ id: string; owned_by?: string }>);
-    await this.refreshConnections();
+    await this.refreshConnections(false);
     // `/v1/models` may intentionally omit entries while admission is rebuilt.
     // The connection snapshot is authoritative for a configured BYOK
     // destination; use its observed models as a local fallback, never a
@@ -543,7 +543,7 @@ export class TuiController extends EventEmitter {
   }
 
   /** Providers, models and combos as the core observes them now. */
-  async refreshConnections(): Promise<void> {
+  async refreshConnections(forceHosted = true): Promise<void> {
     try {
       this.view.connections = await loadConnections(this.client);
       this.store.dispatch({ type: "connections_loaded", connections: this.view.connections.providers.map((p) => ({ provider: p.id, status: p.eligible ? "available" : p.reason ?? "unavailable" })) });
@@ -554,7 +554,7 @@ export class TuiController extends EventEmitter {
       this.notice("warning", t("ctl_connections_unavailable", { reason: errorText(error) }));
     }
     // Local/BYOK startup never waits for the hosted network. Refresh can finish in the background.
-    void this.refreshHostedModels(true);
+    void this.refreshHostedModels(forceHosted);
     this.changed();
   }
 

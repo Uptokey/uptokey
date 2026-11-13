@@ -1,6 +1,12 @@
 import {isNamedExperimentalProvider,isUserDefinedProvider} from "./provider-registry.ts";
 import {validInstallModel} from "./local-model-install.ts";
 
+export function standaloneLocalUiQuery(search: URLSearchParams): boolean {
+  if (search.getAll("view").length !== 1 || search.get("view") !== "standalone") return false;
+  const lang = search.get("lang");
+  return lang === null ? search.size === 1 : search.size === 2 && /^[a-z]{2}(?:-[A-Za-z]{2,4})?$/.test(lang);
+}
+
 export function localSetupConnection(search: URLSearchParams): string | undefined {
   if(search.getAll("setup").length!==1||search.get("setup")!=="connection"||search.getAll("provider").length!==1||
     [...search.keys()].some(key=>key!=="setup"&&key!=="provider"))return undefined;

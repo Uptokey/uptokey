@@ -27,6 +27,7 @@ const CATALOG_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>>
   "uptokey-beta-free-2026-10-09": {
     "google-gemini-3-5-flash-lite": "Gemini 3.5 Flash-Lite · Google",
     "google-gemini-3-8-flash": "Gemini 3.8 Flash · Google",
+    "google-gemini-4-argon": "Gemini 4 Argon · Google",
   },
   "free-beta-v1": {
     "uptokey-free-fast": "Llama 3.2 3B · Cloudflare",

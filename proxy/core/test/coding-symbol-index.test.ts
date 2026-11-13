@@ -5,6 +5,17 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { buildSymbolIndex, createMemorySymbolIndex } from "../src/coding/symbol-index.ts";
 
+test("cold concurrent indexes initialize WASM once and keep symbols isolated", async () => {
+  const first = createMemorySymbolIndex("/symbol-index-concurrent-first");
+  const second = createMemorySymbolIndex("/symbol-index-concurrent-second");
+  await Promise.all([
+    first.add("main.ts", "export function first() { return 1; }"),
+    second.add("main.py", "def second():\n    return 2\n"),
+  ]);
+  assert.deepEqual(first.definitions().map(symbol => symbol.name), ["first"]);
+  assert.deepEqual(second.definitions().map(symbol => symbol.name), ["second"]);
+});
+
 test("indexes mixed Python, TypeScript and Go declarations with one WASM grammar per language", async () => {
   const root = await mkdtemp(join(tmpdir(), "uptokey-symbols-"));
   const index = await buildSymbolIndex(root);

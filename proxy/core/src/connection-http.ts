@@ -10,6 +10,7 @@ import { type ConnectionProfileService, type StoredProfile } from "./connection-
 import { type ConnectionTestService, type TestJobSnapshot } from "./connection-tests.ts";
 import { type InstallJobSnapshot, type ModelInstallJobService } from "./model-install-jobs.ts";
 import { OAuthConnectionService } from "./oauth-connection.ts";
+import { STARTER_DOWNLOAD_PATH } from "./starter-download-http.ts";
 
 export interface ConnectionAuthorizer {
   canRead(c: Context): Promise<boolean>;
@@ -42,6 +43,8 @@ const UUID_SEG = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 const PROVIDER_SEG = "[A-Za-z0-9][A-Za-z0-9_-]{0,63}";
 
 const DYNAMIC_ROUTES: Array<{ method: ConnectionRouteMode; body: ConnectionRouteMatch["body"]; pattern: RegExp }> = [
+  { method: "GET", body: "none", pattern: new RegExp(`^${STARTER_DOWNLOAD_PATH}$`) },
+  { method: "POST", body: "empty", pattern: new RegExp(`^${STARTER_DOWNLOAD_PATH}(?:/cancel)?$`) },
   { method: "GET", body: "none", pattern: /^\/local\/provider\/credits$/ },
   { method: "GET", body: "none", pattern: /^\/local\/provider\/setup\/presets$/ },
   { method: "POST", body: "json", pattern: /^\/local\/provider\/setup\/(?:prepare|commit|dispose)$/ },
@@ -232,7 +235,7 @@ export function registerConnectionRoutes(app: Hono, deps: ConnectionRouteDeps): 
     await ensureMigrated();
     await oauth.ready;
     const admission = deps.getAdmission();
-    return profiles.projectViews(async (profile) => {
+    return profiles.projectViews(async (profile, credentialPresent) => {
       const supportLevel = supportLevelFor(profile);
       if (profile.accessMode === "oauth") {
         const binding = await profiles.oauthBinding(profile.id);
@@ -242,8 +245,8 @@ export function registerConnectionRoutes(app: Hono, deps: ConnectionRouteDeps): 
         if (meta.state === "reauth_required") return { supportLevel, status: "expired" as const };
         if (meta.state === "refreshing" || meta.state === "connecting") return { supportLevel, status: "degraded" as const };
       }
-      if (profile.accessMode !== "local" && !(await profiles.credentialPresent(profile))) {
-        return { supportLevel, status: "unauthenticated" as const };
+      if (credentialPresent !== true) {
+        return { supportLevel, status: credentialPresent === undefined ? "unknown" as const : "unauthenticated" as const };
       }
       const entry = admission?.get(profile.providerId);
       if (!entry) return { supportLevel, status: "unknown" as const };

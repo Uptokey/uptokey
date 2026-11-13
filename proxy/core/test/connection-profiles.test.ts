@@ -35,6 +35,51 @@ test("E2-02 AC-02-02: revogar uma conta preserva a outra", async () => {
   assert.equal(await profiles.readCredential(kept!), "gsk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 });
 
+test("an uncertain rotation save keeps the credential referenced by the reopened profile", async () => {
+  const secrets = new MemorySecretStore();
+  const storage = memoryConnectionStorage();
+  const profiles = new ConnectionProfileService(secrets, {
+    ...storage,
+    async saveProfiles(state, beforeCommit) {
+      await storage.saveProfiles(state, beforeCommit);
+      if (state.profiles[0]?.revision === 2) throw new Error("synthetic_post_commit_failure");
+    },
+  });
+  const created = await profiles.create({ schemaVersion: 1, providerId: "groq", label: "Fixture", accessMode: "byok", enabled: true, modelIds: [] }, "synthetic_old");
+  await assert.rejects(profiles.updateSecret(created.id, created.revision, "synthetic_new"), /synthetic_post_commit_failure/);
+  const reopened = new ConnectionProfileService(secrets, storage);
+  const current = (await reopened.get(created.id))!;
+  assert.equal(current.revision, 2);
+  assert.equal(await reopened.readCredential(current), "synthetic_new");
+  await reopened.revoke(current.id, current.revision);
+  assert.equal(secrets.values.size, 0);
+});
+
+test("retired key cleanup survives an edit and reopen and is required on revoke", async () => {
+  let blocked: string | undefined;
+  class StrictStore extends MemorySecretStore {
+    async delete(ref: string) {
+      if (ref === blocked || !this.values.has(ref)) throw new Error("synthetic_delete_failed");
+      await super.delete(ref);
+    }
+  }
+  const secrets = new StrictStore();
+  const storage = memoryConnectionStorage();
+  const profiles = new ConnectionProfileService(secrets, storage);
+  const created = await profiles.create({ schemaVersion: 1, providerId: "groq", label: "Fixture", accessMode: "byok", enabled: true, modelIds: [] }, "synthetic_old");
+  blocked = created.credentialRef;
+  const rotated = await profiles.updateSecret(created.id, created.revision, "synthetic_new");
+  const renamed = await profiles.update(rotated.id, { revision: rotated.revision, label: "Renamed" });
+  const reopened = new ConnectionProfileService(secrets, storage);
+  await assert.rejects(reopened.revoke(renamed.id, renamed.revision), /synthetic_delete_failed/);
+  assert.equal(await reopened.readCredential((await reopened.get(renamed.id))!), "synthetic_new");
+  blocked = undefined;
+  const latest = await reopened.updateSecret(renamed.id, renamed.revision, "synthetic_latest");
+  assert.equal(secrets.values.size, 1);
+  await reopened.revoke(latest.id, latest.revision);
+  assert.equal(secrets.values.size, 0);
+});
+
 test("a default cleanup failure retains the exact association, denies false success and permits a confirmed retry", async () => {
   for (const failure of ['hook','secret'] as const) {
     let failing=true, hooks=0;

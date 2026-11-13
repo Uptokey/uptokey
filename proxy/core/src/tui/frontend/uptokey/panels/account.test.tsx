@@ -18,6 +18,7 @@ import { ToastProvider } from "../../vendor/opencode-tui/ui/toast"
 import { DialogProvider, useDialog, type DialogContext } from "../../vendor/opencode-tui/ui/dialog"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../../vendor/opencode-tui/keymap"
 import { ClipboardProvider } from "../../vendor/opencode-tui/context/clipboard"
+import type { InputRenderable } from "@opentui/core"
 
 test("rendered account panel requests/adopts once, returns focus and exposes real localized state in ten languages", async () => {
   const previous = getLang(), parent = resolve("../../../output")
@@ -143,8 +144,12 @@ test("account starts browser sign-in first and keeps the same usable link, copy 
   account.reopenLogin = () => reopen(async value => { opened.push(value); return true })
   setLang("en")
   setBackend({ controller: { account }, onChange: (handler: () => void) => { account.on("change", handler); return () => account.off("change", handler) } } as never)
-  let dialog!: DialogContext
-  function Launch() { dialog = useDialog(); onMount(() => dialog.replace(() => <AccountPanel />)); return <box /> }
+  let dialog!: DialogContext, draft!: InputRenderable
+  function Launch() {
+    dialog = useDialog()
+    onMount(() => { setTimeout(() => { draft.focus(); dialog.replace(() => <AccountPanel />) }, 1) })
+    return <input ref={value => { draft = value }} value="Unsent original draft" />
+  }
   function Harness() {
     const renderer = useRenderer(), keymap = createDefaultOpenTuiKeymap(renderer), config = resolveConfig({}, { terminalSuspend: false })
     const off = registerOpencodeKeymap(keymap, renderer, config); onCleanup(off)
@@ -190,9 +195,16 @@ test("account starts browser sign-in first and keeps the same usable link, copy 
     expect(copied).toEqual([url, url])
     expect(opened).toEqual([url, url])
     authenticated = true; delayStatus = false; finishStatus!(); await refresh
-    await waitFrame(frame => frame.includes("Fixture") && frame.includes("Free") && frame.includes("Hosted AI included"))
+    await waitFrame(() => dialog.stack.length === 0)
+    expect(draft.value).toBe("Unsent original draft")
+    await waitFrame(() => app.renderer.currentFocusedRenderable === draft)
     expect(account.view.login).toBe(null)
     expect(calls.filter(value => value === "login")).toHaveLength(1)
+    // Opening account details after login is a passive read, not another login return.
+    dialog.replace(() => <AccountPanel />)
+    await waitFrame(frame => frame.includes("Fixture") && frame.includes("Free") && frame.includes("Hosted AI included"))
+    await account.refresh(); await app.renderOnce()
+    expect(dialog.stack.length).toBe(1)
     // Recovery of an already signed-in terminal keeps its own URL and copy path, without another login.
     account.offerHostedConnection()
     await account.connectHosted(async value => { opened.push(value); return false })
@@ -203,5 +215,22 @@ test("account starts browser sign-in first and keeps the same usable link, copy 
     app.mockInput.pressKey("HOME"); await app.flush(); app.mockInput.pressArrow("down"); app.mockInput.pressArrow("down"); await app.flush(); app.mockInput.pressEnter(); await app.flush()
     await waitFrame(() => copied.length === 3)
     expect(copied.at(-1)).toBe(url); expect(calls.filter(value => value === "connection")).toHaveLength(1); expect(calls.filter(value => value === "login")).toHaveLength(1)
+    // A failed login remains visible; canceling a later attempt cannot close a newer modal.
+    authenticated = false; loginStarted = false; await account.refresh()
+    dialog.replace(() => <AccountPanel />)
+    await waitFrame(frame => frame.includes("Sign in"))
+    const browserLogin = account.login
+    account.login = async () => { account.view.error = "account_unavailable"; account.emit("change") }
+    app.mockInput.pressEnter(); await app.flush(); await Bun.sleep(160); await app.renderOnce()
+    expect(dialog.stack.length).toBe(1); expect(account.view.error).toBe("account_unavailable")
+    account.login = browserLogin
+    app.mockInput.pressEnter(); await app.flush()
+    await waitFrame(frame => frame.includes("1234ABCD"))
+    app.mockInput.pressEscape(); await app.flush()
+    expect(dialog.stack.length).toBe(0); expect(account.view.login).toBe(null)
+    dialog.replace(() => <text>Later unrelated panel</text>)
+    authenticated = true; await account.refresh(); await Bun.sleep(160); await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("Later unrelated panel")
+    expect(draft.value).toBe("Unsent original draft")
   } finally { app.renderer.destroy(); account.dispose(); setLang(previous) }
 }, 15_000)

@@ -54,8 +54,8 @@
   {
    "file": "component/dialog-model.tsx",
    "upstreamSha256": "e30c8949786f66bc139e7f2b748bbb6cba4d5f368689141316b8378fe99ba3a5",
-   "localSha256": "0d5ba0cf0256c9b792bdb7cdfe2ee3d835f74f7a25d76aaa3171ea33881ac4da",
-   "linesNotInUpstream": 65
+   "localSha256": "7da16d886a35669f3ed7c946a502bcd45ac98c15fcc8028f0926ab112006815b",
+   "linesNotInUpstream": 76
   },
   {
    "file": "component/dialog-move-session.tsx",
@@ -474,8 +474,8 @@
   {
    "file": "ui/dialog-select.tsx",
    "upstreamSha256": "761a6d8e16291b1265a9094c973b7f7d9e1f318b835f8d2cde537c94234d8866",
-   "localSha256": "af26ff5a240f729fb18396028d36973cd7049666ca29fc738ea203a97875e653",
-   "linesNotInUpstream": 131
+   "localSha256": "6675f320907964483d8fe0a06c37c5e962e352a4b88050becd0d508f7d4a68d3",
+   "linesNotInUpstream": 134
   },
   {
    "file": "ui/dialog.tsx",

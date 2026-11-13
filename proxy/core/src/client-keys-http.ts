@@ -29,7 +29,7 @@ export function mountClientAndManagementRoutes(app: Hono, deps: any) {
     identityEpochMismatch,
     administrativeAuth,
     authorizeClientKeyManagement,
-    projectInferenceRequest,
+    prepareInferenceRequest,
     requestClient,
     checkModelScope,
     checkOutputLimit,
@@ -62,7 +62,7 @@ export function mountClientAndManagementRoutes(app: Hono, deps: any) {
         return c.json({ error: { type: "invalid_request", message: "schema de Completions inválido" } }, 400);
       }
       const request = legacyToChatRequest(legacy);
-      const projected = projectInferenceRequest(request);
+      const projected = prepareInferenceRequest(request);
       if (!projected) { release(); return c.json({ error: { type: "invalid_request", message: "schema de Completions inválido" } }, 400); }
       const client = requestClient(c);
       const modelDenied = checkModelScope(client, legacy.model);

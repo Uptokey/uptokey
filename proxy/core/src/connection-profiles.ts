@@ -26,6 +26,7 @@ export interface StoredProfile extends ConnectionProfile {
   createdAt: string;
   updatedAt: string;
   migratedFromLegacy: boolean;
+  retiredCredentialRef?: string;
 }
 
 interface ProfilesFile {
@@ -55,7 +56,7 @@ export interface OAuthProviderRegistration {
 
 export interface ConnectionStateStorage {
   loadProfiles(): Promise<ProfilesFile | null>;
-  saveProfiles(state: ProfilesFile): Promise<void>;
+  saveProfiles(state: ProfilesFile, beforeCommit?: () => Promise<void>): Promise<void>;
 }
 
 export function fileConnectionStorage(
@@ -63,8 +64,8 @@ export function fileConnectionStorage(
 ): ConnectionStateStorage {
   return {
     loadProfiles: () => readJson<ProfilesFile | null>(profilesPath, null),
-    saveProfiles: (state) =>
-      withConfigFileLock(profilesPath, () => writeJsonAtomic(profilesPath, state)),
+    saveProfiles: (state, beforeCommit) =>
+      withConfigFileLock(profilesPath, () => writeJsonAtomic(profilesPath, state, { beforeCommit })),
   };
 }
 
@@ -72,7 +73,7 @@ export function memoryConnectionStorage(): ConnectionStateStorage {
   let state: ProfilesFile | null = null;
   return {
     loadProfiles: async () => state,
-    saveProfiles: async (next) => { state = next; },
+    saveProfiles: async (next, beforeCommit) => { if (beforeCommit) await beforeCommit(); state = next; },
   };
 }
 
@@ -185,8 +186,8 @@ export class ConnectionProfileService {
     return this.state;
   }
 
-  private async persist(state: ProfilesFile): Promise<void> {
-    await this.storage.saveProfiles(state);
+  private async persist(state: ProfilesFile, beforeCommit?: () => Promise<void>): Promise<void> {
+    await this.storage.saveProfiles(state, beforeCommit);
     this.state = state;
   }
 
@@ -224,6 +225,13 @@ export class ConnectionProfileService {
         // Account-only onboarding configures the adapter without a legacy key.
         // Do not fabricate a provider-wide default beside the actual account.
         if (accessMode !== 'local' && state.profiles.some(p => p.providerId === providerId && !p.migratedFromLegacy) && !await this.secrets.get(legacySecretRef(providerId))) { skipped.push(providerId); continue; }
+        if (accessMode === "local" && Array.isArray(item.models) && item.models.length > 0) {
+          const accountModels = new Set(state.profiles
+            .filter(profile => profile.providerId === providerId && profile.accessMode === "local" &&
+              !profile.migratedFromLegacy && profile.endpointUrl === item.endpointUrl)
+            .flatMap(profile => profile.modelIds));
+          if (item.models.every(model => accountModels.has(model))) { skipped.push(providerId); continue; }
+        }
         const profile = parseConnectionProfile({
           schemaVersion: CONNECTIONS_SCHEMA_VERSION,
           id,
@@ -285,57 +293,81 @@ export class ConnectionProfileService {
     return found ? { ...found, modelIds: [...found.modelIds] } : undefined;
   }
 
-  async credentialPresent(profile: StoredProfile): Promise<boolean> {    if (profile.credentialRef) {
-      const value = await this.secrets.get(profile.credentialRef);
-      if (typeof value === "string" && value.length > 0) return true;
+  /** Last-mile check against this service's live writer-owned state, not a copied
+   * authorization result. Callers must first load/read the profile normally.
+   * No await may separate this check from dispatch. External process mutations
+   * are outside this service's existing single-owner authority boundary. */
+  isCurrentIdentity(profile: Pick<StoredProfile, "id" | "revision" | "providerId">): boolean {
+    const current = this.state?.profiles.find(item => item.id === profile.id);
+    return current?.enabled === true && current.providerId === profile.providerId && current.revision === profile.revision;
+  }
+
+  private async readCredentialReferences(ref?: string, fallback?: string): Promise<string | undefined> {
+    const value = ref ? await this.secrets.get(ref) : undefined;
+    if (typeof value === "string" && value.length > 0) return value;
+    const legacy = fallback && fallback !== ref ? await this.secrets.get(fallback) : undefined;
+    return typeof legacy === "string" && legacy.length > 0 ? legacy : undefined;
+  }
+
+  private readPresentedCredential(profile: StoredProfile): Promise<string | undefined> {
+    return this.readCredentialReferences(profile.credentialRef, profile.migratedFromLegacy ? legacySecretRef(profile.providerId) : undefined);
+  }
+
+  private async deleteCredentialIfPresent(ref?: string): Promise<void> {
+    if (!ref) return;
+    try {
+      await this.secrets.delete(ref);
+    } catch (error) {
+      // Some vaults reject deletion of a missing entry. A previously confirmed
+      // cleanup must not prevent another rotation or revocation.
+      if (await this.secrets.get(ref) !== undefined) throw error;
     }
-    // Leitura compatível do namespace legado para perfis migrados.
-    if (profile.migratedFromLegacy && profile.accessMode !== "local") {
-      const legacy = await this.secrets.get(legacySecretRef(profile.providerId));
-      if (typeof legacy === "string" && legacy.length > 0) return true;
-    }
-    return profile.accessMode === "local";
+  }
+
+  async credentialPresent(profile: StoredProfile): Promise<boolean> {
+    return profile.accessMode === "local" || (await this.readPresentedCredential(profile)) !== undefined;
   }
 
   /** Valor de credencial para sondas autenticadas; nunca vai a logs, views ou exports. */
   async readCredential(profile: StoredProfile): Promise<string | null> {
-    if (profile.migratedFromLegacy && profile.accessMode !== "local") {
-      const current = await this.secrets.get(legacySecretRef(profile.providerId));
-      if (typeof current === "string" && current.length > 0) return current;
-    }
-    if (profile.credentialRef) {
-      const value = await this.secrets.get(profile.credentialRef);
-      if (typeof value === "string" && value.length > 0) return value;
-    }
-    if (profile.migratedFromLegacy && profile.accessMode !== "local") {
-      const legacy = await this.secrets.get(legacySecretRef(profile.providerId));
-      if (typeof legacy === "string" && legacy.length > 0) return legacy;
-    }
-    return null;
+    const legacy = profile.migratedFromLegacy && profile.accessMode !== "local" ? legacySecretRef(profile.providerId) : undefined;
+    return await this.readCredentialReferences(legacy ?? profile.credentialRef, legacy ? profile.credentialRef : undefined) ?? null;
   }
 
   async accountLabel(profile: StoredProfile): Promise<string> {
     if (profile.accessMode === "local") return profile.providerId;
-    const ref = profile.credentialRef;
-    const raw = ref ? await this.secrets.get(ref) : undefined;
-    const fallback = profile.migratedFromLegacy ? await this.secrets.get(legacySecretRef(profile.providerId)) : undefined;
-    const value = typeof raw === "string" && raw.length > 0 ? raw : fallback;
-    if (typeof value !== "string" || value.length === 0) return "sem credencial";
+    return this.formatAccountLabel(profile, await this.readPresentedCredential(profile));
+  }
+
+  private formatAccountLabel(profile: StoredProfile, value: string | undefined): string {
+    if (!value) return "sem credencial";
     if (profile.accessMode === "oauth") return `conta ••${createHash("sha256").update(value).digest("hex").slice(0, 4)}`;
     return value.length <= 8 ? "conta ••••" : `conta ••${value.slice(-4)}`;
   }
 
   async projectViews(
-    resolve: (profile: StoredProfile) => Promise<{ supportLevel: ConnectionSupportLevel; status: ConnectionStatus }>,
+    resolve: (profile: StoredProfile, credentialPresent: boolean | undefined) => Promise<{ supportLevel: ConnectionSupportLevel; status: ConnectionStatus }>,
   ): Promise<ConnectionView[]> {
     const state = await this.load();
     const observedAt = this.nowIso();
     const views: ConnectionView[] = [];
     for (const profile of state.profiles) {
-      const derived = await resolve(profile);
+      let credentialPresent: boolean | undefined = true;
+      let accountLabel = profile.providerId;
+      if (profile.accessMode !== "local") {
+        try {
+          const value = await this.readPresentedCredential(profile);
+          credentialPresent = value !== undefined;
+          accountLabel = this.formatAccountLabel(profile, value);
+        } catch {
+          // A vault error is unknown state for this account, not a missing key.
+          credentialPresent = undefined;
+        }
+      }
+      const derived = await resolve(profile, credentialPresent);
       const view = projectConnectionView(toContract(profile), {
-        credentialPresent: await this.credentialPresent(profile),
-        accountLabel: await this.accountLabel(profile),
+        credentialPresent: credentialPresent === true,
+        accountLabel,
         supportLevel: derived.supportLevel,
         status: profile.enabled ? derived.status : "disabled",
         observedAt,
@@ -346,7 +378,7 @@ export class ConnectionProfileService {
     return views;
   }
 
-  async create(input: unknown, secret?: string, operationId?: string, admit?: () => Promise<void>): Promise<StoredProfile> {
+  async create(input: unknown, secret?: string, operationId?: string, admit?: () => Promise<void>, publishFirstLocal?: () => Promise<void>): Promise<StoredProfile> {
     if (operationId !== undefined && !isUuid(operationId)) throw fail("connection_invalid_profile", 400);
     return this.exclusive(async () => {
       const state = await this.load();
@@ -354,7 +386,10 @@ export class ConnectionProfileService {
         const replay = state.idempotency[operationId];
         if (replay) {
           const existing = state.profiles.find((p) => p.id === replay.profileId);
-          if (existing) return { ...existing, modelIds: [...existing.modelIds] };
+          if (existing) {
+            await admit?.();
+            return { ...existing, modelIds: [...existing.modelIds] };
+          }
         }
       }
       if (!state.multicontaEnabled) throw fail("multiconta_disabled", 409);
@@ -362,6 +397,9 @@ export class ConnectionProfileService {
         throw fail("connection_limit_exceeded", 429);
       }
       const parsed = parseConnectionProfile(input);
+      if (publishFirstLocal && (parsed.accessMode !== "local" || secret !== undefined)) {
+        throw fail("connection_invalid_profile", 400);
+      }
       await admit?.();
       const id = parsed.id ?? randomUUID();
       if (state.profiles.some((p) => p.id === id)) throw fail("connection_invalid_profile", 400);
@@ -377,13 +415,39 @@ export class ConnectionProfileService {
         migratedFromLegacy: false,
         ...(secret !== undefined && secret.length > 0 ? { credentialRef: connectionSecretRef(id) } : {}),
       };
-      if (stamped.credentialRef && secret) {
-        await this.secrets.set(stamped.credentialRef, secret);
-        try { await admit?.(); } catch (error) { await this.secrets.delete(stamped.credentialRef); throw error; }
-      } else await admit?.();
-      state.profiles.push(stamped);
-      if (operationId) state.idempotency[operationId] = { profileId: id, revision: 1 };
-      await this.persist(state);
+      const next: ProfilesFile = { ...state, profiles: [...state.profiles, stamped],
+        idempotency: operationId ? { ...state.idempotency, [operationId]: { profileId: id, revision: 1 } } : state.idempotency };
+      const ref = stamped.credentialRef;
+      try {
+        if (ref && secret) await this.secrets.set(ref, secret);
+        await admit?.();
+        await this.persist(next, admit);
+        await publishFirstLocal?.();
+      } catch (error) {
+        this.state = null;
+        if (ref) {
+          // An error after rename can leave a committed profile. Keep its key,
+          // and also keep the key if storage cannot prove it is unreferenced.
+          const referenced = await this.storage.loadProfiles().then(
+            latest => latest?.profiles.some(profile => profile.credentialRef === ref) ?? false,
+            () => undefined,
+          );
+          if (referenced === false) await this.secrets.delete(ref);
+        }
+        if (publishFirstLocal) {
+          // The profile writer is still held. Undo only our own addition if
+          // runtime configuration declined it, leaving other writers alone.
+          try {
+            const latest = await this.storage.loadProfiles();
+            if (JSON.stringify(latest) === JSON.stringify(next)) await this.persist(state);
+            else this.state = null;
+          } catch (rollbackError) {
+            this.state = null;
+            throw new AggregateError([error, rollbackError], "connection_first_local_rollback_failed");
+          }
+        }
+        throw error;
+      }
       return { ...stamped, modelIds: [...stamped.modelIds] };
     });
   }
@@ -402,10 +466,12 @@ export class ConnectionProfileService {
       const credential=input.credential??previousSecret;
       if(!input.remove&&!credential)throw fail('connection_invalid_profile',400);
       const parsed=parseConnectionProfile({schemaVersion:CONNECTIONS_SCHEMA_VERSION,id,revision:(current?.revision??0)+1,providerId:input.providerId,label:input.label,accessMode:'byok',enabled:input.enabled,endpointUrl:input.endpointUrl,modelIds:[],credentialRef:ref,priority:current?.priority??0});
-      const profile:StoredProfile={...parsed,id,createdAt:current?.createdAt??this.nowIso(),updatedAt:this.nowIso(),migratedFromLegacy:false};
+      const profile:StoredProfile={...parsed,id,createdAt:current?.createdAt??this.nowIso(),updatedAt:this.nowIso(),migratedFromLegacy:false,...(current?.retiredCredentialRef?{retiredCredentialRef:current.retiredCredentialRef}:{})};
       let touched=false;
       try{
-        await admit();touched=true;
+        await admit();
+        if(input.remove)await this.deleteCredentialIfPresent(current?.retiredCredentialRef);
+        touched=true;
         if(input.remove)await this.secrets.delete(ref);else if(input.credential!==undefined||!current)await this.secrets.set(ref,credential!);
         await admit();
         state.profiles=state.profiles.filter(item=>item.id!==id);if(!input.remove)state.profiles.push(profile);
@@ -424,7 +490,7 @@ export class ConnectionProfileService {
     });
   }
 
-  async update(id: string, patchInput: unknown): Promise<StoredProfile> {
+  async update(id: string, patchInput: unknown, admit?: () => Promise<void>): Promise<StoredProfile> {
     return this.exclusive(async () => {
       const state = await this.load();
       const index = state.profiles.findIndex((p) => p.id === id);
@@ -456,9 +522,14 @@ export class ConnectionProfileService {
           : (current.proxyPoolId ? { proxyPoolId: current.proxyPoolId } : {})),
         priority: patch.priority ?? current.priority,
       });
-      const next: StoredProfile = { ...merged, id: current.id, createdAt: current.createdAt, updatedAt: this.nowIso(), migratedFromLegacy: current.migratedFromLegacy };
-      state.profiles[index] = next;
-      await this.persist(state);
+      const next: StoredProfile = {
+        ...merged, id: current.id, createdAt: current.createdAt, updatedAt: this.nowIso(), migratedFromLegacy: current.migratedFromLegacy,
+        ...(current.retiredCredentialRef ? { retiredCredentialRef: current.retiredCredentialRef } : {}),
+      };
+      const profiles = [...state.profiles];
+      profiles[index] = next;
+      try { await this.persist({ ...state, profiles }, admit); }
+      catch (error) { this.state = null; throw error; }
       return { ...next, modelIds: [...next.modelIds] };
     });
   }
@@ -479,12 +550,43 @@ export class ConnectionProfileService {
         const replay = state.idempotency[operationId];
         if (replay && replay.profileId === id) return { ...current, modelIds: [...current.modelIds] };
       }
-      const ref = current.credentialRef ?? connectionSecretRef(id);
-      await this.secrets.set(ref, secret);
-      const next: StoredProfile = { ...current, credentialRef: ref, revision: current.revision + 1, updatedAt: this.nowIso() };
-      state.profiles[index] = next;
-      if (operationId) state.idempotency[operationId] = { profileId: id, revision: next.revision };
-      await this.persist(state);
+      const ref = current.migratedFromLegacy
+        ? current.credentialRef ?? connectionSecretRef(id)
+        : `${connectionSecretRef(id)}:${randomUUID()}`;
+      const next: StoredProfile = {
+        ...current, credentialRef: ref, revision: current.revision + 1, updatedAt: this.nowIso(),
+        ...(!current.migratedFromLegacy && current.credentialRef ? { retiredCredentialRef: current.credentialRef } : {}),
+      };
+      const updated: ProfilesFile = {
+        ...state,
+        profiles: state.profiles.map((profile, position) => position === index ? next : profile),
+        idempotency: operationId
+          ? { ...state.idempotency, [operationId]: { profileId: id, revision: next.revision } }
+          : state.idempotency,
+      };
+      if (current.migratedFromLegacy) {
+        await this.secrets.set(ref, secret);
+        await this.persist(updated);
+        return { ...next, modelIds: [...next.modelIds] };
+      }
+      // An in-flight request keeps the committed reference until the new revision
+      // is visible. An older snapshot can never read from the new key slot.
+      await this.deleteCredentialIfPresent(current.retiredCredentialRef);
+      try {
+        await this.secrets.set(ref, secret);
+        await this.persist(updated);
+      } catch (error) {
+        this.state = null;
+        const referenced = await this.storage.loadProfiles().then(
+          latest => latest?.profiles.some(profile => profile.credentialRef === ref) ?? false,
+          () => undefined,
+        );
+        if (referenced === false) await this.deleteCredentialIfPresent(ref);
+        throw error;
+      }
+      // The new revision is already committed. Keep the retired reference so
+      // the next rotation or revocation can retry a failed vault deletion.
+      await this.deleteCredentialIfPresent(next.retiredCredentialRef).catch(() => undefined);
       return { ...next, modelIds: [...next.modelIds] };
     });
   }
@@ -507,6 +609,7 @@ export class ConnectionProfileService {
       }
       // Keep the association until its cleanup is confirmed. A partial failure must
       // not turn a still-present legacy key into the router's unscoped fallback.
+      await this.deleteCredentialIfPresent(current.retiredCredentialRef);
       if (current.credentialRef) await this.secrets.delete(current.credentialRef);
       await this.persist({ ...state, profiles: state.profiles.filter(profile => profile.id !== current.id) });
       return { revoked: true, providerId: current.providerId, remote: "skipped" as const };

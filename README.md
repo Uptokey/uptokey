@@ -1,8 +1,12 @@
 # Uptokey
 
-A coding assistant in your terminal, with a local service for your provider connections, project tools and conversations. Provider API keys are stored in the operating system's secret store.
+A local-first AI assistant for coding and everyday work. Connect your own AI provider or run a model on your computer. Uptokey keeps provider API keys in your operating system's vault.
 
-[Website](https://www.uptokey.com) · [Documentation](https://docs.uptokey.com) · [npm package](https://www.npmjs.com/package/uptokey)
+[Documentation](https://docs.uptokey.com) · [Website](https://www.uptokey.com) · [npm package](https://www.npmjs.com/package/uptokey)
+
+![Uptokey Terminal, Desktop, Web dashboard, Chrome and VS Code, with the local AI proxy and operating system vault](docs/images/uptokey-surfaces.svg)
+
+This open-source repository is the home of the local proxy and the terminal beta. The desktop app, web dashboard and extensions are separate product surfaces. Find the current downloads and setup guides on the [Uptokey website](https://www.uptokey.com).
 
 - **Portable terminal beta:** Windows, macOS and Linux, on x64 or ARM64, with Node.js **22.12.0 or newer**. npm installs the matching renderer and runtime; no separate Bun setup is needed. Platform execution results accompany each release artifact.
 - **Local API:** `http://127.0.0.1:21435/v1` by default.

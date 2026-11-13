@@ -113,10 +113,11 @@ test("hosted inventory derives only zero-price enabled models from the bound liv
   assert.equal(calls, 4);
 });
 
-test("the verified seven-model catalog shows individual model and source names without replacing dispatch identities", async () => {
+test("the hosted catalog shows Argon and other model names without replacing dispatch identities", async () => {
   const entries = [
     ["google-gemini-3-5-flash-lite", "uptokey-beta-free-2026-10-09", "Gemini 3.5 Flash-Lite · Google"],
     ["google-gemini-3-8-flash", "uptokey-beta-free-2026-10-09", "Gemini 3.8 Flash · Google"],
+    ["google-gemini-4-argon", "uptokey-beta-free-2026-10-09", "Gemini 4 Argon · Google"],
     ["uptokey-free-fast", "free-beta-v1", "Llama 3.2 3B · Cloudflare"],
     ["uptokey-free", "free-beta-v1", "GPT-OSS 20B · Cloudflare"],
     ["uptokey-free-reasoning", "free-beta-v1", "GPT-OSS 120B · Cloudflare"],
@@ -126,10 +127,12 @@ test("the verified seven-model catalog shows individual model and source names w
   const value = { ...catalog(), models: entries.map(([id, version]) => ({
     id, price: { model: id, version: String(version), currency: "USD", inputMicrosPerMillion: 0, outputMicrosPerMillion: 0 },
     limits: { inputTokens: 8192, outputTokens: 8192, contextTokens: 16384 },
+    ...(id === "google-gemini-4-argon" ? { toolCalls: true } : {}),
   })) };
   const models = await loadHostedModels(async () => json(value), accountRef, revision);
   assert.deepEqual(models.map(model => [model.modelId, model.priceVersion, model.label]), entries);
-  assert.equal(new Set(models.map(model => model.label)).size, 7);
+  assert.equal(new Set(models.map(model => model.label)).size, entries.length);
+  assert.equal(models.find(model => model.modelId === "google-gemini-4-argon")?.toolCalls, true);
   for (const model of models) {
     assert.equal(model.accountRef, accountRef); assert.equal(model.revision, revision);
     assert.equal(hostedInput(model, "named-model", messages).model, model.modelId);

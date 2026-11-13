@@ -9,10 +9,12 @@ import {isCoreProvider,isOptionalProvider,isUserDefinedProvider,isNamedExperimen
 import {acceptNamedProviderRisk} from './provider-risk.ts';
 import {GEMINI_FREE_PRIVACY_NOTICE_VERSION} from './privacy.ts';
 import type {ConnectionProfileService,StoredProfile} from './connection-profiles.ts';
-import type {SecretStore} from './secret-store.ts';
+import {MemorySecretStore,type SecretStore} from './secret-store.ts';
 import type {ProxyConfig,ProviderName} from './types.ts';
 import {COMPAT_RUNTIME_DEFAULTS} from './local-runtime/default.ts';
 import {PROVIDER_SETUP_CATALOG_PRESETS} from './provider-setup-catalog.ts';
+import {DEFAULT_OLLAMA_CHAT_ENDPOINT,verifyDefaultOllamaChat} from './local-model-discovery.ts';
+import {OLLAMA_STARTER_MODEL} from './local-runtime/ollama-chat-control.ts';
 
 const BASE='/local/provider/setup';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -27,7 +29,7 @@ class SetupHttpError extends Error {readonly code:string;readonly status:400|401
 const fail=(code:string,status?:ConstructorParameters<typeof SetupHttpError>[1]):never=>{throw new SetupHttpError(code,status);};
 const record=(v:unknown):Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:fail('provider_setup_invalid_request');
 const exact=(v:Record<string,unknown>,required:string[],optional:string[]=[])=>required.every(k=>k in v)&&Object.keys(v).every(k=>required.includes(k)||optional.includes(k));
-interface Pending {id:string;owner:string;expires:number;controller:AbortController;prepared?:PreparedProviderSetup;key:string;label?:string;operationId:string;existing?:StoredProfile;updated?:StoredProfile;created?:StoredProfile;committing?:boolean;result?:{providerId:string;modelId:string;connectionId:string;accountLabel:string;reloaded:true};timer:ReturnType<typeof setTimeout>}
+interface Pending {id:string;owner:string;expires:number;controller:AbortController;prepared?:PreparedProviderSetup;key:string;label?:string;operationId:string;ollamaBefore?:string;existing?:StoredProfile;updated?:StoredProfile;created?:StoredProfile;committing?:boolean;result?:{providerId:string;modelId:string;connectionId:string;accountLabel:string;reloaded:true};timer:ReturnType<typeof setTimeout>}
 export interface ProviderSetupHttpDeps {
  secrets:SecretStore;profiles:ConnectionProfileService;getConfig:()=>ProxyConfig;
  persist:(mutator:(next:ProxyConfig)=>void,admit?:()=>Promise<void>)=>Promise<ProxyConfig>;
@@ -47,26 +49,38 @@ export function registerProviderSetupRoutes(app:Hono,deps:ProviderSetupHttpDeps)
   const actual=await deps.profiles.get(expected.id);
   if(!actual||actual.revision!==expected.revision||!actual.enabled||actual.providerId!==expected.providerId||!await deps.profiles.credentialPresent(actual))return fail('provider_setup_expired',410);
  }
- async function current(c:Context,item:Pending){if(now()>=item.expires){close(item);return fail('provider_setup_expired',410);}if(await authority(c)!==item.owner)return fail('provider_setup_expired',403);if(item.controller.signal.aborted)return fail('provider_setup_expired',410);await currentTarget(item);}
+ async function currentOwner(c:Context,item:Pending){if(now()>=item.expires){close(item);return fail('provider_setup_expired',410);}if(await authority(c)!==item.owner)return fail('provider_setup_expired',403);if(item.controller.signal.aborted||now()>=item.expires)return fail('provider_setup_expired',410);}
+ async function current(c:Context,item:Pending){await currentOwner(c,item);await currentTarget(item);}
+ async function firstLocalAvailable(config:ProxyConfig){
+  if(config.providers.ollama?.configured||(await deps.profiles.list()).some(profile=>profile.providerId==='ollama'))return fail('provider_setup_local_conflict',409);
+ }
  async function body(c:Context){const parsed=await readBoundedJson(c.req.raw,MAX_LOCAL_CONTROL_REQUEST_BYTES);if(!parsed.ok)return fail('provider_setup_invalid_request');return record(parsed.value);}
  function rate(c:Context){const decision=deps.checkRate('localhost-provider-setup',20,60_000);if(!decision.ok){c.header('Retry-After',String(Math.max(1,Math.min(300,Math.ceil(decision.retryAfter)))));return fail('provider_setup_rate_limited',429);}}
  const route=(fn:(c:Context)=>Promise<Response>)=>async(c:Context)=>{try{await authority(c);return await fn(c);}catch(error){const code=error instanceof SetupHttpError?error.code:error instanceof ProviderSetupError&&SAFE.has(error.code)?error.code:error instanceof Error&&SAFE.has(error.message)?error.message:'provider_setup_failed';const status=error instanceof SetupHttpError?error.status:code==='provider_setup_failed'?502:400;return c.json({error:{type:code}},status);}};
  app.get(BASE+'/presets',route(async c=>c.json({presets:[...PROVIDER_SETUP_PRESETS.map(p=>({id:p.id,label:p.id==='custom'?'Custom endpoint':p.label,protocol:p.protocol,local:p.local,endpointUrl:p.endpointUrl,...(p.discovery?{discovery:p.discovery}:{}),...(p.documentationUrl?{documentationUrl:p.documentationUrl}:{}),...(p.getKeyUrl?{getKeyUrl:p.getKeyUrl}:{}),...(p.endpointRequired?{endpointRequired:true,endpointPlaceholder:p.endpointPlaceholder,endpointHostSuffix:p.endpointHostSuffix}:{}),...(p.modelIds?{modelIds:p.modelIds,modelsReviewedAt:p.modelsReviewedAt}:{})})),...LOCAL_COMPAT]})));
  app.post(BASE+'/prepare',route(async c=>{
   rate(c);const owner=await authority(c),input=await body(c);
-  if(!exact(input,['providerId'],['apiKey','customEndpoint','manualModel','label','connectionId','expectedRevision'])||typeof input.providerId!=='string'||input.providerId.length>64||input.apiKey!==undefined&&(typeof input.apiKey!=='string'||input.apiKey.length>512)||input.customEndpoint!==undefined&&(typeof input.customEndpoint!=='string'||input.customEndpoint.length>2048)||input.manualModel!==undefined&&(typeof input.manualModel!=='string'||input.manualModel.length>200)||input.label!==undefined&&(typeof input.label!=='string'||input.label.trim().length>80))return fail('provider_setup_invalid_request');
+  if(!exact(input,['providerId'],['apiKey','customEndpoint','manualModel','label','connectionId','expectedRevision','firstLocalOnly'])||typeof input.providerId!=='string'||input.providerId.length>64||input.apiKey!==undefined&&(typeof input.apiKey!=='string'||input.apiKey.length>512)||input.customEndpoint!==undefined&&(typeof input.customEndpoint!=='string'||input.customEndpoint.length>2048)||input.manualModel!==undefined&&(typeof input.manualModel!=='string'||input.manualModel.length>200)||input.label!==undefined&&(typeof input.label!=='string'||input.label.trim().length>80))return fail('provider_setup_invalid_request');
   const existingRequest=input.connectionId!==undefined||input.expectedRevision!==undefined;
-  // A paired first-party Tauri shell may refresh one existing BYOK account,
-  // but it never inherits the broader local management authority used to add
-  // credentials, endpoints, labels or models. The pending owner binds the
-  // following commit/dispose calls to this exact restricted session.
-  if(owner.startsWith('refresh:')&&!existingRequest)return fail('unauthorized',401);
+  const restricted=owner.startsWith('refresh:');
+  const starterOnly=restricted&&input.firstLocalOnly===true;
+  // A paired first-party shell can refresh an existing BYOK account or enable
+  // the verified, already installed starter. It cannot add arbitrary connections.
+  if(restricted&&!existingRequest&&!starterOnly)return fail('unauthorized',401);
+  let ollamaBefore:string|undefined;
+  if('firstLocalOnly' in input){
+   if(input.firstLocalOnly!==true||input.providerId!=='ollama'||Object.keys(input).length!==2)return fail('provider_setup_invalid_request');
+   const config=deps.getConfig();
+   ollamaBefore=JSON.stringify(config.providers.ollama??null);
+   await firstLocalAvailable(config);
+   if(starterOnly&&config.providers.ollama?.endpointUrl&&config.providers.ollama.endpointUrl!==DEFAULT_OLLAMA_CHAT_ENDPOINT)return fail('provider_setup_local_conflict',409);
+  }
   if(existingRequest&&(!(typeof input.connectionId==='string'&&UUID.test(input.connectionId))||!Number.isSafeInteger(input.expectedRevision)||input.apiKey!==undefined||input.customEndpoint!==undefined||input.manualModel!==undefined||input.label!==undefined))return fail('provider_setup_invalid_request');
   const catalog=PROVIDER_SETUP_CATALOG_PRESETS.find(p=>p.id===input.providerId);
   const compatible=LOCAL_COMPAT.find(p=>p.id===input.providerId)??catalog,preset=PROVIDER_SETUP_PRESETS.find(p=>p.id===input.providerId)??compatible;
   const existing=existingRequest?await deps.profiles.get(input.connectionId as string):undefined;
   if(existingRequest&&(!existing||existing.providerId!==input.providerId||existing.revision!==input.expectedRevision||existing.accessMode==='oauth'||!existing.enabled))return fail('provider_setup_expired',existing?.revision!==input.expectedRevision?409:410);
-  if(owner.startsWith('refresh:')&&existing?.accessMode!=='byok')return fail('unauthorized',401);
+  if(restricted&&!starterOnly&&existing?.accessMode!=='byok')return fail('unauthorized',401);
   if(existing&&catalog?.discovery==='manual')return fail('provider_discovery_unsupported');
   if(compatible&&!catalog?.endpointRequired&&input.customEndpoint!==undefined&&input.customEndpoint!==compatible.endpointUrl)return fail('provider_endpoint_fixed');
   if(catalog?.discovery==='manual'&&(!(typeof input.manualModel==='string')||!input.manualModel.trim()))return fail('provider_model_invalid');
@@ -79,7 +93,7 @@ export function registerProviderSetupRoutes(app:Hono,deps:ProviderSetupHttpDeps)
   for(const item of pending.values())if(now()>=item.expires)close(item);
   if(pending.size>=MAX_PENDING)return fail('provider_setup_capacity',429);
   const id=randomUUID(),controller=new AbortController(),expires=now()+TTL;
-  const item:Pending={id,owner,expires,controller,key:'',label:existing?.label??(typeof input.label==='string'?input.label.trim()||undefined:undefined),operationId:randomUUID(),...(existing?{existing}:{}),timer:setTimeout(()=>{const item=pending.get(id);if(item)close(item);},TTL)};item.timer.unref?.();pending.set(id,item);
+  const item:Pending={id,owner,expires,controller,key:'',label:existing?.label??(typeof input.label==='string'?input.label.trim()||undefined:undefined),operationId:randomUUID(),ollamaBefore,...(existing?{existing}:{}),timer:setTimeout(()=>{const item=pending.get(id);if(item)close(item);},TTL)};item.timer.unref?.();pending.set(id,item);
   const aborted=()=>close(item);c.req.raw.signal.addEventListener('abort',aborted,{once:true});
   try{
    item.key=normalizeProviderKey(existingKey??(typeof input.apiKey==='string'?input.apiKey.trim():''),input.providerId as ProviderName,Boolean(preset?.local));
@@ -91,13 +105,18 @@ export function registerProviderSetupRoutes(app:Hono,deps:ProviderSetupHttpDeps)
     }
     const response=await (deps.fetchImpl??fetch)(input,init);try{await current(c,item);return response;}catch(error){await response.body?.cancel().catch(()=>undefined);throw error;}
    };
-   const discovery=createProviderSetupService({secrets:deps.secrets,loadConfig:async()=>structuredClone(deps.getConfig()),fetch:guardedFetch,reload:async()=>{},updateConfig:async()=>fail('provider_setup_invalid_request')});
+   const discovery=createProviderSetupService({secrets:starterOnly?new MemorySecretStore():deps.secrets,loadConfig:async()=>structuredClone(deps.getConfig()),fetch:guardedFetch,reload:async()=>{},updateConfig:async()=>fail('provider_setup_invalid_request')});
    item.prepared=input.manualModel===undefined?await discovery.prepare(input.providerId,item.key,customEndpoint,controller.signal):await discovery.prepareManual(input.providerId,item.key,customEndpoint,input.manualModel as string,controller.signal);
+   if(starterOnly){
+    const models=item.prepared.models.filter(model=>model.id===OLLAMA_STARTER_MODEL);
+    if(!models.length||!await verifyDefaultOllamaChat(OLLAMA_STARTER_MODEL,controller.signal,deps.fetchImpl))return fail('provider_model_not_discovered');
+    item.prepared={...item.prepared,models};
+   }
    if(catalog)item.prepared={...item.prepared,label:catalog.label};
    await current(c,item);
    if(existing)item.key='';
    const notices=PROVIDER_NOTICE_MESSAGES[item.prepared.providerId as keyof typeof PROVIDER_NOTICE_MESSAGES];
-   return c.json({id,providerId:item.prepared.providerId,label:item.prepared.label,models:item.prepared.models,source:item.prepared.source,notice:notices?.en??null,noticeByLocale:notices??null,expiresAt:new Date(expires).toISOString(),...(existing?{connectionId:existing.id,expectedRevision:existing.revision,reusingStoredCredential:true}:{})});
+   return c.json({id,providerId:item.prepared.providerId,label:item.prepared.label,models:item.prepared.models,source:item.prepared.source,notice:notices?.en??null,noticeByLocale:notices??null,expiresAt:new Date(expires).toISOString(),...(existing?{connectionId:existing.id,expectedRevision:existing.revision,reusingStoredCredential:true}:{commitReplay:true})});
   }catch(error){try{await current(c,item);}catch(currentError){error=currentError;}close(item);throw error;}finally{c.req.raw.signal.removeEventListener('abort',aborted);}
  }));
  app.post(BASE+'/commit',route(async c=>{
@@ -112,6 +131,7 @@ export function registerProviderSetupRoutes(app:Hono,deps:ProviderSetupHttpDeps)
   const otherProviderModels=item.existing?(await deps.profiles.list()).filter(profile=>profile.id!==item.existing!.id&&profile.providerId===providerId&&profile.enabled).flatMap(profile=>profile.modelIds):[];
   const discoveredModels=prepared.models.map(model=>model.id);
   const patch=(next:ProxyConfig)=>{
+   if(item.ollamaBefore!==undefined&&JSON.stringify(next.providers.ollama??null)!==item.ollamaBefore)return fail('provider_setup_local_conflict',409);
    if(isOptionalProvider(providerId))ensureProviderEntry(next,providerId);else if(isUserDefinedProvider(providerId))ensureUserDefinedProviderEntry(next,providerId);else if(!isCoreProvider(providerId))return fail('provider_unknown');
    const entry=next.providers[providerId as ProviderName]!;
    if(entry.configured&&entry.endpointUrl&&entry.endpointUrl!==endpoint)return fail('provider_endpoint_conflict',409);
@@ -122,12 +142,22 @@ export function registerProviderSetupRoutes(app:Hono,deps:ProviderSetupHttpDeps)
    if(providerId==='gemini'){entry.privacyAcceptedAt??=new Date(now()).toISOString();entry.privacyNoticeVersion=GEMINI_FREE_PRIVACY_NOTICE_VERSION;}
    // No provider-wide secret/default selection/routing combo is written here.
   };
-  patch(structuredClone(deps.getConfig()));await current(c,item);
+  if(item.ollamaBefore===undefined||!item.created)patch(structuredClone(deps.getConfig()));
+  await current(c,item);
+  const persist=()=>deps.persist(patch,()=>current(c,item));
   if(item.existing){
-   item.updated??=await deps.profiles.update(item.existing.id,{revision:item.existing.revision,modelIds:[modelId],...(item.existing.modelIds.includes(modelId)?{}:{imageInputModels:null,audioInputModels:null,toolModels:null,jsonSchemaModels:null})});
-  }else item.created??=await deps.profiles.create({schemaVersion:1,providerId,label:item.label??prepared.label,accessMode:local?'local':'byok',enabled:true,...(isCoreProvider(providerId)?{}:{endpointUrl:endpoint}),modelIds:[modelId]},item.key||undefined,item.operationId,()=>current(c,item));
+   item.updated??=await deps.profiles.update(item.existing.id,{revision:item.existing.revision,modelIds:[modelId],...(item.existing.modelIds.includes(modelId)?{}:{imageInputModels:null,audioInputModels:null,toolModels:null,jsonSchemaModels:null})},async()=>{await currentTarget(item);await currentOwner(c,item);});
+  }else {
+   const admit=async()=>{
+    await current(c,item);
+    if(item.ollamaBefore!==undefined)await firstLocalAvailable(deps.getConfig());
+   };
+   item.created??=await deps.profiles.create({schemaVersion:1,id:item.operationId,providerId,label:item.label??prepared.label,accessMode:local?'local':'byok',enabled:true,...(isCoreProvider(providerId)?{}:{endpointUrl:endpoint}),modelIds:[modelId]},item.key||undefined,item.operationId,admit,item.ollamaBefore===undefined?undefined:async()=>{await persist();});
+  }
   item.key='';
-  await currentTarget(item);await deps.persist(patch,async()=>{await current(c,item);await currentTarget(item);});await deps.invalidate(providerId as ProviderName);await current(c,item);await currentTarget(item);
+  await currentTarget(item);
+  if(item.ollamaBefore===undefined)await persist();
+  await deps.invalidate(providerId as ProviderName);await current(c,item);await currentTarget(item);
   const target=item.updated??item.created!;
   item.result={providerId,modelId,connectionId:target.id,accountLabel:target.label,reloaded:true};prepared.dispose();item.prepared=undefined;return c.json(item.result);
   } finally {item.committing=false;}

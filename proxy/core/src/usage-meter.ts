@@ -27,6 +27,8 @@ export interface UsageObservation {
   readonly usage: (ReportedTokenUsage & CacheUsage) | null;
   /** True when the response was interrupted (cancel/timeout/stream failure). */
   readonly interrupted: boolean;
+  /** Protocol completion, distinct from a transport EOF without SSE [DONE]. */
+  readonly responseComplete: boolean;
 }
 export interface UsageObserver { chunk(bytes: Uint8Array): void; complete(): void; interrupt(): void; }
 const MAX_USAGE_BUFFER = 1_048_576;
@@ -41,7 +43,7 @@ export class UsageMeter {
       excludedDispatchPaths: ["workspace_gateway"], persisted: false, providers: structuredClone([...this.providers.values()]) };
   }
 
-  observe(provider: ProviderName, streaming: boolean, onUsage?: (usage: ReportedTokenUsage & CacheUsage) => void, onClose?: (observation: UsageObservation) => void): UsageObserver {
+  observe(provider: ProviderName, streaming: boolean, onUsage?: (usage: ReportedTokenUsage & CacheUsage) => void, onClose?: (observation: UsageObservation) => void, onFirstOutput?: () => void): UsageObserver {
     let metrics = this.providers.get(provider);
     if (!metrics) {
       metrics = { provider, responsesStarted: 0, responsesInFlight: 0, responsesWithUsage: 0, responsesWithoutUsage: 0, interruptedResponses: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -55,18 +57,30 @@ export class UsageMeter {
     let disabled = false;
     let settled = false;
     let streamDone = false;
+    let validJson = false;
+    let responseFailed = false;
+    let outputObserved = false;
     const decoder = new TextDecoder();
     const parse = (text: string) => {
       try {
         const value = JSON.parse(text);
+        validJson = isDataRecord(value);
+        // Error envelopes may carry an object or a scalar. Failure is sticky:
+        // a later usage frame or [DONE] cannot turn an upstream error into success.
+        if (isDataRecord(value) && (Object.hasOwn(value, "error") && value.error !== null || value.type === "error" || value.type === "response.failed" || value.type === "response.incomplete")) responseFailed = true;
+        if (streaming && !responseFailed && !outputObserved && hasGeneratedOutput(value)) {
+          outputObserved = true;
+          try { onFirstOutput?.(); } catch { /* timing is best-effort; body is unchanged */ }
+        }
         const next = readReportedUsage(value);
         if (next) usage = next; // Streaming usage is cumulative, never sum its frames.
       } catch { /* Missing/malformed metadata is unavailable; the response is unchanged. */ }
     };
     const parser = streaming ? createParser({
       maxBufferSize: MAX_USAGE_BUFFER,
-      onEvent: ({ data }) => {
+      onEvent: ({ data, event }) => {
         if (streamDone) return;
+        if (event === "error") responseFailed = true;
         if (data.length > MAX_USAGE_BUFFER) { disabled = true; usage = undefined; }
         if (data === "[DONE]") streamDone = true;
         else if (!disabled) parse(data);
@@ -108,7 +122,7 @@ export class UsageMeter {
           if (onUsage) { try { onUsage(usage); } catch { /* metrics hook is best-effort */ } }
         } else counters.responsesWithoutUsage += 1;
       }
-      if (onClose) { try { onClose({ usage: closed ?? null, interrupted }); } catch { /* settlement hook is best-effort */ } }
+      if (onClose) { try { onClose({ usage: closed ?? null, interrupted, responseComplete: !interrupted && !disabled && !responseFailed && (streaming ? streamDone : validJson) }); } catch { /* settlement hook is best-effort */ } }
       buffered = "";
       usage = undefined;
       parser?.reset();
@@ -119,6 +133,25 @@ export class UsageMeter {
       interrupt: () => settle(true)
     };
   }
+}
+
+/** Generated content only: heartbeat, role-only, usage and finish frames are not TTFT. */
+function hasGeneratedOutput(value: unknown): boolean {
+  if (!isDataRecord(value) || !Array.isArray(value.choices)) return false;
+  const nonempty = (text: unknown) => typeof text === "string" && text.length > 0;
+  return value.choices.some(choice => {
+    if (!isDataRecord(choice)) return false;
+    if (nonempty(choice.text)) return true;
+    const delta = choice.delta;
+    if (!isDataRecord(delta)) return false;
+    if ([delta.content, delta.reasoning_content, delta.reasoning, delta.refusal].some(nonempty)) return true;
+    const calls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [delta.function_call];
+    return calls.some(call => {
+      if (!isDataRecord(call)) return false;
+      const fn = isDataRecord(call.function) ? call.function : call;
+      return nonempty(fn.name) || nonempty(fn.arguments);
+    });
+  });
 }
 
 export function readReportedUsage(value: unknown): (ReportedTokenUsage & CacheUsage) | undefined {

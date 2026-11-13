@@ -12,15 +12,32 @@ const MESSAGE_ROLES = new Set(["system", "developer", "user", "assistant", "tool
 // The shared projection also receives native Anthropic names (up to 128).
 // Protocol/provider-specific limits remain the responsibility of their adapters.
 const FUNCTION_NAME = /^[A-Za-z0-9_-]{1,128}$/;
+const preparedRequests = new WeakSet<object>();
 
 export function hasForbiddenInferenceCredentialField(value: Record<string, unknown>): boolean {
   return Object.keys(value).some((key) => FORBIDDEN_ROOT_FIELDS.has(key.toLowerCase().replace(/[-_]/g, "")));
 }
 
 export function projectInferenceRequest(value: unknown): ChatCompletionRequest | undefined {
+  if (value !== null && typeof value === "object" && preparedRequests.has(value)) return value as ChatCompletionRequest;
   let projected: unknown;
   try { projected = JSON.parse(canonicalJson(value)); } catch { return undefined; }
   return validProjectedShape(projected) ? projected : undefined;
+}
+
+/** Keep one validated snapshot across the HTTP admission and router boundaries. */
+export function prepareInferenceRequest(value: unknown): ChatCompletionRequest | undefined {
+  const request = projectInferenceRequest(value);
+  if (!request || preparedRequests.has(request)) return request;
+  freezeProjection(request);
+  preparedRequests.add(request);
+  return request;
+}
+
+function freezeProjection(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  for (const child of Object.values(value)) freezeProjection(child);
+  Object.freeze(value);
 }
 
 export function validInferenceRequestShape(value: unknown): value is ChatCompletionRequest {

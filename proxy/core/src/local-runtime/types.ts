@@ -14,6 +14,7 @@ export interface LocalRuntimeModel {
   id: string;
   runtime: LocalRuntimeId;
   sizeBytes?: number;
+  digest?: string;
   capabilities: LocalRuntimeCapabilities;
   metadataBasis: "reported" | "partial" | "unknown";
 }

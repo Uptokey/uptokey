@@ -1,7 +1,7 @@
 import type {Artifact} from '@uptokey/sync-contract/workflow';
 import type {ProjectTaskAuthority} from './project-task-authority.ts';
 /**
- * W3 — executor local serial de planos aprovados.
+ * W3 — executor local de planos aprovados.
  *
  * Garantias: intenção (`prepared`, depois `dispatched`) é persistida antes do efeito e o
  * resultado depois; política é reavaliada antes de cada etapa; cancelamento impede novas
@@ -140,6 +140,8 @@ export interface WorkflowExecutorOptions {
   journal: RunJournal;
   policy: PolicyEnvironment;
   effects: EffectDispatcher;
+  /** Limites da leitura pública anônima e sem paginação, resolvidos no catálogo do Core. */
+  parallelReadScope?: (id: string, version: number) => {origin: string; maxOutputBytes: number} | undefined;
   now?: () => Date;
   newId?: () => string;
   admission?: RequestAdmission;
@@ -154,6 +156,7 @@ export class WorkflowExecutor {
   private readonly journal: RunJournal;
   private readonly policy: PolicyEnvironment;
   private readonly effects: EffectDispatcher;
+  private readonly parallelReadScope: WorkflowExecutorOptions["parallelReadScope"];
   private readonly now: () => Date;
   private readonly newId: () => string;
   private readonly admission: RequestAdmission;
@@ -167,6 +170,7 @@ export class WorkflowExecutor {
     this.journal = options.journal;
     this.policy = options.policy;
     this.effects = options.effects;
+    this.parallelReadScope = options.parallelReadScope;
     this.now = options.now ?? (() => new Date());
     this.newId = options.newId ?? randomUUID;
     this.admission = options.admission ?? new RequestAdmission(WORKFLOW_LIMITS.activeRunsPerProcess);
@@ -352,6 +356,15 @@ export class WorkflowExecutor {
       const delegation=await this.journal.readTaskAuthority?.(projectId,run.planId,run.requestId);
       if(!delegation&&await this.journal.isTaskRequest?.(projectId,run.requestId)){await this.deny(projectId,runId,state.stepId,undefined,'project_task_authority_invalid');return;}
       if(delegation)snapshot.grant=delegation.grant;
+      const pairMode = !delegation && snapshot.plan ? this.publicReadPairMode(snapshot.plan) : undefined;
+      if (pairMode && snapshot.plan) {
+        if (run.stepStates.some(item => item.status === "prepared" || item.status === "dispatched")) {
+          await this.reconcileInterrupted(projectId, runId);
+          continue;
+        }
+        await this.drivePublicReadPair(record, snapshot.plan, snapshot, pairMode, signal);
+        return;
+      }
       const step = snapshot.plan?.steps.find((candidate) => candidate.id === state.stepId);
       const capability = step ? snapshot.capabilities.get(capabilityKey(step.capabilityId, step.capabilityVersion)) : undefined;
       const stepReceipts = receiptsForStep(record.receipts, state.stepId);
@@ -399,53 +412,126 @@ export class WorkflowExecutor {
         : { allowed: false as const, code: "plan_changed", status: 409 as const };
       if (!decision.allowed) { await this.deny(projectId, runId, state.stepId, step, (decision as any).code); return; }
 
-      const attemptId = this.newId();
-      const receiptId = this.newId();
-      const resolved = resolveBindings(step!, record.receipts, run.stepStates);
-      const prepared = await this.mutate(projectId, runId, (current) => {
-        if (current.run.status !== "running") return undefined;
-        const at = this.stamp(current.run.updatedAt);
-        const receipt = prepareReceipt({ id: receiptId, projectId, runId, stepId: state.stepId, attemptId, capability: capability!, inputArtifactRefs: resolved.inputArtifactRefs, now: at });
-        return { run: withStep(current.run, state.stepId, "prepared", at, attemptId, receiptId), receipts: [...current.receipts, receipt] };
-      });
-      if (!prepared) return;
-
-      const dispatched = await this.mutate(projectId, runId, (current) => {
-        const receipt = current.receipts.find((item) => item.id === receiptId);
-        if (!receipt || receipt.status !== "prepared") return undefined;
-        const at = this.stamp(current.run.updatedAt);
-        const expired = deadline === undefined || this.now().getTime() >= deadline;
-        if (current.run.status !== "running" || expired) {
-          const code = current.run.status !== "running" ? "cancelled" : "run_timeout_exceeded";
-          return { run: withStep(current.run, state.stepId, "failed", at), receipts: replace(current.receipts, settleReceipt(receipt, { kind: "not_sent", code, now: at })) };
-        }
-        return { run: withStep(current.run, state.stepId, "dispatched", at), receipts: replace(current.receipts, markDispatched(receipt)) };
-      });
-      if (!dispatched || dispatched.run.status !== "running") return;
-      if (dispatched.receipts.find((item) => item.id === receiptId)?.status !== "dispatched") continue;
-
-      const window = this.runWindow(signal, deadline);
-      let outcome: EffectOutcome;
-      try {
-        outcome = await this.effects.dispatch({ projectId, runId, stepId: state.stepId, attemptId, principalId: run.principalId, capability: capability!, arguments: resolved.arguments, limits: limits!, deadlineAt: new Date(deadline!).toISOString(), signal: window.signal });
-      } catch {
-        outcome = { kind: "failed", code: window.timedOut() ? "run_timeout_exceeded" : window.signal.aborted ? "aborted" : "effect_exception", sent: "unknown" };
-      } finally { window.dispose(); }
-      if (window.timedOut() && outcome.kind === "failed") outcome = { ...outcome, code: "run_timeout_exceeded" };
-      if(outcome.kind==='pending'&&(capability?.effect!=='read_external'||capability.retryClass!=='read_only'||!Number.isSafeInteger(pollInterval)||Number(pollInterval)<1000||Number(pollInterval)>60000))outcome={kind:'failed',code:'poll_invalid',sent:'unknown'};
-      const artifacts=(outcome.kind==='completed'||outcome.kind==='pending')?outcome.artifacts?.map(item=>({...item,bytes:new Uint8Array(item.bytes)})):undefined;
-      const pending=outcome.kind==='pending';
-      const settle = toSettleInput(outcome);
-      await this.mutate(projectId, runId, (current) => {
-        const receipt = current.receipts.find((item) => item.id === receiptId);
-        if (!receipt || receipt.status !== "dispatched" || current.run.status!=="running") return undefined;
-        const at = this.stamp(current.run.updatedAt);
-        // `not_sent` depois de `dispatched` depende da garantia do serviço (porta EffectDispatcher).
-        const settled = settleReceipt(receipt, { ...settle, now: at } as SettleInput);
-        const stepStatus = settled.status === "succeeded" ? pending?"pending":"succeeded" : settled.status === "unknown" ? "unknown" : "failed";
-        return { run: withStep(current.run, state.stepId, stepStatus, at), receipts: replace(current.receipts, settled) };
-      },artifacts);
+      if (!await this.attempt(record, step!, capability!, limits!, deadline, pollInterval, signal)) return;
     }
+  }
+
+  private publicReadPairMode(plan: ExecutionPlan): "parallel" | "serial" | undefined {
+    if (!this.parallelReadScope || plan.steps.length !== 2 || plan.limits.maxCalls !== 2) return;
+    const origins = new Set<string>();
+    let bytes = 0;
+    for (const step of plan.steps) {
+      if (step.arguments.prepared_call?.kind !== "literal" || Object.keys(step.arguments).length !== 1) return;
+      const scope = this.parallelReadScope(step.capabilityId, step.capabilityVersion);
+      if (!scope) return;
+      origins.add(scope.origin);
+      bytes += scope.maxOutputBytes;
+    }
+    // Each adapter enforces its own cap. The two in-flight results can fit together.
+    if (bytes > plan.limits.maxOutputBytes) return;
+    return origins.size === 2 ? "parallel" : "serial";
+  }
+
+  private async drivePublicReadPair(record: RunRecord, plan: ExecutionPlan, snapshot: PolicySnapshot,
+    mode: "parallel" | "serial", signal: AbortSignal): Promise<void> {
+    const {projectId, id:runId, principalId, planId} = record.run;
+    const approval = await this.journal.readApproval(projectId, planId);
+    const approvalDestinations = approval?.planDigest === record.run.planDigest ? approval.destinations : [];
+    const driveStep = async (step: PlanStep, current: RunRecord, policy: PolicySnapshot) => {
+      const {run} = current;
+      const state = run.stepStates.find(item => item.stepId === step.id);
+      // A resumed run may continue its untouched branch. Never replay a sent or uncertain read.
+      if (signal.aborted || run.status !== "running" || state?.status !== "pending" || state.receiptIds.length !== 0) return;
+      const decision = authorizeStep({...policy, run, step, approvalDestinations, dispatchedCalls: countDispatchedCalls(current.receipts)});
+      if (decision.allowed === false) {
+        await this.deny(projectId, runId, step.id, step, decision.code, false);
+        return;
+      }
+      const grant = policy.grant!;
+      const limits = effectiveLimits(plan, grant);
+      if (limits.maxCalls < plan.limits.maxCalls || limits.maxOutputBytes < plan.limits.maxOutputBytes) {
+        await this.deny(projectId, runId, step.id, step, "limit_exceeds_grant", false);
+        return;
+      }
+      const capability = policy.capabilities.get(capabilityKey(step.capabilityId, step.capabilityVersion))!;
+      const deadline = Math.min(runDeadlineAt(run, limits) ?? Infinity, Date.parse(grant.expiresAt));
+      await this.attempt(current, step, capability, limits, deadline, undefined, signal);
+    };
+    const [first, second] = plan.steps;
+    if (mode === "parallel") {
+      const outcomes = await Promise.allSettled([driveStep(first!, record, snapshot), driveStep(second!, record, snapshot)]);
+      if (!signal.aborted && outcomes.some(result => result.status === "rejected")) await this.reconcileInterrupted(projectId, runId);
+    } else {
+      // Share a single slot per origin. Refresh the grant after the first request settles.
+      await driveStep(first!, record, snapshot).catch(() => this.reconcileInterrupted(projectId, runId));
+      const latest = await this.journal.read(projectId, runId);
+      if (signal.aborted || latest?.run.status !== "running") return;
+      await driveStep(second!, latest, await this.policySnapshot(principalId, projectId, planId))
+        .catch(() => this.reconcileInterrupted(projectId, runId));
+    }
+    if (signal.aborted) return;
+    const current = await this.journal.read(projectId, runId);
+    if (current?.run.status !== "running") return;
+    const states = current.run.stepStates;
+    if (states.every(state => state.status === "succeeded")) await this.finish(projectId, runId, "succeeded");
+    else if (states.every(state => state.status === "succeeded" || state.status === "failed")) await this.finish(projectId, runId, "failed");
+    else await this.finish(projectId, runId, "needs_attention");
+  }
+
+  private async attempt(record: RunRecord, step: PlanStep, capability: CapabilityDescriptor, limits: ExecutionLimits,
+    deadline: number | undefined, pollInterval: JsonData | undefined, signal: AbortSignal): Promise<boolean> {
+    const {run} = record;
+    const {projectId, id:runId} = run;
+    const stepId = step.id;
+    const attemptId = this.newId();
+    const receiptId = this.newId();
+    const resolved = resolveBindings(step, record.receipts, run.stepStates);
+    const prepared = await this.mutate(projectId, runId, (current) => {
+      if (current.run.status !== "running" || signal.aborted) return undefined;
+      const at = this.stamp(current.run.updatedAt);
+      const receipt = prepareReceipt({ id: receiptId, projectId, runId, stepId, attemptId, capability, inputArtifactRefs: resolved.inputArtifactRefs, now: at });
+      return { run: withStep(current.run, stepId, "prepared", at, attemptId, receiptId), receipts: [...current.receipts, receipt] };
+    });
+    if (!prepared) return false;
+
+    const dispatched = await this.mutate(projectId, runId, (current) => {
+      const receipt = current.receipts.find((item) => item.id === receiptId);
+      if (!receipt || receipt.status !== "prepared") return undefined;
+      const at = this.stamp(current.run.updatedAt);
+      const expired = deadline === undefined || this.now().getTime() >= deadline;
+      const cancelled = current.run.status !== "running" || signal.aborted;
+      const limitReached = countDispatchedCalls(current.receipts) >= limits.maxCalls;
+      if (cancelled || expired || limitReached) {
+        const code = cancelled ? "cancelled" : expired ? "run_timeout_exceeded" : "limit_calls_exceeded";
+        return { run: withStep(current.run, stepId, "failed", at), receipts: replace(current.receipts, settleReceipt(receipt, { kind: "not_sent", code, now: at })) };
+      }
+      return { run: withStep(current.run, stepId, "dispatched", at), receipts: replace(current.receipts, markDispatched(receipt)) };
+    });
+    if (!dispatched || dispatched.run.status !== "running") return false;
+    if (dispatched.receipts.find((item) => item.id === receiptId)?.status !== "dispatched") return !signal.aborted;
+
+    const window = this.runWindow(signal, deadline);
+    let outcome: EffectOutcome;
+    try {
+      outcome = await this.effects.dispatch({ projectId, runId, stepId, attemptId, principalId: run.principalId, capability, arguments: resolved.arguments, limits, deadlineAt: new Date(deadline!).toISOString(), signal: window.signal });
+    } catch {
+      outcome = { kind: "failed", code: window.timedOut() ? "run_timeout_exceeded" : window.signal.aborted ? "aborted" : "effect_exception", sent: "unknown" };
+    } finally { window.dispose(); }
+    if (window.timedOut() && outcome.kind === "failed") outcome = { ...outcome, code: "run_timeout_exceeded" };
+    if(outcome.kind==='pending'&&(capability?.effect!=='read_external'||capability.retryClass!=='read_only'||!Number.isSafeInteger(pollInterval)||Number(pollInterval)<1000||Number(pollInterval)>60000))outcome={kind:'failed',code:'poll_invalid',sent:'unknown'};
+    const artifacts=(outcome.kind==='completed'||outcome.kind==='pending')?outcome.artifacts?.map(item=>({...item,bytes:new Uint8Array(item.bytes)})):undefined;
+    const pending=outcome.kind==='pending';
+    const settle = toSettleInput(outcome);
+    await this.mutate(projectId, runId, (current) => {
+      const receipt = current.receipts.find((item) => item.id === receiptId);
+      if (!receipt || receipt.status !== "dispatched" || current.run.status!=="running") return undefined;
+      const at = this.stamp(current.run.updatedAt);
+      // `not_sent` depois de `dispatched` depende da garantia do serviço (porta EffectDispatcher).
+      const settled = settleReceipt(receipt, { ...settle, now: at } as SettleInput);
+      const stepStatus = settled.status === "succeeded" ? pending?"pending":"succeeded" : settled.status === "unknown" ? "unknown" : "failed";
+      return { run: withStep(current.run, stepId, stepStatus, at), receipts: replace(current.receipts, settled) };
+    },artifacts);
+    return true;
   }
 
   /**
@@ -494,7 +580,7 @@ export class WorkflowExecutor {
     });
   }
 
-  private async deny(projectId: string, runId: string, stepId: string, step: PlanStep | undefined, code: string): Promise<void> {
+  private async deny(projectId: string, runId: string, stepId: string, step: PlanStep | undefined, code: string, finishRun = true): Promise<void> {
     await this.mutate(projectId, runId, (current) => {
       if (current.run.status !== "running") return undefined;
       const at = this.stamp(current.run.updatedAt);
@@ -505,7 +591,7 @@ export class WorkflowExecutor {
         inputArtifactRefs: [], now: at, code,
       });
       const run = withStep(current.run, stepId, "failed", at, attemptId, receiptId);
-      return { run: { ...run, status: "failed", finishedAt: at }, receipts: [...current.receipts, receipt] };
+      return { run: finishRun ? { ...run, status: "failed", finishedAt: at } : run, receipts: [...current.receipts, receipt] };
     });
   }
 

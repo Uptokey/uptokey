@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   isSafeRelativePath,
   parseProjectRootBinding,
+  projectRootIdentityMaterial,
   type ProjectRootBinding,
   type ProjectAccessMode
 } from '@uptokey/sync-contract/project-agent';
@@ -29,8 +30,7 @@ export class ProjectRootError extends Error {
 
 export function computeRootIdentityDigest(realPath: string): string {
   const stat = fs.statSync(realPath);
-  const normalized = path.resolve(realPath).toLowerCase();
-  const rawId = `${stat.dev}:${stat.ino || normalized}:${stat.birthtimeMs || 0}`;
+  const rawId = projectRootIdentityMaterial(path.resolve(realPath), stat);
   return createHash('sha256').update(rawId).digest('hex');
 }
 

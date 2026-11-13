@@ -1462,6 +1462,7 @@ export class WorkspaceRuntime {
         await this.governanceService.settleExecutionBudgets(principal,project,record.run,record.receipts,values,this.registry().list());
       }
     }), admission:this.admission, now:this.now,
+      parallelReadScope:(id,version)=>this.apiInstruments.parallelReadScope(id,version),
       policy:{
         isPrincipalActive: id=>this.services.active(id), accessGate:()=>this.services.gate(),
         loadGrant: (id,project)=>this.store.getGrant(principal,project,id),

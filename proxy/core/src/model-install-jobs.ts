@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { readJson, writeJsonAtomic } from "./atomic-json.ts";
 import { withConfigFileLock } from "./config-file-lock.ts";
 import { installLocalModel, type ModelInstallProgress } from "./local-model-install.ts";
-import { discoverLocalModels } from "./local-model-discovery.ts";
+import { DEFAULT_OLLAMA_CHAT_ENDPOINT, discoverLocalModels } from "./local-model-discovery.ts";
+import { OLLAMA_STARTER_MODEL } from "./local-runtime/ollama-chat-control.ts";
 import { modelInstallJobsPath } from "./paths.ts";
 import { CONNECTIONS_SCHEMA_VERSION, parseModelInstallSpec, type ModelInstallRuntime, type ModelInstallState } from "@uptokey/sync-contract/connections";
 
@@ -62,6 +63,9 @@ export type ModelInstaller = (
   spec: { runtime: ModelInstallRuntime; modelId: string; destinationId: string },
   ctx: InstallerContext,
 ) => Promise<InstallerResult>;
+
+const starterOperation = "0bcd018f-2805-4ddc-8496-e43cc4b7bd42";
+const starterSpec = { runtime: "ollama", modelId: OLLAMA_STARTER_MODEL, destinationId: "ollama", operationId: starterOperation } as const;
 
 function fail(code: string, status?: number): Error {
   return Object.assign(new Error(code), { code, ...(status === undefined ? {} : { status }) });
@@ -171,8 +175,65 @@ export class ModelInstallJobService {
 
   async start(specInput: unknown): Promise<InstallJobSnapshot> {
     const spec = parseModelInstallSpec(specInput);
+    if (spec.operationId === starterOperation) throw fail("connection_invalid_install");
+    return this.startInstall(spec);
+  }
+
+  /** The composer owns only this exact operation in the existing job store. */
+  supportsDefaultStarter(): boolean {
+    return this.ollamaEndpointUrl === undefined || this.ollamaEndpointUrl === DEFAULT_OLLAMA_CHAT_ENDPOINT;
+  }
+
+  private starterJob(state: InstallJobsFile): InstallJobSnapshot | undefined {
+    const job = state.jobs.find(row => row.id === state.idempotency[starterOperation]);
+    if (job && (job.operationId !== starterOperation || job.runtime !== starterSpec.runtime ||
+      job.modelId !== starterSpec.modelId || job.destinationId !== starterSpec.destinationId || job.expectedDigest !== null)) {
+      throw fail("connection_invalid_install", 409);
+    }
+    return job;
+  }
+
+  async getStarter(): Promise<InstallJobSnapshot | undefined> {
+    return this.exclusive(async () => {
+      const job = this.starterJob(await this.load());
+      return job && this.snapshot(job);
+    });
+  }
+
+  async startStarter(readyModelIsMissing?: () => Promise<boolean>): Promise<InstallJobSnapshot> {
+    if (!this.supportsDefaultStarter()) throw fail("runtime_unavailable", 503);
+    return this.startInstall(parseModelInstallSpec(starterSpec), { readyModelIsMissing });
+  }
+
+  async cancelStarter(): Promise<InstallJobSnapshot | undefined> {
+    const job = await this.getStarter();
+    return job && this.cancel(job.id);
+  }
+
+  private async startInstall(spec: ReturnType<typeof parseModelInstallSpec>, starter?: {
+    readyModelIsMissing?: () => Promise<boolean>;
+  }): Promise<InstallJobSnapshot> {
     return this.exclusive(async () => {
       const state = await this.load();
+      if (starter) {
+        const job = this.starterJob(state);
+        // Recheck under the queue lock so a completed concurrent retry or an
+        // external restore cannot turn an earlier inventory read into another pull.
+        if (job && (["cancelled", "interrupted", "failed"].includes(job.state) ||
+            (job.state === "ready" && await starter.readyModelIsMissing?.()))) {
+          // A cancelling worker can still own the ID. A retry waits for its
+          // finalization before requeuing, so it never starts a second pull.
+          if (this.running.has(job.id)) throw fail("runtime_unavailable", 409);
+          const queued: InstallJobSnapshot = { ...job, state: "queued", downloadedBytes: 0,
+            sizeBytes: null, integrity: "unverified", observedDigest: null, updatedAt: this.iso() };
+          delete queued.note;
+          const next = { ...state, jobs: state.jobs.map(row => row === job ? queued : row) };
+          await this.storage.save(next);
+          this.state = next;
+          void this.pump();
+          return this.snapshot(queued);
+        }
+      }
       if (spec.operationId) {
         const replayId = state.idempotency[spec.operationId];
         if (replayId) {
@@ -211,6 +272,7 @@ export class ModelInstallJobService {
       const job = state.jobs.find((j) => j.id === id);
       if (!job) throw fail("connection_not_found", 404);
       if (job.state === "queued" || job.state === "downloading" || job.state === "verifying") {
+        this.running.get(id)?.abort();
         job.state = "cancelled";
         job.updatedAt = this.iso();
         await this.storage.save(state);

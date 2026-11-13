@@ -17,16 +17,30 @@ import { DisconnectProvider } from "../dialogs/disconnect-provider.tsx"
 import { HOSTED_PROVIDER } from "../../../hosted.ts"
 
 /** A compact account menu; every operation is explicit and uses the core's existing authority. */
-export function AccountPanel() {
+export function AccountPanel(props: { onSignedIn?: () => void } = {}) {
   const account = getBackend().controller.account
   const dialog = useDialog(), { theme } = useTheme(), tick = useControllerTick()
   const clipboard = useClipboard(), toast = useToast()
   const lifetime = new AbortController()
+  let returnAfterLogin = Boolean(account.view.login)
+  const startLogin = () => { returnAfterLogin = true; void account.login() }
+  const cancelLogin = () => { returnAfterLogin = false; account.cancelPending() }
   onMount(() => { void loadAccountPlanForView(account, lifetime.signal) })
   const state = createMemo(() => { tick(); return { ...account.view } })
+  createEffect(() => {
+    const view = state()
+    if (!returnAfterLogin || view.busy) return
+    if (view.session?.authenticated && !view.login) {
+      returnAfterLogin = false
+      // Clearing only the modal restores the existing composer and route.
+      // A model chooser supplies its own return without changing the model.
+      if (props.onSignedIn) props.onSignedIn()
+      else dialog.clear()
+    } else if (!view.login) returnAfterLogin = false
+  })
   const pending = () => { tick(); return Boolean(account.view.challenge || account.view.login || account.view.busy && !account.view.session?.authenticated) }
   useBindings(() => ({ enabled: pending(), priority: 2, bindings: [
-    { key: "escape", desc: accountText("cancel"), cmd: () => { account.cancelPending(); dialog.clear() } },
+    { key: "escape", desc: accountText("cancel"), cmd: () => { cancelLogin(); dialog.clear() } },
   ] }))
   // A true modal close cancels pending access; replacing the panel for language/details preserves its state.
   onCleanup(() => { lifetime.abort(); if (!dialog.stack.length) { account.cancelPlanRead(); if (pending()) account.cancelPending() } })
@@ -53,11 +67,11 @@ export function AccountPanel() {
     if (view.login) {
       rows.push({ title: accountText("open_browser"), value: "open-browser", onSelect: () => { void account.reopenLogin() } })
       rows.push({ title: accountText("copy_link"), value: "copy-link", onSelect: () => { void copyLoginLink() } })
-      rows.push({ title: accountText("cancel"), value: "cancel", onSelect: () => account.cancelPending() })
+      rows.push({ title: accountText("cancel"), value: "cancel", onSelect: cancelLogin })
     }
     else if (view.challenge) {
-      if (view.session?.loginAvailable) rows.push({ title: accountText("sign_in"), value: "sign-in", onSelect: () => { account.cancelPending(); void account.login() } })
-      rows.push({ title: accountText("cancel"), value: "cancel", onSelect: () => account.cancelPending() })
+      if (view.session?.loginAvailable) rows.push({ title: accountText("sign_in"), value: "sign-in", onSelect: () => { account.cancelPending(); startLogin() } })
+      rows.push({ title: accountText("cancel"), value: "cancel", onSelect: cancelLogin })
     }
     else if (!view.session?.authenticated) {
       for (const item of view.available?.accounts ?? []) rows.push({
@@ -65,7 +79,7 @@ export function AccountPanel() {
         value: item.accountRef, onSelect: () => { void account.adopt(item.accountRef) },
       })
       if (view.session?.configured) {
-        if (view.session.loginAvailable) rows.push({ title: accountText("sign_in"), value: "sign-in", onSelect: () => { void account.login() } })
+        if (view.session.loginAvailable) rows.push({ title: accountText("sign_in"), value: "sign-in", onSelect: startLogin })
         rows.push({ title: accountText("share"), value: "share", onSelect: () => { void account.requestAccess() } })
       }
     } else {

@@ -17,6 +17,19 @@ function changeFrontendInfo(files, change) {
   files.set("package/dist/tui/BUILD_INFO.json", Buffer.from(JSON.stringify(info)));
 }
 
+test("candidate override stages matching frontend metadata without changing source package identity", t => {
+  const fixture = betaPackageFixture(t);
+  const before = readFileSync(join(fixture.source, "package.json"), "utf8");
+  const version = "0.1.0-beta.26.dev.20261106";
+  fixture.info.version = version; fixture.writeInfo();
+  const buildInfo = JSON.parse(readFileSync(join(fixture.distDir, "BUILD_INFO.json"), "utf8"));
+  buildInfo.version = version;
+  writeFileSync(join(fixture.distDir, "BUILD_INFO.json"), JSON.stringify(buildInfo));
+  const result = stagePackage(fixture.source, fixture.stage, "beta", { env: { UPTOKEY_BUILD_VERSION: version } });
+  assert.equal(result.manifest.version, version);
+  assert.equal(readFileSync(join(fixture.source, "package.json"), "utf8"), before);
+});
+
 test("import inventory includes all entry/chunk imports and excludes quoted prose, comments and regex", () => {
   const code = 'import "side-effect"; export {x} from "@scope/pkg/subpath"; import("dynamic"); require2("commonjs"); __require3("numbered"); createRequire(import.meta.url)("created"); import `static-template`; const t = `${import("nested-template")}`; const r=()=>/require("fake-regex")/; const p="import(\\\"fake-prose\\\")"; /* import("fake-comment") */ import "node:fs"; require("fs/promises"); import "bun:ffi";';
   assert.deepEqual(extractRuntimeSpecifiers(code), ["@scope/pkg", "commonjs", "created", "dynamic", "nested-template", "numbered", "side-effect", "static-template"]);

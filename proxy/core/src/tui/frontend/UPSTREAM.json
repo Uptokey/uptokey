@@ -174,6 +174,16 @@
       "file": "vendor/opencode-tui/routes/session/index.tsx",
       "reason": "Terminal tool non-execution remains neutral and visible rather than appearing successful, including when successful tool details are collapsed.",
       "date": "2026-10-18"
+    },
+    {
+      "file": "vendor/opencode-tui/component/dialog-model.tsx",
+      "reason": "Preserve the model picker filter through explicit account sign-in: pass the origin and query to the existing account panel and accept initialQuery when the panel returns. No model or session selection is changed.",
+      "date": "2026-11-06"
+    },
+    {
+      "file": "vendor/opencode-tui/ui/dialog-select.tsx",
+      "reason": "Restore an explicitly supplied initialFilter in the existing selection store and input ref. Leave ordinary input initialization untouched so typing is not reset during renders.",
+      "date": "2026-11-06"
     }
   ],
   "note": "Local modifications to vendored files are appended to localModifications with file, reason and date; unmodified files must keep upstream bytes so upstream updates can be diffed.",
@@ -202,6 +212,15 @@
         "Turn undo/redo through the backend, history paging, complete copy/export, observed usage, a clickable composer destination and model capability labels."
       ],
       "opentuiUpgrade": "OpenTUI dependencies remain pinned; see package.json."
+    },
+    {
+      "recordedAt": "2026-11-06T21:17:33.967Z",
+      "basis": "Selective reconciliation against the unchanged pinned revision using git show and the LF normalization/line-set algorithm in scripts/upstream-diff.mjs. Only the two files listed were compared; UPSTREAM-DIFF.comparedAt and every other entry remain historical.",
+      "files": [
+        "component/dialog-model.tsx",
+        "ui/dialog-select.tsx"
+      ],
+      "reason": "Automatic return from account sign-in restores the originating model picker query."
     }
   ]
 }

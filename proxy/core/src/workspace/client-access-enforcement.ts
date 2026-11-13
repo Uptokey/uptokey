@@ -23,6 +23,7 @@ import {
 } from "./client-access-policy.ts";
 import { ClientRegistrationError, migrateUnregisteredClient, readClientRegistration } from "./client-registration.ts";
 import {isApprovedPwaRegistration} from './browser-enrollment.ts';
+import {catalogChatMethod,catalogChatProject} from './catalog-chat-http.ts';
 
 const CLIENT_TOKEN = /^utk_local_([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.[A-Za-z0-9_-]{32}$/i;
 
@@ -128,6 +129,7 @@ const PLAN_FLOW_SUFFIXES = /(?:^|\/)(?:projects\/create|project-roots\/register|
 const DURABLE_WRITE_SUFFIXES = /(?:^|\/)(?:runs\/start|delete|export\/zip)$/;
 
 export function mapWorkspaceCapability(method: string, pathname: string): ClientCapabilityScope {
+  if(catalogChatMethod(pathname)===method)return 'chat:submit';
   const suffix = pathname.replace(/^\/v1\/workspace\//, "");
   if(/^projects\/[^/]+\/learned-recipes\/[^/]+\/access(?:\/|$)/.test(suffix))return method==='GET'?'project:read':'conversation:write';
   if(/^projects\/[^/]+\/learned-recipes\/[^/]+\/service-plans$/.test(suffix))return 'chat:submit';
@@ -474,6 +476,8 @@ export const verifyConsentProof = verifyKeyPossessionProof;
 
 /** Project addressed by a workspace route (`/v1/workspace/projects/<id>/...`), when any. */
 export function workspaceProjectFromPath(pathname: string): string | undefined {
+  const catalogProject=catalogChatProject(pathname);
+  if(catalogProject)return catalogProject;
   const match = /^\/v1\/workspace\/projects\/([^/]+)(?:\/|$)/.exec(pathname);
   const id = match?.[1];
   return id && id !== "create" && id !== "import" ? decodeURIComponent(id) : undefined;

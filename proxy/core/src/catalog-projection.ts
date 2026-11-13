@@ -66,7 +66,6 @@ export interface UserConnectionView {
   endpointConfigured: boolean;
   models: string[];
   defaultModel: string | null;
-  credentialRef: `provider:${string}` | null;
 }
 
 export interface ObservedConnectionState {
@@ -209,7 +208,6 @@ export function projectUserConnection(config: ProxyConfig, providerId: string): 
     endpointConfigured: Boolean(entry.endpointUrl),
     models: [...entry.models],
     defaultModel: entry.defaultModel || null,
-    credentialRef: entry.configured ? `provider:${providerId}` : null,
   };
 }
 

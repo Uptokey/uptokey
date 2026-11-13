@@ -1,5 +1,10 @@
 import {createHash} from 'node:crypto';
 export const PUBLIC_PWA_ORIGIN = 'https://app.uptokey.com';
+export const BROWSER_APPROVAL_CHOICES_ACCEPT = 'application/vnd.uptokey.browser-approval-choices+json';
+export const BROWSER_APPROVAL_EXTENSIONS_ACCEPT = 'application/vnd.uptokey.browser-approval-extensions+json';
+export const NATIVE_CLIENT_APPROVAL_ACCEPT = 'application/vnd.uptokey.native-client-approval+json';
+export const EDITOR_PAIRING_APPROVAL_ACCEPT = 'application/vnd.uptokey.editor-approval-wait+json';
+export const EXTENSION_PAIRING_APPROVAL_ACCEPT = 'application/vnd.uptokey.extension-approval-wait+json';
 export const isPublicPwaOrigin = (origin:unknown):origin is string => origin === PUBLIC_PWA_ORIGIN;
 export const isPairedBrowserOrigin = (origin:unknown):origin is string => typeof origin === 'string' && (isPublicPwaOrigin(origin) || /^chrome-extension:\/\/[a-p]{32}$/.test(origin));
 /** Existing local PWA admission or explicit public PWA approval, never a name/admin grant. */

@@ -49,7 +49,7 @@ export function parsePreparedProviderSetup(input) {
   if (p.noticeByLocale !== null) { const row = record(p.noticeByLocale); if (LOCALES.some(locale => !text(row[locale], 4096))) return bad(); noticeByLocale = Object.fromEntries(LOCALES.map(locale => [locale, row[locale]])); }
   const existing = p.connectionId !== undefined || p.expectedRevision !== undefined || p.reusingStoredCredential !== undefined;
   if (existing && (typeof p.connectionId !== 'string' || !UUID.test(p.connectionId) || !Number.isSafeInteger(p.expectedRevision) || p.expectedRevision < 1 || p.reusingStoredCredential !== true)) return bad();
-  return { id: p.id, providerId: p.providerId, label: p.label, models, source: p.source, notice: p.notice, noticeByLocale, expiresAt: p.expiresAt, ...(existing ? { connectionId: p.connectionId, expectedRevision: p.expectedRevision, reusingStoredCredential: true } : {}) };
+  return { id: p.id, providerId: p.providerId, label: p.label, models, source: p.source, notice: p.notice, noticeByLocale, expiresAt: p.expiresAt, ...(existing ? { connectionId: p.connectionId, expectedRevision: p.expectedRevision, reusingStoredCredential: true } : p.commitReplay === true ? { commitReplay: true } : {}) };
 }
 
 export function parseProviderDestination(input) {
@@ -60,14 +60,37 @@ export function parseProviderDestination(input) {
 
 export function createProviderSetupProtocolClient(request) {
   if (typeof request !== 'function') throw new TypeError('provider_setup_transport_required');
+  // A new-account preparation from a capable Core binds one stable profile
+  // and operation ID. Store only its short-lived replay eligibility, never the key.
+  const replayable = new Map();
   return {
     presets: async signal => parseProviderPresets(await request('/presets', undefined, signal)),
-    prepare: async (input, signal) => parsePreparedProviderSetup(await request('/prepare', input, signal)),
+    prepare: async (input, signal) => {
+      const prepared = parsePreparedProviderSetup(await request('/prepare', input, signal));
+      if (prepared.commitReplay && input.connectionId === undefined && !signal?.aborted) {
+        if (replayable.size >= 16) replayable.delete(replayable.keys().next().value);
+        replayable.set(prepared.id, Date.parse(prepared.expiresAt));
+      }
+      return prepared;
+    },
     commit: async (id, modelId, signal) => {
       if (!UUID.test(id) || !MODEL.test(modelId)) throw new ProviderSetupClientError('provider_setup_invalid_request', 400);
-      return parseProviderDestination(await request('/commit', { id, modelId, acceptNotice: true }, signal));
+      const input = { id, modelId, acceptNotice: true };
+      signal?.throwIfAborted();
+      let response;
+      try { response = await request('/commit', input, signal); }
+      catch (error) {
+        const uncertain = error instanceof TypeError || error instanceof ProviderSetupClientError &&
+          error.status === 502 && error.message === 'provider_setup_failed';
+        if (!uncertain || !(replayable.get(id) > Date.now()) || signal?.aborted) throw error;
+        replayable.delete(id);
+        response = await request('/commit', input, signal);
+      }
+      const destination = parseProviderDestination(response);
+      replayable.delete(id);
+      return destination;
     },
-    dispose: async id => { if (UUID.test(id)) await request('/dispose', { id }); },
+    dispose: async id => { replayable.delete(id); if (UUID.test(id)) await request('/dispose', { id }); },
   };
 }
 

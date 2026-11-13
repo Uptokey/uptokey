@@ -15,11 +15,11 @@ import { useControllerTick } from "../../../uptokey/panels/use-controller.ts"
 import { accountText } from "../../../../account-ui.ts"
 import { ConnectProvider } from "../../../uptokey/dialogs/connect-provider.tsx"
 
-export function DialogModel(props: { providerID?: string }) {
+export function DialogModel(props: { providerID?: string; initialQuery?: string }) {
   const local = useLocal()
   const sync = useSync()
   const dialog = useDialog()
-  const [query, setQuery] = createSignal("")
+  const [query, setQuery] = createSignal(props.initialQuery ?? "")
   const tick = useControllerTick()
   const accountAuthenticated = createMemo(() => { tick(); return getBackend().controller.account.view.session?.authenticated === true })
 
@@ -137,7 +137,7 @@ export function DialogModel(props: { providerID?: string }) {
       onSelect() {
         const backend = getBackend()
         if (accountAction() === "refresh") { void backend.controller.retryHostedModels(); return }
-        backend.emit({ type: "uptokey.panel.open", properties: { name: "account" } })
+        backend.emit({ type: "uptokey.panel.open", properties: { name: "account", returnTo: "models", query: query() } })
       },
     }] : []
 
@@ -210,6 +210,7 @@ export function DialogModel(props: { providerID?: string }) {
         },
       ]}
       onFilter={setQuery}
+      initialFilter={props.initialQuery}
       flat={true}
       skipFilter={true}
       title={title()}

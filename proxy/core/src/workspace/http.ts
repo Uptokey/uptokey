@@ -12,6 +12,7 @@ import { readBoundedJson,readArtifactImportJson } from '@uptokey/sync-contract/l
 import { WORKFLOW_LIMITS, WorkflowContractError,parseWorkflowCommand } from '@uptokey/sync-contract/workflow';
 import { WorkspaceError, type WorkspaceRuntime } from './runtime.ts';
 import {PlanConsentService} from './plan-consent.ts';
+import {catalogChatMethod,handleCatalogChat} from './catalog-chat-http.ts';
 import type {BrowserPublicJwk} from './browser-session.ts';
 import type { SecretStore } from '../secret-store.ts';
 import { SyncDataStore, SyncDataError } from './e2ee-sync.ts';
@@ -49,6 +50,7 @@ export function workspaceUsageQuery(url:URL):boolean {
  return path('usage-value')&&one(['period','after','limit'])&&cursor('after',stable)&&cursor('limit',limit)&&/^\d{4}-(0[1-9]|1[0-2])$/.test(url.searchParams.get('period')??'');
 }
 export function workspaceMethod(path:string,method?:string):'GET'|'POST'|'PATCH'|'DELETE'|undefined {
+  const catalogMethod=catalogChatMethod(path);if(catalogMethod)return catalogMethod;
   if(new RegExp(`^/v1/workspace/projects/${id}/learned-recipes/[A-Za-z0-9_-]{1,100}/access$`).test(path))return method==='GET'?'GET':method==='PATCH'?'PATCH':method==='DELETE'?'DELETE':undefined;
   if(new RegExp(`^/v1/workspace/projects/${id}/learned-recipes/[A-Za-z0-9_-]{1,100}/(?:access/(?:configure|discover)|service-plans)$`).test(path))return 'POST';
   if(path==='/v1/workspace/services')return 'GET';
@@ -88,14 +90,32 @@ export function mountWorkspaceRoutes(app:Hono, runtime:WorkspaceRuntime|undefine
       await ready;
       const owner=await principal(c.req.header('authorization'));
       if(!owner) return c.json({error:{type:'unauthorized'}},401);
-      const serviceAdmission=async(projectId?:string)=>{
-        c.req.raw.signal.throwIfAborted();const header=c.req.header('authorization');
+      const serviceAdmission=async(projectId?:string,checkRequest=true)=>{
+        if(checkRequest)c.req.raw.signal.throwIfAborted();const header=c.req.header('authorization');
         if(await principal(header)!==owner||!serviceAccessGuard||await serviceAccessGuard(header,c.req.method,new URL(c.req.url).pathname)||secrets&&await resolveLocalRetentionMode(header,secrets)==='ephemeral')throw new WorkspaceError('service_cancelled',403);
         if(projectId){const current=projectGrant?await projectGrant(header):'*';if(current===undefined||!isProjectGranted(current,projectId))throw new WorkspaceError('service_cancelled',403);}
       };
       const parts=new URL(c.req.url).pathname.split('/').slice(3);
       const projects=projectGrant?await projectGrant(c.req.header('authorization')):'*';
       if(projects===undefined)return c.json({error:{type:'unauthorized'}},401);
+      const path=new URL(c.req.url).pathname;
+      if(catalogChatMethod(path)===c.req.method){
+        c.header('cache-control','no-store');
+        const authorization=c.req.header('authorization');
+        const conversationId=c.req.header('x-uptokey-conversation-id');
+        const conversationRequestId=c.req.header('x-uptokey-conversation-request-id');
+        const key=await browserKey?.(authorization,c.req.header('origin'));
+        if(!key)throw new WorkspaceError('browser_consent_required',403);
+        const body=c.req.method==='POST'?await readBoundedJson(c.req.raw,4096):undefined;
+        if(body&&!body.ok)throw new WorkspaceError('invalid_request',400);
+        const result=await handleCatalogChat(path,body?.value,{
+          runtime,owner,projects,consent,key,signal:c.req.raw.signal,revalidate:project=>serviceAdmission(project,false),
+          admit:(project,command)=>conversationId&&conversationRequestId
+            ?conversationAdmission?.(owner,project,command,conversationId,conversationRequestId,authorization,c.get('workspaceContextRevision' as never) as number|undefined)
+            :undefined
+        });
+        return c.json(result.body,result.status);
+      }
       if(parts[0]==='services'){
         c.header('cache-control','no-store');
         if(parts.length===1&&c.req.method==='GET')return c.json(await runtime.serviceAccess.list(owner));

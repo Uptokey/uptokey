@@ -18,6 +18,8 @@ import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import type { Hono } from 'hono';
 import { isProjectGranted, type LocalProjectGrant } from './principal.ts';
+import { getActiveEfficiencyPolicy } from './efficiency-pipeline.ts';
+import { responseStyleForPolicy } from '../response-style.ts';
 import { readBoundedJson } from '@uptokey/sync-contract/limits';
 import { canonicalJson } from '@uptokey/sync-contract/canonical';
 import {
@@ -42,8 +44,10 @@ import { dataDir } from '../paths.ts';
 import { WorkspaceError } from './runtime.ts';
 
 const CONVERSATION_KEY_ACCOUNT = 'local:conversation-store-key';
-// v2: policy columns. v3: additive admission identities; existing run links remain historical.
-const SCHEMA_VERSION = 3;
+// v4 adds an owner-scoped creation identifier to the existing conversation row.
+const SCHEMA_VERSION = 4;
+const CREATION_REQUEST_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const creationRequestIdPattern = new RegExp(`^${CREATION_REQUEST_UUID}$`);
 const BODY_LIMIT_BYTES = 256 * 1024;
 const IMPORT_BODY_LIMIT_BYTES = 1024 * 1024;
 // Closing the browser is best-effort; expired in-memory sessions are also
@@ -60,7 +64,8 @@ CREATE TABLE IF NOT EXISTS conversations(
   origin TEXT, origin_digest TEXT,
   storage_policy TEXT NOT NULL DEFAULT 'local',
   processing_policy TEXT NOT NULL DEFAULT 'local_only',
-  cloud_sync_opt_in INTEGER NOT NULL DEFAULT 0
+  cloud_sync_opt_in INTEGER NOT NULL DEFAULT 0,
+  creation_request_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(principal_id, updated_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS messages(
@@ -208,11 +213,11 @@ export class ConversationStore {
       // Migração incremental (não destrutiva): políticas e tabela de admissão acima.
       // Bancos novos já trazem as colunas via SCHEMA_SQL; o ALTER só roda em
       // bancos v1 existentes. Os defaults cobrem linhas antigas.
-      const columns = new Set(
-        (db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]).map((column) => column.name),
-      );
       db.exec('BEGIN IMMEDIATE');
       try {
+        const columns = new Set(
+          (db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]).map((column) => column.name),
+        );
         if (!columns.has('storage_policy')) {
           db.exec(`ALTER TABLE conversations ADD COLUMN storage_policy TEXT NOT NULL DEFAULT 'local'`);
         }
@@ -222,7 +227,12 @@ export class ConversationStore {
         if (!columns.has('cloud_sync_opt_in')) {
           db.exec(`ALTER TABLE conversations ADD COLUMN cloud_sync_opt_in INTEGER NOT NULL DEFAULT 0`);
         }
-        db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)').run(
+        if (!columns.has('creation_request_id')) {
+          db.exec('ALTER TABLE conversations ADD COLUMN creation_request_id TEXT');
+        }
+        db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_creation_owner
+          ON conversations(principal_id, creation_request_id) WHERE creation_request_id IS NOT NULL`);
+        db.prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)').run(
           SCHEMA_VERSION,
           this.now().toISOString(),
         );
@@ -443,12 +453,17 @@ export class ConversationStore {
       storagePolicy?: unknown;
       processingPolicy?: unknown;
       cloudSyncOptIn?: unknown;
+      creationRequestId?: unknown;
     },
     revalidate?: () => Promise<void>,
   ): Promise<ReturnType<typeof parseConversation>> {
     const master = await this.ensureKey();
     void master;
     await revalidate?.();
+    const requestId = input.creationRequestId;
+    if (requestId !== undefined && (typeof requestId !== 'string' || !creationRequestIdPattern.test(requestId))) {
+      throw new WorkspaceError('conversation_invalid');
+    }
     if (input.title !== undefined && typeof input.title !== 'string') throw new WorkspaceError('conversation_invalid');
     let title = 'Nova conversa';
     if (typeof input.title === 'string' && input.title.trim()) {
@@ -509,17 +524,26 @@ export class ConversationStore {
 
     // A fonte canônica da política é o banco (colunas persistidas); 'cloud'
     // registra apenas a intenção — não existe backend remoto nem upload.
-    this.database
+    const inserted = this.database
       .prepare(
         `INSERT INTO conversations(id, principal_id, workspace_id, project_id, title, created_at, updated_at,
-          revision, archived_at, active_branch_id, storage_policy, processing_policy, cloud_sync_opt_in)
-         VALUES(?, ?, ?, ?, ?, ?, ?, 1, NULL, 'main', ?, ?, ?)`,
+          revision, archived_at, active_branch_id, storage_policy, processing_policy, cloud_sync_opt_in, creation_request_id)
+         VALUES(?, ?, ?, ?, ?, ?, ?, 1, NULL, 'main', ?, ?, ?, ?)
+         ON CONFLICT(principal_id, creation_request_id) WHERE creation_request_id IS NOT NULL DO NOTHING`,
       )
       .run(
         id, principalId, workspaceIdFor(principalId), projectId, title, now, now,
-        storagePolicy, processingPolicy, storagePolicy === 'cloud' ? 1 : 0,
+        storagePolicy, processingPolicy, storagePolicy === 'cloud' ? 1 : 0, requestId ?? null,
       );
+    if (inserted.changes === 0) throw new WorkspaceError('conversation_conflict', 409);
     return this.rowToView(this.readConversationRow(principalId, id));
+  }
+
+  findCreation(principalId: string, requestId: string) {
+    const row = this.database.prepare('SELECT * FROM conversations WHERE principal_id=? AND creation_request_id=?')
+      .get(principalId, requestId);
+    if (!row) throw new WorkspaceError('conversation_not_found', 404);
+    return this.rowToView(row);
   }
 
   async listConversations(principalId: string, query: { after?: unknown; limit?: unknown; query?: unknown; includeArchived?: unknown }, projects: LocalProjectGrant = '*') {
@@ -985,7 +1009,14 @@ export class ConversationStore {
         schemaVersion: 1, id: messageId, conversationId, parentId: send.parentId, branchId,
         role, clientMessageId: send.clientMessageId, createdAt, revision: 1,
       });
-      return { message, parts, requestId, duplicate: false as const, conversationRevision: row.revision + 1 };
+      // A fresh, unbound text turn (including inline text files) has no prior
+      // message or outbox entry from which a governed run could have been admitted.
+      const firstLocalText = row.revision === 1 && count === 0 && branchId === 'main' && row.project_id === null &&
+        row.storage_policy === 'local' && row.processing_policy === 'local_only' &&
+        role === 'user' && !send.parentId && parts.every(part => part.type === 'text' ||
+          (part.type === 'file' && part.artifactRef == null && Boolean(part.name) && typeof part.text === 'string'));
+      return { message, parts, requestId, duplicate: false as const, conversationRevision: row.revision + 1,
+        ...(firstLocalText ? { firstLocalText: true as const } : {}) };
     });
   }
 
@@ -1720,9 +1751,10 @@ const CONVERSATION_READ = new RegExp(
 const CONVERSATION_WRITE = new RegExp(
   `^/v1/workspace/conversations/(?:create|import|(${CONVERSATION_UUID})/(update|delete|messages|runs|events|budget))$`,
 );
+const CONVERSATION_CREATION = new RegExp(`^/v1/workspace/conversations/creation/(${CREATION_REQUEST_UUID})$`);
 
 export function conversationMethod(path: string, method: string): 'GET' | 'POST' | undefined {
-  if (method === 'GET') return CONVERSATION_READ.test(path) ? 'GET' : undefined;
+  if (method === 'GET') return CONVERSATION_READ.test(path) || CONVERSATION_CREATION.test(path) ? 'GET' : undefined;
   if (method === 'POST') return CONVERSATION_WRITE.test(path) ? 'POST' : undefined;
   return undefined;
 }
@@ -1859,7 +1891,19 @@ export function mountConversationRoutes(app: Hono, deps: ConversationRouteDeps):
         requireProject(body?.projectId);
         const storagePolicy = body?.storagePolicy ?? (ephemeral ? 'temporary' : 'local');
         const revalidate = () => requireRetention(storagePolicy === 'temporary' && body?.cloudSyncOptIn !== true, (body?.projectId ?? null) as string | null);
-        return c.json(await store.createConversation(owner, { title: body?.title, projectId: body?.projectId, storagePolicy, processingPolicy: body?.processingPolicy, cloudSyncOptIn: body?.cloudSyncOptIn }, revalidate), 201);
+        return c.json(await store.createConversation(owner, { title: body?.title, projectId: body?.projectId, storagePolicy, processingPolicy: body?.processingPolicy, cloudSyncOptIn: body?.cloudSyncOptIn, creationRequestId: body?.creationRequestId }, revalidate), 201);
+      }
+      const creation = c.req.method === 'GET' ? CONVERSATION_CREATION.exec(path) : null;
+      if (creation) {
+        await requireRetention(false);
+        const conversation = store.findCreation(owner, creation[1]!);
+        requireProject(conversation.projectId);
+        await requireRetention(false, conversation.projectId);
+        const current = store.findCreation(owner, creation[1]!);
+        if (current.id !== conversation.id || current.projectId !== conversation.projectId) {
+          throw new WorkspaceError('conversation_conflict', 409);
+        }
+        return c.json(current);
       }
       if (c.req.method === 'POST' && path === '/v1/workspace/conversations/import') {
         requireProject(null); // Current import contract creates unbound conversations.
@@ -1914,7 +1958,14 @@ export function mountConversationRoutes(app: Hono, deps: ConversationRouteDeps):
         return c.json(result);
       }
       if (c.req.method === 'POST' && suffix === '/messages') {
-        return c.json(await store.appendMessage(owner, conversationId, input, revalidate), 201);
+        const receipt = await store.appendMessage(owner, conversationId, input, revalidate);
+        if ('firstLocalText' in receipt && receipt.firstLocalText === true) {
+          try {
+            const firstResponseStyle = responseStyleForPolicy(getActiveEfficiencyPolicy()).instruction;
+            return c.json({ ...receipt, firstResponseStyle }, 201);
+          } catch { /* A preference projection failure must not invalidate a saved message. */ }
+        }
+        return c.json(receipt, 201);
       }
       if (c.req.method === 'POST' && suffix === '/runs') {
         await requireRetention(false);

@@ -15,9 +15,10 @@ import { cancelStream, cancelStreamWithin } from "./stream-lifecycle.ts";
 import { ContextGuard } from "./context-guard.ts";
 import { optionalProviderAllowsKeyless } from "./provider-profile.ts";
 import { ALL_PROVIDERS, isNamedExperimentalProvider, isProvider, isOptionalProvider, isUserDefinedProvider } from "./provider-registry.ts";
-import { GenericOpenAIAdapter } from "./adapters.ts";
+import { GenericOpenAIAdapter, ollamaLocalModelReference, wasOllamaLoopbackDispatch } from "./adapters.ts";
 import { chatCompletionToAnthropicRequest } from "./anthropic-messages.ts";
 import { isLocalEndpointUrl } from "./endpoint-policy.ts";
+import { hasOllamaStarterControl, isOllamaStarterEffort } from "./local-runtime/ollama-chat-control.ts";
 import { namedProviderRiskAccepted } from "./provider-risk.ts";
 import { UsageMeter, type CacheUsage, type ReportedTokenUsage, type UsageMetrics, type UsageObservation, type UsageObserver } from "./usage-meter.ts";
 import { TokenCalibration } from "./token-calibration.ts";
@@ -40,7 +41,7 @@ import { ProviderPerformanceTracker, type ProviderPerformanceSnapshot } from "./
 import type { EgressStore } from "./egress/store.ts";
 import type { StoredProfile } from "./connection-profiles.ts";
 
-type DispatchAuthorizationReason = "account_revoked" | "credential_revoked" | "account_unavailable";
+type DispatchAuthorizationReason = "account_revoked" | "credential_revoked" | "account_unavailable" | "missing_key" | "secret_store_unavailable";
 
 class DispatchAuthorizationError extends Error {
   readonly reason: DispatchAuthorizationReason;
@@ -52,12 +53,6 @@ class DispatchAuthorizationError extends Error {
     this.explicit = explicit;
   }
 }
-
-type DispatchIdentity =
-  | { kind: "profile-key"; profileId: string; explicit: boolean; model: string; endpoint: string }
-  | { kind: "profile-keyless"; profileId: string; explicit: boolean; model: string; endpoint: string }
-  | { kind: "legacy-key" }
-  | { kind: "keyless" };
 
 interface BudgetReservationRef {
   current: Reservation;
@@ -106,6 +101,8 @@ export class Router {
   private readonly performance = new ProviderPerformanceTracker(() => this.now());
   private egressStore: EgressStore | null = null;
   private connectionProfiles: import("./connection-profiles.ts").ConnectionProfileService | null = null;
+  // Opaque invalidation identities only; no credential values are retained here.
+  private readonly providerInvalidations = new Map<ProviderName, symbol>();
 
   constructor(
     config: ProxyConfig,
@@ -159,6 +156,7 @@ export class Router {
     // Snapshot the server-owned restriction before any asynchronous work. Never read accessors.
     let allowedProviders: Set<ProviderName> | undefined;
     let disableRetries = false;
+    let localProcessingOnly = false;
     try {
       const restriction = Object.getOwnPropertyDescriptor(context, "allowedProviders");
       if (!restriction && "allowedProviders" in context || restriction && !Object.hasOwn(restriction, "value")) throw new Error("invalid_provider_scope");
@@ -170,11 +168,24 @@ export class Router {
       const retries = Object.getOwnPropertyDescriptor(context, "disableRetries");
       if ((!retries && "disableRetries" in context) || (retries && (!Object.hasOwn(retries, "value") || retries.value !== undefined && typeof retries.value !== "boolean"))) throw new Error("invalid_retry_policy");
       disableRetries = retries?.value === true;
+      const processing = Object.getOwnPropertyDescriptor(context, "localProcessingOnly");
+      if ((!processing && "localProcessingOnly" in context) || (processing && (!Object.hasOwn(processing, "value") || processing.value !== undefined && typeof processing.value !== "boolean"))) throw new Error("invalid_processing_scope");
+      localProcessingOnly = processing?.value === true;
     } catch {
       return Response.json({ error: { type: "provider_scope_denied", request_id: context.requestId } }, { status: 403, headers: { "cache-control": "no-store" } });
     }
     let request = projectInferenceRequest(unsafeRequest);
     if (!request) return Response.json({ error: { type: "invalid_request", request_id: context.requestId } }, { status: 400, headers: { "cache-control": "no-store" } });
+    if (request.reasoning_effort !== undefined && (
+      !isOllamaStarterEffort(request.reasoning_effort) || !hasOllamaStarterControl(this.config, request.model)
+      || !localProcessingOnly || allowedProviders?.size !== 1 || !allowedProviders.has("ollama")
+      || request.uptokey_provider !== "ollama" || request.uptokey_require_model !== true
+    )) return Response.json({ error: { type: "protocol_field_unsupported", field: "reasoning_effort" } }, { status: 422 });
+    // The production Ollama adapter resolves its endpoint from live config at send time.
+    const starterEndpoint = request.reasoning_effort === undefined ? undefined : this.config.providers.ollama?.endpointUrl;
+    const starterRouteCurrent = (endpoint: string, model: string) => starterEndpoint === undefined ||
+      endpoint === starterEndpoint && this.config.providers.ollama?.endpointUrl === starterEndpoint &&
+      hasOllamaStarterControl(this.config, model);
     const selectedAccount = context.accountRef ?? request.uptokey_account;
     const accountId = typeof selectedAccount === 'string' ? selectedAccount.replace(/^conn:/, '') : undefined;
     let explicitProfile: import('./connection-profiles.ts').StoredProfile | undefined;
@@ -263,7 +274,7 @@ export class Router {
     // Deprioritize degraded/unhealthy providers without dropping them from the chain.
     effectiveFallbackOrder = deprioritizeUnhealthy(effectiveFallbackOrder, (name) => this.health.get(name).state);
     if (comboDecision.candidates.length === 0) routingCandidates = effectiveFallbackOrder.map((provider) => ({ provider }));
-    routingCandidates = orderCandidatesByRoutingPolicy(this.config, routingCandidates, request, routingEstimate, comboDecision.combo?.mode ?? this.config.routingPolicy?.mode ?? "fixed", this.performance, this.health);
+    routingCandidates = orderCandidatesByRoutingPolicy(this.config, routingCandidates, request, routingEstimate, comboDecision.combo?.mode ?? this.config.routingPolicy?.mode ?? "fixed", this.performance, comboDecision.combo?.latency);
 
     const attemptRecords: AttemptRecord[] = [];
     const warnings: string[] = [];
@@ -297,18 +308,53 @@ export class Router {
       const provider = this.config.providers[name];
       if (!provider?.enabled) { attemptRecords.push({ provider: name, reason: "disabled" }); attempts.push({ provider: name, reason: "disabled" }); continue; }
       const endpoint = provider.endpointUrl ?? "";
+      if (localProcessingOnly && !isLocalEndpointUrl(endpoint)) {
+        attemptRecords.push({ provider: name, reason: "local_processing_denied" });
+        continue;
+      }
       const breakerOpts = { failureThreshold: provider.allowedFails, cooldownMs: provider.cooldownMs };
       const rejection = this.rejections.get(name, endpoint);
       if (rejection) { attemptRecords.push({ provider: name, reason: rejection.reason }); attempts.push({ provider: name, reason: rejection.reason }); continue; }
       const requestedModel = candidate.model ?? (virtual ? undefined : request.model);
       const exactModelRequired = candidate.model !== undefined || request.uptokey_require_model === true || requireLocalAliasModel;
-      const selectedModel = selectModel(provider, requestedModel, exactModelRequired);
+      let selectedModel = selectModel(provider, requestedModel, exactModelRequired);
       if (selectedModel === undefined) {
                 attemptRecords.push({ provider: name, reason: "requested_model_unavailable" }); attempts.push({ provider: name, reason: "requested_model_unavailable" }); continue;
       }
-      if (explicitProfile && (explicitProfile.modelIds.length > 0 && !explicitProfile.modelIds.includes(selectedModel) ||
-          explicitProfile.endpointUrl && explicitProfile.endpointUrl.replace(/\/$/, '') !== endpoint.replace(/\/$/, ''))) {
+      let selectedProfile: StoredProfile | undefined;
+      try {
+        selectedProfile = explicitProfile ?? await this.connectionProfiles?.getActiveProfileForProvider(name);
+      } catch {
+        // Metadata failure is local. It must not consume quota or read a credential.
+        attemptRecords.push({ provider: name, reason: "account_unavailable", action: "fallback" });
+        attempts.push({ provider: name, reason: "account_unavailable" });
+        lastFailedProvider = name;
+        lastSwitchReason = "account_unavailable";
+        continue;
+      }
+      if (selectedProfile?.endpointUrl && selectedProfile.endpointUrl.replace(/\/$/, '') !== endpoint.replace(/\/$/, '') && explicitProfile) {
         return Response.json({error:{type:'account_scope_denied'}},{status:403});
+      }
+      if (selectedProfile && (!selectedProfile.enabled || selectedProfile.providerId !== name || selectedProfile.endpointUrl && selectedProfile.endpointUrl !== endpoint)) {
+        attempts.push({provider:name,reason:'account_disabled'});continue;
+      }
+      const accountModels = selectedProfile?.modelIds;
+      const accountAllows = (model: string) => !accountModels?.length || accountModels.includes(model);
+      const localAllows = (model: string) => !localProcessingOnly || name !== "ollama" || !!ollamaLocalModelReference(model);
+      // Automatic routing chooses a model the active account can use within the
+      // request's processing boundary. Named and exact requests keep their model.
+      if ((virtual || request.model === undefined) && !exactModelRequired && (!accountAllows(selectedModel) || !localAllows(selectedModel))) {
+        const candidates = accountModels?.length ? accountModels : provider.models;
+        selectedModel = candidates.find(model => localAllows(model) && (!accountModels?.length || provider.models.includes(model))) ?? selectedModel;
+      }
+      if (!accountAllows(selectedModel)) {
+        if (explicitProfile) return Response.json({error:{type:'account_scope_denied'}},{status:403});
+        const reason = 'account_model_unavailable';
+        attemptRecords.push({provider:name,reason}); attempts.push({provider:name,reason}); continue;
+      }
+      if (!localAllows(selectedModel)) {
+        attemptRecords.push({ provider: name, reason: "local_processing_denied" });
+        continue;
       }
       const cacheEpoch = this.cache?.providerEpoch(name);
       if (name === "gemini" && !geminiPrivacyAccepted(provider.privacyAcceptedAt, provider.privacyNoticeVersion)) { privacyBlocked = true; attemptRecords.push({ provider: name, reason: "privacy_consent_required" }); attempts.push({ provider: name, reason: "privacy_consent_required" }); continue; }
@@ -325,7 +371,8 @@ export class Router {
       if (!adapter) { attemptRecords.push({ provider: name, reason: "missing_adapter" }); attempts.push({ provider: name, reason: "missing_adapter" }); continue; }
       // One coherent measurement for this attempt: the resolved model plus, when the adapter
       // transforms the envelope (Anthropic Messages), the exact wire body that will be sent.
-      const attemptAccounting = planAttemptAccounting(providerRequest, estimate, this.wireEnvelopeFor(adapter, providerRequest));
+      const processingOptions: DispatchOptions | undefined = localProcessingOnly ? { localProcessingOnly } : undefined;
+      const attemptAccounting = planAttemptAccounting(providerRequest, estimate, this.wireEnvelopeFor(adapter, providerRequest, processingOptions));
       const candidateCostEstimate = { input: Math.max(routingEstimate.input, attemptAccounting.reservation.total - estimate.output), output: estimate.output };
       let routingGate = evaluateRoutingPolicy(this.config, name, selectedModel, candidateCostEstimate, requestCostMode, requestCostLimit, accumulatedCostMicros);
       if (routingGate.allowed === false) { attemptRecords.push({ provider: name, reason: routingGate.reason }); attempts.push({ provider: name, reason: routingGate.reason }); continue; }
@@ -362,21 +409,6 @@ export class Router {
         }
       }
 
-      let selectedProfile: StoredProfile | undefined;
-      try {
-        selectedProfile = explicitProfile ?? await this.connectionProfiles?.getActiveProfileForProvider(name);
-      } catch {
-        // A profile-backend failure happens before quota/admission. Keep it local:
-        // no provider failure, health, circuit, attempt-budget, or reservation effect.
-        attemptRecords.push({ provider: name, reason: "account_unavailable", action: "fallback" });
-        attempts.push({ provider: name, reason: "account_unavailable" });
-        lastFailedProvider = name;
-        lastSwitchReason = "account_unavailable";
-        continue;
-      }
-      if(selectedProfile && (!selectedProfile.enabled || selectedProfile.providerId!==name || selectedProfile.endpointUrl && selectedProfile.endpointUrl!==endpoint)) {
-        attempts.push({provider:name,reason:'account_disabled'});continue;
-      }
       // V4/F2: when the caller requires capabilities (image/audio input, tools, json_schema), only a
       // destination whose connection declares each of them for this model is eligible. Never inferred
       // from the model name or OpenAI compatibility; every fallback candidate is revalidated the same
@@ -396,14 +428,14 @@ export class Router {
         return Response.json({error:{type:'account_funding_unavailable',request_id:context.requestId}},{status:503});
       }
       const efficiencyPolicy=getActiveEfficiencyPolicy();
-      const cacheNamespace = exactCacheNamespace(endpoint, candidate.comboId, candidate.comboRevision) + (selectedProfile ? `:account:${selectedProfile.id}:${selectedProfile.revision}` : '')+(efficiencyPolicy.revision>1?`:eff:${efficiencyPolicy.revision}`:'') + (cachePartition ? `:scope:${cachePartition}` : '');
+      const cacheNamespace = exactCacheNamespace(endpoint, candidate.comboId, candidate.comboRevision) + (selectedProfile ? `:account:${selectedProfile.id}:${selectedProfile.revision}` : '')+(efficiencyPolicy.revision>1?`:eff:${efficiencyPolicy.revision}`:'') + (cachePartition ? `:scope:${cachePartition}` : '') + (localProcessingOnly ? ':local-processing-v2' : '');
       const cacheEnabled=liveEfficiencyGuards(efficiencyPolicy).allowExactCache;
       if (cacheEnabled && cachePartition && context.tenantId && this.cache && await allowCache()) {
         if (exactCacheEligibility(providerRequest) !== "eligible") this.efficiency.recordLookup("ineligible");
         else {
         const lookup: ExactCacheLookup = await this.cache.lookup(context.tenantId, name, providerRequest, cacheNamespace).catch(() => ({ status: "corrupt" as const }));
         const cached = lookup.status === "hit" ? lookup.response : undefined;
-        const usable = await allowCache();
+        const usable = await allowCache() && starterRouteCurrent(endpoint, selectedModel);
         this.efficiency.recordLookup(cached && !usable ? "miss" : lookup.status);
         if (cached && usable) {
           this.exactCacheHits += 1;
@@ -435,7 +467,7 @@ export class Router {
       if (warn && !warnings.includes(warn)) warnings.push(warn);
       if (signal.aborted) { await this.ledger.compensateConnectionFailure(quota.reservation); return cancelledResponse(context.requestId); }
       // E2-19: select egress member before BYOK secret load (fail-closed on strict miss). No process HTTP_PROXY mutation.
-      let egressOptions: DispatchOptions | undefined;
+      let egressOptions = processingOptions;
       if (this.egressStore) {
         const destHost = (() => {
           try {
@@ -455,8 +487,13 @@ export class Router {
           lastFailedProvider = name; lastSwitchReason = selected.code;
           continue;
         }
+        if (localProcessingOnly && !selected.usedDirect) {
+          await this.ledger.compensateConnectionFailure(quota.reservation);
+          attemptRecords.push({ provider: name, reason: "local_processing_denied" });
+          continue;
+        }
         try {
-          egressOptions = await this.egressStore.transportOptions(selected, signal);
+          egressOptions = { ...processingOptions, ...await this.egressStore.transportOptions(selected, signal) };
         } catch (error) {
           await this.ledger.compensateConnectionFailure(quota.reservation);
           signal.throwIfAborted();
@@ -486,102 +523,55 @@ export class Router {
           return Response.json({ error: { message: "Egress persistence unavailable", type: "proxy_error", code: "egress_persistence_unavailable" } }, { status: 503 });
         }
       }
-      let key: string | undefined;
+      let telemetryCredential: string | undefined;
       const allowPromptCache = name === 'anthropic' && context.tenantId ? async () => {
         if (!await allowCache()) return false;
         const policy = getActiveEfficiencyPolicy();
         return policy.enabled && policy.providerPromptCache;
       } : undefined;
-      let profileSelected = false;
-      let accountDisabled = false;
-      try {
-        if (selectedProfile) {
-          const current = await this.connectionProfiles!.get(selectedProfile.id);
-          profileSelected = true;
-          if (!current?.enabled || current.revision !== selectedProfile.revision || current.providerId !== name) accountDisabled = true;
-          else key = await this.connectionProfiles!.readCredential(current) ?? undefined;
-        }
-        if (!key && !profileSelected) {
-          key = await this.secrets.get(`provider:${name}`);
-        }
-      } catch {
-        await this.ledger.compensateConnectionFailure(quota.reservation);
-        attemptRecords.push({ provider: name, reason: "secret_store_unavailable" });
-        attempts.push({ provider: name, reason: "secret_store_unavailable" });
-        continue;
-      }
-      if (accountDisabled) {
-        await this.ledger.compensateConnectionFailure(quota.reservation);
-        attemptRecords.push({ provider: name, reason: "disabled", action: "fallback" });
-        attempts.push({ provider: name, reason: "disabled" });
-        lastFailedProvider = name;
-        lastSwitchReason = "disabled";
-        continue;
-      }
-      if (!key && (!explicitProfile || explicitProfile.accessMode === 'local') && (name === "ollama" || name === "vllm" || (isOptionalProvider(name) && optionalProviderAllowsKeyless(this.config, name))
-        || (isUserDefinedProvider(name) && typeof provider.endpointUrl === "string" && isLocalEndpointUrl(provider.endpointUrl)))) key = "";
-      else if (!key) { await this.ledger.compensateConnectionFailure(quota.reservation); attemptRecords.push({ provider: name, reason: "missing_key", action: "fallback" }); attempts.push({ provider: name, reason: "missing_key" }); lastFailedProvider = name; lastSwitchReason = "missing_key"; continue; }
+      const keylessAllowed = (!explicitProfile || explicitProfile.accessMode === 'local') &&
+        (name === "ollama" || name === "vllm" || (isOptionalProvider(name) && optionalProviderAllowsKeyless(this.config, name)) ||
+          (isUserDefinedProvider(name) && isLocalEndpointUrl(endpoint)));
       const explicitAccount = explicitProfile !== undefined;
-      const dispatchIdentity: DispatchIdentity = selectedProfile
-        ? {
-          kind: key === "" ? "profile-keyless" : "profile-key",
-          profileId: selectedProfile.id,
-          explicit: explicitAccount,
-          model: selectedModel,
-          endpoint
-        }
-        : key === "" ? { kind: "keyless" } : { kind: "legacy-key" };
+      const providerInvalidation = this.providerInvalidations.get(name);
+      let credentialMode: "key" | "keyless" | undefined;
       const authorizeDispatch = async (): Promise<string> => {
         if (signal.aborted) throw signal.reason ?? new DOMException("aborted", "AbortError");
-        if (dispatchIdentity.kind === "keyless") return "";
-        if (dispatchIdentity.kind === "legacy-key") {
-          let refreshed: string | undefined;
-          try {
-            refreshed = await this.secrets.get(`provider:${name}`);
-          } catch {
-            throw new DispatchAuthorizationError("account_unavailable", false);
-          }
-          if (!refreshed) throw new DispatchAuthorizationError("credential_revoked", false);
-          return refreshed;
-        }
-        if (!this.connectionProfiles) throw new DispatchAuthorizationError("account_unavailable", dispatchIdentity.explicit);
         let current: StoredProfile | undefined;
+        if (selectedProfile) {
+          try {
+            current = await this.connectionProfiles!.get(selectedProfile.id);
+          } catch {
+            throw new DispatchAuthorizationError("account_unavailable", explicitAccount);
+          }
+          if (!current?.enabled || current.providerId !== name || current.revision !== selectedProfile.revision ||
+              (current.endpointUrl && current.endpointUrl !== endpoint) ||
+              (current.modelIds.length > 0 && !current.modelIds.includes(selectedModel))) {
+            throw new DispatchAuthorizationError("account_revoked", explicitAccount);
+          }
+        }
+        if (credentialMode === "keyless") return "";
+        let key: string | null | undefined;
         try {
-          current = await this.connectionProfiles.get(dispatchIdentity.profileId);
+          key = current ? await this.connectionProfiles!.readCredential(current) : await this.secrets.get(`provider:${name}`);
         } catch {
-          throw new DispatchAuthorizationError("account_unavailable", dispatchIdentity.explicit);
+          throw new DispatchAuthorizationError(credentialMode ? "account_unavailable" : "secret_store_unavailable", explicitAccount);
         }
-        if (!current?.enabled || current.providerId !== name || current.revision !== selectedProfile!.revision ||
-          (current.endpointUrl && current.endpointUrl !== dispatchIdentity.endpoint) ||
-          (dispatchIdentity.explicit && current.modelIds.length > 0 && !current.modelIds.includes(dispatchIdentity.model))) {
-          throw new DispatchAuthorizationError("account_revoked", dispatchIdentity.explicit);
+        if (key) {
+          credentialMode = "key";
+          if (this.telemetry) telemetryCredential = key;
+          return key;
         }
-        if (dispatchIdentity.kind === "profile-keyless") return "";
-        let refreshed: string | undefined;
-        try {
-          refreshed = await this.connectionProfiles.readCredential(current) ?? undefined;
-        } catch {
-          throw new DispatchAuthorizationError("account_unavailable", dispatchIdentity.explicit);
-        }
-        if (!refreshed) throw new DispatchAuthorizationError("account_revoked", dispatchIdentity.explicit);
-        // R1: the credential read is the last await before the adapter. The same profile
-        // must still own this key after it: a revocation or revision change completed
-        // meanwhile denies locally instead of dispatching, switching accounts or falling
-        // back to the legacy key. An explicitly chosen profile always refuses (403).
-        let confirmed: StoredProfile | undefined;
-        try {
-          confirmed = await this.connectionProfiles.get(current.id);
-        } catch {
-          throw new DispatchAuthorizationError("account_unavailable", dispatchIdentity.explicit);
-        }
-        if (!confirmed?.enabled || confirmed.providerId !== name || confirmed.revision !== current.revision ||
-          (confirmed.endpointUrl && confirmed.endpointUrl !== dispatchIdentity.endpoint) ||
-          (dispatchIdentity.explicit && confirmed.modelIds.length > 0 && !confirmed.modelIds.includes(dispatchIdentity.model))) {
-          throw new DispatchAuthorizationError("account_revoked", dispatchIdentity.explicit);
-        }
-        return refreshed;
+        if (credentialMode === "key") throw new DispatchAuthorizationError(current ? "account_revoked" : "credential_revoked", explicitAccount);
+        if (!keylessAllowed) throw new DispatchAuthorizationError("missing_key", explicitAccount);
+        credentialMode = "keyless";
+        return "";
       };
       const started = this.now();
+      const reportProviderFailure = (statusCode: number, classifiedAt: number) => this.telemetry?.providerFailed({
+        provider: name, statusCode, latencyMs: elapsed(classifiedAt, started), requestId: context.requestId,
+        sensitiveValues: telemetryCredential ? [telemetryCredential] : undefined,
+      });
       let transientRetries = 0;
       let admittedRates: string | undefined;
       const currentRates = () => {
@@ -590,6 +580,17 @@ export class Router {
       };
       const reservationRef: BudgetReservationRef = { current: quota.reservation,
         validatePolicy: () => {
+          if (!starterRouteCurrent(endpoint, selectedModel)) throw new DispatchPolicyError('routing_policy_changed');
+          // Legacy and migrated accounts rotate through the provider lifecycle,
+          // whose existing invalidation hook may leave profile metadata unchanged.
+          if ((!selectedProfile || selectedProfile.migratedFromLegacy) && this.providerInvalidations.get(name) !== providerInvalidation) {
+            throw new DispatchAuthorizationError("credential_revoked", explicitAccount);
+          }
+          // Funding validation can await after the secret read. Revoke/rotation
+          // during that wait invalidates this exact account before any adapter send.
+          if (selectedProfile && !this.connectionProfiles?.isCurrentIdentity(selectedProfile)) {
+            throw new DispatchAuthorizationError("account_revoked", explicitAccount);
+          }
           const current = evaluateRoutingPolicy(this.config, name, selectedModel, candidateCostEstimate, requestCostMode, requestCostLimit, accumulatedCostMicros);
           if (current.allowed === false) throw new DispatchPolicyError(current.reason);
           // A stricter data policy requires the envelope to be prepared and counted again.
@@ -625,8 +626,8 @@ export class Router {
           }
           reservationRef.current = activeReservation;
           const response = transientRetries === 0 && !(disableRetries || requestCostMode === "within_limit")
-            ? await this.dispatchWith429Backoff(adapter, provider, providerRequest, key, signal, reserveTokens, activeReservation, egressOptions, candidateAttemptBudget, allowPromptCache, authorizeDispatch, reservationRef)
-            : await this.dispatchReserved(adapter, provider, providerRequest, key, signal, activeReservation, egressOptions, candidateAttemptBudget, allowPromptCache, authorizeDispatch, reservationRef);
+            ? await this.dispatchWith429Backoff(adapter, provider, providerRequest, signal, reserveTokens, activeReservation, egressOptions, candidateAttemptBudget, authorizeDispatch, allowPromptCache, reservationRef)
+            : await this.dispatchReserved(adapter, provider, providerRequest, signal, activeReservation, egressOptions, candidateAttemptBudget, authorizeDispatch, allowPromptCache, reservationRef);
                     try { await this.ledger.reconcileProvider(name as ProviderName, response.headers); }
           catch { /* a reserva local já persistida permanece conservadora; não duplicar prompt por falha contábil local */ }
 
@@ -643,15 +644,18 @@ export class Router {
               // Client fail-fast must not trip circuit; invalid credentials use sticky rejection only.
               // Disabled-fallback for transient upstream errors still records connection pain.
               if (invalidCredentials) {
-                this.health.recordFailure(name, this.now()); this.performance.recordFailure(name);
+                const failedAt = this.now();
+                this.health.recordFailure(name, failedAt); this.performance.recordFailure(name, providerRequest.model, failedAt);
               } else if (fallbackDisabled || classified.kind === "billing") {
                 const failedAt = this.now();
-                this.health.recordFailure(name, failedAt); this.performance.recordFailure(name);
+                this.health.recordFailure(name, failedAt); this.performance.recordFailure(name, providerRequest.model, failedAt);
                 this.circuits.recordFailure(name, endpoint, breakerOpts, failedAt);
               }
               lastFailedProvider = name;
               const finalStatus = invalidCredentials ? "fail_fast" : (fallbackDisabled ? "disabled_fallback" : "fail_fast");
-              return providerRequestRejected(response.status, name, attempts.length > 0, context.requestId, this.rejections.get(name, endpoint)?.reason, scrubbedOutcome({
+              const reason = localProcessingOnly && name === "ollama" && response.status === 404
+                ? "ollama_local_model_unavailable" : this.rejections.get(name, endpoint)?.reason;
+              return providerRequestRejected(response.status, name, attempts.length > 0, context.requestId, reason, scrubbedOutcome({
                 provider_used: null, provider_failed: name, switch_reason: classified.reason, final_status: finalStatus,
                 attempts: [...attemptRecords, { provider: name, reason: classified.reason, action: finalStatus, status: response.status }],
                 warnings, partial_content: partialContent,
@@ -675,13 +679,13 @@ export class Router {
             if (!await discardResponse(response)) return providerCleanupTimeout(context.requestId);
             if (invalidCredentials) {
               // Surface invalid key via rejection/admission only — do not feed transient cooldown/circuit.
-              this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name);
+              this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name, providerRequest.model, classifiedAt);
             } else {
               this.recordFailure(provider, classifiedAt);
-              this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name);
+              this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name, providerRequest.model, classifiedAt);
               this.circuits.recordFailure(name, endpoint, breakerOpts, classifiedAt);
             }
-            this.telemetry?.providerFailed({ provider: name, statusCode: response.status, latencyMs: elapsed(classifiedAt, started), requestId: context.requestId, sensitiveValues: [key] });
+            reportProviderFailure(response.status, classifiedAt);
             attemptRecords.push({ provider: name, reason: classified.reason, action: this.resiliencePolicy().autoFallbackEnabled ? "fallback" : "fail_fast", status: response.status });
             attempts.push({ provider: name, reason: classified.reason });
             lastFailedProvider = name;
@@ -701,9 +705,9 @@ export class Router {
             const classifiedAt = this.now();
             if (!await discardResponse(response)) return providerCleanupTimeout(context.requestId);
             this.recordFailure(provider, classifiedAt);
-            this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name);
+            this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name, providerRequest.model, classifiedAt);
             this.circuits.recordFailure(name, endpoint, breakerOpts, classifiedAt);
-            this.telemetry?.providerFailed({ provider: name, statusCode: response.status, latencyMs: elapsed(classifiedAt, started), requestId: context.requestId, sensitiveValues: [key] });
+            reportProviderFailure(response.status, classifiedAt);
             attemptRecords.push({ provider: name, reason: classified.reason, action: "fallback", status: response.status });
             attempts.push({ provider: name, reason: classified.reason });
             lastFailedProvider = name; lastSwitchReason = classified.reason; failoverClassifiedAt = classifiedAt;
@@ -719,9 +723,9 @@ export class Router {
             const classifiedAt = this.now();
             if (!await discardResponse(response)) return providerCleanupTimeout(context.requestId);
             this.recordFailure(provider, classifiedAt);
-            this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name);
+            this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name, providerRequest.model, classifiedAt);
             this.circuits.recordFailure(name, endpoint, breakerOpts, classifiedAt);
-            this.telemetry?.providerFailed({ provider: name, statusCode: response.status, latencyMs: elapsed(classifiedAt, started), requestId: context.requestId, sensitiveValues: [key] });
+            reportProviderFailure(response.status, classifiedAt);
             attemptRecords.push({ provider: name, reason: "invalid_content_type", action: "fallback" });
             attempts.push({ provider: name, reason: "invalid_content_type" });
             lastFailedProvider = name; lastSwitchReason = "invalid_content_type"; failoverClassifiedAt = classifiedAt;
@@ -730,16 +734,16 @@ export class Router {
           }
           const usageHooks = this.usageHooks(name, providerRequest, attemptAccounting, reservationRef, signal, context);
           const boundedResponse = limitProviderResponse(response, MAX_PROVIDER_RESPONSE_BYTES, () => {
+            if (signal.aborted) return;
             const failedAt = this.now();
             this.recordFailure(provider, failedAt);
-            this.health.recordFailure(name, failedAt); this.performance.recordFailure(name);
+            this.health.recordFailure(name, failedAt); this.performance.recordFailure(name, providerRequest.model, failedAt);
             this.circuits.recordFailure(name, endpoint, breakerOpts, failedAt);
             this.telemetry?.providerFailed({ provider: name, statusCode: 0, latencyMs: elapsed(failedAt, started), requestId: context.requestId });
-          }, request.stream === true && providerContentType(response.headers.get("content-type")) === "text/event-stream" ? 0 : provider.requestTimeoutMs, this.usage.observe(name, request.stream === true, usageHooks.onUsage, usageHooks.onClose), { preservePartial: true, onPartial: (text) => { partialContent = text; } });
+          }, request.stream === true && providerContentType(response.headers.get("content-type")) === "text/event-stream" ? 0 : provider.requestTimeoutMs, this.observePerformance(name, providerRequest, started, signal, usageHooks), { preservePartial: true, onPartial: (text) => { partialContent = text; } });
           this.clearFailures(name);
           this.health.recordSuccess(name);
           this.circuits.recordSuccess(name, endpoint, breakerOpts);
-          this.performance.recordSuccess(name, null, elapsed(this.now(), started), null);
           if (sessionId) {
             this.contextGuard.recordSwitch(sessionId, name, providerRequest.model, true);
           }
@@ -752,7 +756,7 @@ export class Router {
             } catch { /* cache é otimização local; streaming principal permanece autoritativo */ }
           }
           this.efficiency.recordLatency("live_dispatch", elapsed(this.now(), dispatchStartedAt));
-          return routeResponse(boundedResponse, name, attempts.length > 0, false, providerRequest.model, { capabilityDeclaration, switchReason: lastSwitchReason, failedProvider: lastFailedProvider, warnings, comboId: candidate.comboId, comboRevision: candidate.comboRevision, costClass: routingGate.classification, costEstimateMicros: routingGate.costMicros !== null && routingGate.costMicros !== undefined ? String(routingGate.costMicros) : undefined });
+          return routeResponse(boundedResponse, name, attempts.length > 0, false, providerRequest.model, { capabilityDeclaration, ollamaLoopback: localProcessingOnly && name === 'ollama' && wasOllamaLoopbackDispatch(response), switchReason: lastSwitchReason, failedProvider: lastFailedProvider, warnings, comboId: candidate.comboId, comboRevision: candidate.comboRevision, costClass: routingGate.classification, costEstimateMicros: routingGate.costMicros !== null && routingGate.costMicros !== undefined ? String(routingGate.costMicros) : undefined });
         }
       } catch (error) { 
         if (signal.aborted) return cancelledResponse(context.requestId);
@@ -772,6 +776,12 @@ export class Router {
             { status: error.code === 'workspace_forbidden' ? 403 : error.code === 'workspace_archived' ? 409 : 503, headers: { 'cache-control': 'no-store' } });
         }
         if (error instanceof DispatchAuthorizationError) {
+          if (error.reason === "missing_key" || error.reason === "secret_store_unavailable") {
+            attempts.push({ provider: name, reason: error.reason });
+            attemptRecords.push({ provider: name, reason: error.reason, action: "fallback" });
+            lastFailedProvider = name; lastSwitchReason = error.reason;
+            continue;
+          }
           if (error.explicit) {
             return Response.json({ error: { type: "account_scope_denied", request_id: context.requestId } }, { status: 403, headers: { "cache-control": "no-store" } });
           }
@@ -803,9 +813,9 @@ export class Router {
         }
         if (error instanceof Error && error.message === "provider_cleanup_timeout") {
           const classifiedAt = this.now(); this.recordFailure(provider, classifiedAt);
-          this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name);
+          this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name, providerRequest.model, classifiedAt);
           this.circuits.recordFailure(name, endpoint, breakerOpts, classifiedAt);
-          this.telemetry?.providerFailed({ provider: name, statusCode: 0, latencyMs: elapsed(classifiedAt, started), requestId: context.requestId, sensitiveValues: [key] });
+          reportProviderFailure(0, classifiedAt);
           return providerCleanupTimeout(context.requestId);
         }
         const classified = classifyDispatchError(error);
@@ -818,11 +828,12 @@ export class Router {
             const retryQuota = await this.ledger.reserve(name, provider.budget, reserveTokens);
             if (retryQuota.allowed && retryQuota.reservation) {
               try {
-                const retryResponse = await this.dispatchReserved(adapter, provider, providerRequest, key!, signal, retryQuota.reservation, egressOptions, attemptBudget, allowPromptCache, authorizeDispatch, reservationRef);
+                const retryStarted = this.now();
+                const retryResponse = await this.dispatchReserved(adapter, provider, providerRequest, signal, retryQuota.reservation, egressOptions, attemptBudget, authorizeDispatch, allowPromptCache, reservationRef);
                 if (retryResponse.status === 200 && validProviderContentType(retryResponse.headers.get("content-type"), request.stream === true)) {
                   this.clearFailures(name); this.health.recordSuccess(name); this.circuits.recordSuccess(name, endpoint, breakerOpts);
                   const retryUsageHooks = this.usageHooks(name, providerRequest, attemptAccounting, reservationRef, signal, context);
-                  return routeResponse(limitProviderResponse(retryResponse, MAX_PROVIDER_RESPONSE_BYTES, () => undefined, request.stream === true && providerContentType(retryResponse.headers.get("content-type")) === "text/event-stream" ? 0 : provider.requestTimeoutMs, this.usage.observe(name, request.stream === true, retryUsageHooks.onUsage, retryUsageHooks.onClose), { preservePartial: true, onPartial: (t) => { partialContent = t; } }), name, attempts.length > 0, false, providerRequest.model, { capabilityDeclaration, switchReason: lastSwitchReason, failedProvider: lastFailedProvider, warnings, comboId: candidate.comboId, comboRevision: candidate.comboRevision, costClass: routingGate.classification, costEstimateMicros: routingGate.costMicros !== null && routingGate.costMicros !== undefined ? String(routingGate.costMicros) : undefined });
+                  return routeResponse(limitProviderResponse(retryResponse, MAX_PROVIDER_RESPONSE_BYTES, () => { if (!signal.aborted) this.performance.recordFailure(name, providerRequest.model); }, request.stream === true && providerContentType(retryResponse.headers.get("content-type")) === "text/event-stream" ? 0 : provider.requestTimeoutMs, this.observePerformance(name, providerRequest, retryStarted, signal, retryUsageHooks), { preservePartial: true, onPartial: (t) => { partialContent = t; } }), name, attempts.length > 0, false, providerRequest.model, { capabilityDeclaration, ollamaLoopback: localProcessingOnly && name === 'ollama' && wasOllamaLoopbackDispatch(retryResponse), switchReason: lastSwitchReason, failedProvider: lastFailedProvider, warnings, comboId: candidate.comboId, comboRevision: candidate.comboRevision, costClass: routingGate.classification, costEstimateMicros: routingGate.costMicros !== null && routingGate.costMicros !== undefined ? String(routingGate.costMicros) : undefined });
                 }
                 if (!await discardResponse(retryResponse)) return providerCleanupTimeout(context.requestId);
                 classified.reason = classifyHttpStatus(retryResponse.status).reason;
@@ -839,9 +850,9 @@ export class Router {
         }
         const classifiedAt = this.now();
         this.recordFailure(provider, classifiedAt);
-        this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name);
+        this.health.recordFailure(name, classifiedAt); this.performance.recordFailure(name, providerRequest.model, classifiedAt);
         this.circuits.recordFailure(name, endpoint, breakerOpts, classifiedAt);
-        this.telemetry?.providerFailed({ provider: name, statusCode: 0, latencyMs: elapsed(classifiedAt, started), requestId: context.requestId, sensitiveValues: [key] });
+        reportProviderFailure(0, classifiedAt);
         attemptRecords.push({ provider: name, reason: classified.reason, action: this.resiliencePolicy().autoFallbackEnabled ? "fallback" : "fail_fast" });
         attempts.push({ provider: name, reason: classified.reason });
         lastFailedProvider = name; lastSwitchReason = classified.reason; failoverClassifiedAt = classifiedAt;
@@ -868,6 +879,9 @@ export class Router {
     if (lastBudgetError) return Response.json({ error: { type: lastBudgetError, request_id: context.requestId } },
       { status: lastBudgetError === 'budget_exceeded' ? 429 : 409, headers: { 'cache-control': 'no-store' } });
     if (privacyBlocked) return Response.json({ error: { type: "gemini_privacy_consent_required", request_id: context.requestId } }, { status: 412, headers: { "cache-control": "no-store" } });
+    if (localProcessingOnly && attemptCount === 0 && attemptRecords.some(record => record.reason === "local_processing_denied")) {
+      return Response.json({ error: { type: "local_processing_denied", request_id: context.requestId } }, { status: 403, headers: { "cache-control": "no-store" } });
+    }
 
     // V2: when the preference excluded candidates and nothing was dispatched, the answer is the
     // policy itself (never a silent paid route): the client keeps the task and offers another mode.
@@ -933,8 +947,8 @@ export class Router {
     }, { status: 429, headers: { "retry-after": "30", "cache-control": "no-store" } });
   }
 
-  private async dispatchWith429Backoff(adapter: ProviderAdapter, provider: ProviderConfig, request: ChatCompletionRequest, key: string, signal: AbortSignal, tokens: number, initialReservation: Reservation, egressOptions: DispatchOptions | undefined, budget: { available(): boolean; consume(): boolean }, allowPromptCache?: () => Promise<boolean>, authorize?: () => Promise<string>, reservationRef?: BudgetReservationRef): Promise<Response> {
-    let response = await this.dispatchReserved(adapter, provider, request, key, signal, initialReservation, egressOptions, budget, allowPromptCache, authorize, reservationRef);
+  private async dispatchWith429Backoff(adapter: ProviderAdapter, provider: ProviderConfig, request: ChatCompletionRequest, signal: AbortSignal, tokens: number, initialReservation: Reservation, egressOptions: DispatchOptions | undefined, budget: { available(): boolean; consume(): boolean }, authorize: () => Promise<string>, allowPromptCache?: () => Promise<boolean>, reservationRef?: BudgetReservationRef): Promise<Response> {
+    let response = await this.dispatchReserved(adapter, provider, request, signal, initialReservation, egressOptions, budget, authorize, allowPromptCache, reservationRef);
     // Budget esgotado: devolve o 429 intacto para a classificação normal (fallback/exaustão), sem novo despacho.
     // A tentativa só é consumida depois da reserva e da espera, imediatamente antes do redespacho:
     // quota negada ou cancelamento não gastam o budget que o fallback ainda pode usar.
@@ -950,12 +964,12 @@ export class Router {
         await sleepWithSignal(this.sleep, Math.min(5_000, Math.max(exponential, retryAfter)), signal);
         if (signal.aborted) throw signal.reason ?? new DOMException("aborted", "AbortError");
       } catch (error) { await this.ledger.compensateConnectionFailure(quota.reservation); throw error; }
-      response = await this.dispatchReserved(adapter, provider, request, key, signal, quota.reservation, egressOptions, budget, allowPromptCache, authorize, reservationRef);
+      response = await this.dispatchReserved(adapter, provider, request, signal, quota.reservation, egressOptions, budget, authorize, allowPromptCache, reservationRef);
     }
     return response;
   }
 
-  private async dispatchReserved(adapter: ProviderAdapter, provider: ProviderConfig, request: ChatCompletionRequest, key: string, signal: AbortSignal, reservation: Reservation, egressOptions: DispatchOptions | undefined, budget: { consume(): boolean }, allowPromptCache?: () => Promise<boolean>, authorize?: () => Promise<string>, reservationRef?: BudgetReservationRef): Promise<Response> {
+  private async dispatchReserved(adapter: ProviderAdapter, provider: ProviderConfig, request: ChatCompletionRequest, signal: AbortSignal, reservation: Reservation, egressOptions: DispatchOptions | undefined, budget: { consume(): boolean }, authorize: () => Promise<string>, allowPromptCache?: () => Promise<boolean>, reservationRef?: BudgetReservationRef): Promise<Response> {
     let admitted: DispatchBudgetReservation | undefined;
     let dispatched = false;
     try {
@@ -978,17 +992,12 @@ export class Router {
     };
     const beforeAuthorize = await localRefusal();
     if (beforeAuthorize) { await admitted?.compensate(); return beforeAuthorize; }
-    if (authorize) {
-      try {
-        key = await authorize();
-      } catch (error) {
-        await this.ledger.compensateConnectionFailure(reservation);
-        if (signal.aborted) throw signal.reason ?? new DOMException("aborted", "AbortError");
-        throw error;
-      }
-    }
-    // R2/R4: authorization is the final preparation await. Re-examine the same signal and
-    // egress binding right before the dispatch boundary; a decision that changed meanwhile
+    const key = await authorize().catch(error => {
+      signal.throwIfAborted();
+      throw error;
+    });
+    // R2/R4: re-examine the same signal and egress binding after authorization and
+    // funding preparation; a decision that changed meanwhile
     // refunds the reservation instead of sending directly or debiting quota without HTTP.
     if (admitted?.validate) {
       try { await admitted.validate(); }
@@ -1045,10 +1054,31 @@ export class Router {
   }
   /** Exact wire envelope handed to the adapter, when it declares one. Measured only through
    * the selected model's tokenizer; a wireEnvelope failure is not an accounting failure. */
-  private wireEnvelopeFor(adapter: ProviderAdapter, request: ChatCompletionRequest): unknown | undefined {
+  private wireEnvelopeFor(adapter: ProviderAdapter, request: ChatCompletionRequest, options?: DispatchOptions): unknown | undefined {
     if (typeof adapter.wireEnvelope !== "function") return undefined;
-    try { return adapter.wireEnvelope(request); } catch { return undefined; }
+    try { return adapter.wireEnvelope(request, options); } catch { return undefined; }
   }
+  /** Observe the existing consumer, without cloning or eagerly draining its stream. */
+  private observePerformance(
+    provider: ProviderName,
+    request: ChatCompletionRequest & { model: string },
+    started: number,
+    signal: AbortSignal,
+    hooks: { onUsage: (usage: ReportedTokenUsage & CacheUsage) => void; onClose: (observation: UsageObservation) => void },
+  ): UsageObserver {
+    let ttft: number | null = null;
+    return this.usage.observe(provider, request.stream === true, hooks.onUsage, observation => {
+      hooks.onClose(observation);
+      // Caller cancellation is not provider failure, nor evidence of a fast success.
+      if (signal.aborted || observation.interrupted) return;
+      if (!observation.responseComplete) {
+        this.performance.recordFailure(provider, request.model);
+        return;
+      }
+      this.performance.recordSuccess(provider, request.model, ttft, elapsed(this.now(), started), observation.usage?.outputTokens ?? null);
+    }, () => { ttft ??= elapsed(this.now(), started); });
+  }
+
   /** Per-response accounting hooks: calibrate the local estimate (numbers only, with counting
    * identity, skipped for ephemeral dispatches) and settle the exact reservation of the attempt
    * that produced this response — including late/partial usage and absence of usage. */
@@ -1164,6 +1194,8 @@ export class Router {
     };
   }
   invalidateProviderCache(provider: ProviderName): Promise<void> {
+    // Invalidate pending authorization synchronously, before cache I/O can yield.
+    this.providerInvalidations.set(provider, Symbol());
     this.rejections.clear(provider);
     this.health.clear(provider);
     this.circuits.reset(provider);
@@ -1227,6 +1259,7 @@ export function limitProviderResponse(response: Response, maximum = MAX_PROVIDER
   const reader = response.body.getReader();
   let observed = 0;
   let settled = false;
+  let cancelled = false;
   let failureObserved = false;
   const decoder = new TextDecoder();
   let partialText = "";
@@ -1234,7 +1267,7 @@ export function limitProviderResponse(response: Response, maximum = MAX_PROVIDER
   const isSse = contentType === "text/event-stream";
   const settle = () => { if (!settled) { settled = true; reader.releaseLock(); } };
   const observeFailure = () => {
-    if (failureObserved) return;
+    if (failureObserved || cancelled) return;
     failureObserved = true;
     usage?.interrupt();
     if (partialText) options.onPartial?.(partialText);
@@ -1263,6 +1296,9 @@ export function limitProviderResponse(response: Response, maximum = MAX_PROVIDER
         // inference. Adapter connection deadlines, client cancel and byte limits remain.
         try { chunk = idleTimeoutMs === 0 ? await pending : await Promise.race([pending, new Promise<typeof idle>((resolve) => { timer = setTimeout(() => resolve(idle), idleTimeoutMs); })]); }
         finally { if (timer !== undefined) clearTimeout(timer); }
+        // A pending upstream read may resolve while downstream cancellation is
+        // releasing it. It must not close/error an already cancelled controller.
+        if (cancelled) { settle(); return; }
         if (chunk === idle) {
           observeFailure();
           cancelStream(reader, "provider_response_idle_timeout");
@@ -1286,13 +1322,14 @@ export function limitProviderResponse(response: Response, maximum = MAX_PROVIDER
         usage?.chunk(chunk.value);
         controller.enqueue(chunk.value);
       } catch (error) {
+        if (cancelled) { settle(); return; }
         observeFailure();
         if (emitPartialTrailer(controller, "stream_interrupted")) return;
         settle();
         controller.error(error);
       }
     },
-    async cancel(reason) { usage?.interrupt(); if (partialText) options.onPartial?.(partialText); try { await cancelStreamWithin(reader, 250, reason); } finally { settle(); } }
+    async cancel(reason) { cancelled = true; usage?.interrupt(); if (partialText) options.onPartial?.(partialText); try { await cancelStreamWithin(reader, 250, reason); } finally { settle(); } }
   });
   return new Response(body, { status: response.status, headers: response.headers });
 }
@@ -1302,7 +1339,7 @@ function exactCacheNamespace(endpoint: string, comboId: string | undefined, comb
   return comboId === undefined ? endpoint : JSON.stringify([endpoint, comboId, comboRevision ?? null]);
 }
 
-function routeResponse(response: Response, provider: ProviderName, fallbackTriggered: boolean, cacheHit = false, model?: string, meta?: { capabilityDeclaration?: string; switchReason?: string | null; failedProvider?: ProviderName | null; warnings?: string[]; comboId?: string; comboRevision?: number; cacheAgeMs?: number; costClass?: string; costEstimateMicros?: string }): Response {
+function routeResponse(response: Response, provider: ProviderName, fallbackTriggered: boolean, cacheHit = false, model?: string, meta?: { capabilityDeclaration?: string; ollamaLoopback?: boolean; switchReason?: string | null; failedProvider?: ProviderName | null; warnings?: string[]; comboId?: string; comboRevision?: number; cacheAgeMs?: number; costClass?: string; costEstimateMicros?: string }): Response {
   const headers = new Headers({ "cache-control": "no-store" });
   const contentType = providerContentType(response.headers.get("content-type")); if (contentType !== undefined) headers.set("content-type", contentType);
   for (const name of ["x-request-id", "x-provider-request-id"]) { const value = providerMetadataHeader(response.headers.get(name)); if (value !== undefined) headers.set(name, value); }
@@ -1312,6 +1349,7 @@ function routeResponse(response: Response, provider: ProviderName, fallbackTrigg
   if (selectedModel !== undefined) headers.set("x-uptokey-model", selectedModel);
   headers.set("x-uptokey-fallback", String(fallbackTriggered));
   headers.set("x-uptokey-cache", cacheHit ? "hit" : "miss");
+  if (meta?.ollamaLoopback && !cacheHit) headers.set("x-uptokey-local-route", "ollama-loopback-v1");
   // Age of the replayed body (RFC 9111 Age semantics, whole seconds); lets clients label historical output.
   if (cacheHit && meta?.cacheAgeMs !== undefined && Number.isFinite(meta.cacheAgeMs)) headers.set("x-uptokey-cache-age", String(Math.floor(Math.max(0, meta.cacheAgeMs) / 1000)));
   if (meta?.failedProvider) headers.set("x-uptokey-failed-provider", meta.failedProvider);
@@ -1501,7 +1539,7 @@ function evaluateRoutingPolicy(config: ProxyConfig, provider: ProviderName, mode
   return { allowed: true, dataCollectionDenied: retention?.denyDataCollection === true, classification, costMicros };
 }
 
-function orderCandidatesByRoutingPolicy(config: ProxyConfig, candidates: RoutingCandidate[], request: ChatCompletionRequest, estimate: { input: number; output: number }, mode: RoutingMode, performance?: ProviderPerformanceTracker, health?: ProviderHealthTracker): RoutingCandidate[] {
+function orderCandidatesByRoutingPolicy(config: ProxyConfig, candidates: RoutingCandidate[], request: ChatCompletionRequest, estimate: { input: number; output: number }, mode: RoutingMode, performance?: ProviderPerformanceTracker, latencyPolicy?: { minSamples?: number; windowMs?: number }): RoutingCandidate[] {
   const requestMode = request.uptokey_cost_mode;
   if (requestMode === "economic") {
     return [...candidates].sort((a, b) => {
@@ -1521,30 +1559,34 @@ function orderCandidatesByRoutingPolicy(config: ProxyConfig, candidates: Routing
   if (mode === "cost" || mode === "balanced") {
     return [...candidates].sort((a, b) => compareCandidateCost(config, a, b, request, estimate));
   }
-  if (mode === "latency" || mode === "throughput" || mode === "quality") {
-    const minSamples = config.routingPolicy?.latency?.minSamples ?? 5;
-    const sorted = [...candidates].sort((a, b) => compareCandidateByEvidence(config, a, b, request, mode, performance, health, minSamples));
-        return sorted;
-  }
-  if (mode === "auto") {
+  if (mode === "latency" || mode === "throughput" || mode === "quality" || mode === "auto") {
+    const minSamples = latencyPolicy?.minSamples ?? config.routingPolicy?.latency?.minSamples ?? (mode === "auto" ? 3 : 5);
+    const windowMs = latencyPolicy?.windowMs ?? config.routingPolicy?.latency?.windowMs;
+    // Freeze evidence for this decision. Use one metric across the whole ordering,
+    // avoiding a non-transitive sort that mixes TTFT with total response duration.
+    const snapshots = new Map(candidates.map(candidate => {
+      const provider = config.providers[candidate.provider];
+      const model = provider ? selectModel(provider, candidate.model ?? (isVirtualModel(request.model) ? undefined : request.model), candidate.model !== undefined || request.uptokey_require_model === true) ?? "" : "";
+      return [candidate, performance?.get(candidate.provider, model, windowMs)] as const;
+    }));
+    const useTtft = [...snapshots.values()].every(snapshot => (snapshot?.ttftSampleCount ?? 0) >= minSamples);
     return [...candidates].sort((a, b) => {
-      const costDiff = compareCandidateCost(config, a, b, request, estimate);
-      if (costDiff !== 0) return costDiff;
-      return compareCandidateByEvidence(config, a, b, request, "latency", performance, health, 3);
+      if (mode === "auto") {
+        const costDiff = compareCandidateCost(config, a, b, request, estimate);
+        if (costDiff !== 0) return costDiff;
+      }
+      return compareCandidateByEvidence(snapshots.get(a), snapshots.get(b), mode === "auto" ? "latency" : mode, minSamples, useTtft);
     });
   }
   return candidates;
 }
 
-function compareCandidateByEvidence(config: ProxyConfig, a: RoutingCandidate, b: RoutingCandidate, request: ChatCompletionRequest, mode: RoutingMode, performance?: ProviderPerformanceTracker, health?: ProviderHealthTracker, minSamples = 5): number {
-  const aPerf = performance?.get(a.provider);
-  const bPerf = performance?.get(b.provider);
-  const aHasData = aPerf !== undefined && aPerf.sampleCount >= minSamples;
-  const bHasData = bPerf !== undefined && bPerf.sampleCount >= minSamples;
-
+function compareCandidateByEvidence(aPerf: ProviderPerformanceSnapshot | undefined, bPerf: ProviderPerformanceSnapshot | undefined, mode: RoutingMode, minSamples: number, useTtft: boolean): number {
   if (mode === "latency") {
-    const aLatency = aPerf?.ttftMsEwma ?? aPerf?.totalLatencyMsEwma ?? null;
-    const bLatency = bPerf?.ttftMsEwma ?? bPerf?.totalLatencyMsEwma ?? null;
+    const aHasData = (useTtft ? aPerf?.ttftSampleCount ?? 0 : aPerf?.latencySampleCount ?? 0) >= minSamples;
+    const bHasData = (useTtft ? bPerf?.ttftSampleCount ?? 0 : bPerf?.latencySampleCount ?? 0) >= minSamples;
+    const aLatency = (useTtft ? aPerf?.ttftMsEwma : aPerf?.totalLatencyMsEwma) ?? null;
+    const bLatency = (useTtft ? bPerf?.ttftMsEwma : bPerf?.totalLatencyMsEwma) ?? null;
     if (aHasData && bHasData && aLatency !== null && bLatency !== null) {
       return aLatency - bLatency;
     }
@@ -1552,6 +1594,8 @@ function compareCandidateByEvidence(config: ProxyConfig, a: RoutingCandidate, b:
     if (bHasData && bLatency !== null) return 1;
   }
   if (mode === "throughput") {
+    const aHasData = (aPerf?.throughputSampleCount ?? 0) >= minSamples;
+    const bHasData = (bPerf?.throughputSampleCount ?? 0) >= minSamples;
     if (aHasData && bHasData && aPerf!.tokensPerSecondEwma !== null && bPerf!.tokensPerSecondEwma !== null) {
       return bPerf!.tokensPerSecondEwma - aPerf!.tokensPerSecondEwma;
     }
@@ -1559,10 +1603,8 @@ function compareCandidateByEvidence(config: ProxyConfig, a: RoutingCandidate, b:
     if (bHasData && bPerf!.tokensPerSecondEwma !== null) return 1;
   }
   if (mode === "quality") {
-    const aHealth = health?.get(a.provider);
-    const bHealth = health?.get(b.provider);
-    const aScore = computeQualityScore(aPerf, aHealth, minSamples);
-    const bScore = computeQualityScore(bPerf, bHealth, minSamples);
+    const aScore = computeQualityScore(aPerf, minSamples);
+    const bScore = computeQualityScore(bPerf, minSamples);
     if (aScore !== null && bScore !== null) return bScore - aScore;
     if (aScore !== null) return -1;
     if (bScore !== null) return 1;
@@ -1570,14 +1612,10 @@ function compareCandidateByEvidence(config: ProxyConfig, a: RoutingCandidate, b:
   return 0;
 }
 
-function computeQualityScore(perf: ProviderPerformanceSnapshot | undefined, health: { state: string; consecutiveSuccesses: number } | undefined, minSamples: number): number | null {
-  if (!perf || perf.sampleCount < minSamples) {
-    if (health && health.state === "healthy") return 0.5;
-    return null;
-  }
-  const successRate = perf.successRate ?? 0.5;
-  const healthBoost = health?.state === "healthy" ? 0.2 : health?.state === "degraded" ? -0.1 : -0.3;
-  return Math.max(0, Math.min(1, successRate + healthBoost));
+function computeQualityScore(perf: ProviderPerformanceSnapshot | undefined, minSamples: number): number | null {
+  // Reliability only, never semantic quality. Provider health still gates dispatch,
+  // but cannot manufacture evidence for another model or an expired sample.
+  return perf && perf.sampleCount >= minSamples ? perf.successRate : null;
 }
 
 function compareCandidateCost(config: ProxyConfig, a: RoutingCandidate, b: RoutingCandidate, request: ChatCompletionRequest, estimate: { input: number; output: number }): number {

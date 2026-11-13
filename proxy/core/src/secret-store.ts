@@ -29,6 +29,53 @@ export interface SecretStore {
   delete(account: string): Promise<void>;
 }
 
+type SecretStoreOperation = "read" | "write" | "delete";
+
+/** Public classification only; never retain the native exception or vault data. */
+export class SecureStorageFullError extends Error {
+  readonly code = "secure_storage_full" as const;
+  constructor(operation: SecretStoreOperation) {
+    // Existing callers intentionally match these operation-level messages.
+    super(`secret_store_${operation}_unavailable`);
+    this.name = "SecureStorageFullError";
+  }
+}
+
+/** Follow only bounded, data-valued Error links; preserve rollback errors intact. */
+export function secretStoreFailureCode(error: unknown): "secure_storage_full" | undefined {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value: error, depth: 0 }];
+  const seen = new Set<Error>();
+  for (let visited = 0; pending.length && visited < 16; visited++) {
+    const { value, depth } = pending.shift()!;
+    if (!(value instanceof Error) || seen.has(value)) continue;
+    if (value instanceof SecureStorageFullError) return value.code;
+    seen.add(value);
+    if (depth >= 4) continue;
+    const cause = Object.getOwnPropertyDescriptor(value, "cause");
+    if (cause && "value" in cause) pending.push({ value: cause.value, depth: depth + 1 });
+    if (value instanceof AggregateError) {
+      const errors = Object.getOwnPropertyDescriptor(value, "errors");
+      if (errors && "value" in errors && Array.isArray(errors.value)) {
+        for (const child of errors.value.slice(0, 16 - visited)) pending.push({ value: child, depth: depth + 1 });
+      }
+    }
+  }
+}
+
+function nativeOperationError(error: unknown, operation: SecretStoreOperation, platform: NodeJS.Platform): Error {
+  if (platform === "win32" && error instanceof Error) {
+    const code = Object.getOwnPropertyDescriptor(error, "code");
+    const message = Object.getOwnPropertyDescriptor(error, "message");
+    // This is the observed keyring binding's exact Windows ERROR_NOT_ENOUGH_MEMORY
+    // envelope. Do not infer capacity from arbitrary "8", localized text or paths.
+    if (code && "value" in code && code.value === "GenericFailure" && message && "value" in message && typeof message.value === "string" &&
+      message.value.replace(/\r\n/g, "\n") === "Platform failure: Windows error code 8\n\nCaused by:\n    Windows error code 8") {
+      return new SecureStorageFullError(operation);
+    }
+  }
+  return new Error(`secret_store_${operation}_unavailable`);
+}
+
 export interface SecretStoreBoundary {
   mechanism: "memory" | "keychain-generic" | "macos-protected-data" | "windows-credential-manager" | "secret-service" | "linux-secret-portal" | "unknown";
   native: boolean;
@@ -45,22 +92,23 @@ export class MemorySecretStore implements SecretStore {
 
 export class NativeSecretStore implements SecretStore {
   private readonly entryFactory: (service: string, account: string) => PasswordEntry | Promise<PasswordEntry>;
-  constructor(entryFactory: (service: string, account: string) => PasswordEntry | Promise<PasswordEntry> = nativeEntry) { this.entryFactory = entryFactory; }
+  private readonly platform: NodeJS.Platform;
+  constructor(entryFactory: (service: string, account: string) => PasswordEntry | Promise<PasswordEntry> = nativeEntry, platform: NodeJS.Platform = process.platform) { this.entryFactory = entryFactory; this.platform = platform; }
   async get(account: string): Promise<string | undefined> {
     try {
       // Only null means absent; an empty stored value must reach validation.
       return (await this.entryFactory(service, account)).getPassword() ?? undefined;
-    } catch { throw new Error("secret_store_read_unavailable"); }
+    } catch (error) { throw nativeOperationError(error, "read", this.platform); }
   }
 
   async set(account: string, value: string): Promise<void> {
     try { (await this.entryFactory(service, account)).setPassword(value); }
-    catch { throw new Error("secret_store_write_unavailable"); }
+    catch (error) { throw nativeOperationError(error, "write", this.platform); }
   }
 
   async delete(account: string): Promise<void> {
     try { (await this.entryFactory(service, account)).deletePassword(); }
-    catch { throw new Error("secret_store_delete_unavailable"); }
+    catch (error) { throw nativeOperationError(error, "delete", this.platform); }
   }
 
   securityBoundary(platform = process.platform): SecretStoreBoundary {
@@ -103,7 +151,7 @@ export class MacProtectedSecretStore implements SecretStore {
 export function createOfficialSecretStore(platform = process.platform, executable = process.execPath, linuxChannel: LinuxPackageChannel = LINUX_PACKAGE_CHANNEL, serviceId = resolveOfficialSecretService(), distribution: DistributionChannel = DISTRIBUTION_CHANNEL): NativeSecretStore | MacProtectedSecretStore | LinuxPortalSecretStore {
   const dynamicFactory = async (serviceName: string, account: string) => nativeEntry(serviceId, account);
 
-  if (platform === "win32") return new NativeSecretStore(dynamicFactory);
+  if (platform === "win32") return new NativeSecretStore(dynamicFactory, platform);
   // npm runs under the user's Node/Bun identity and uses the OS login vault.
   // It does not claim the application-bound protection of signed desktop/Flatpak.
   if (distribution === "npm" && isDevelopmentRuntime(executable) && linuxChannel !== "flatpak" && (platform === "linux" || platform === "darwin")) {

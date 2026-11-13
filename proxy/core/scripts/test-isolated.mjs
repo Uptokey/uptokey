@@ -4,7 +4,32 @@ import { createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+/** Public CI diagnostics contain source-known names, never raw TAP/error payloads. */
+export function summarizeTapFailures(tap, source, file) {
+  const safeFile = typeof file === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,159}\.test\.(?:ts|mjs)$/.test(file) ? file : 'unknown.test';
+  const text = typeof source === 'string' ? source.slice(0, 512 * 1024) : '';
+  const known = new Map();
+  const declarations = /^[ \t]*test(?:\.(?:skip|only|todo))?\([ \t]*(["'])([\p{L}\p{N} _.,:;()/+-]{1,200})\1/gmu;
+  for (const match of text.matchAll(declarations)) {
+    known.set(match[2], text.slice(0, match.index).split(/\r?\n/).length);
+  }
+  const failures = [], seen = new Set();
+  const bounded = typeof tap === 'string' ? tap.slice(-256 * 1024) : '';
+  for (const match of bounded.matchAll(/^[ \t]*not ok \d+ - ([^\r\n]*)/gm)) {
+    const name = match[1], line = known.get(name);
+    const subtest = line === undefined ? 'unrecognized_subtest' : name;
+    const identity = `${subtest}:${line ?? 0}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    failures.push({ subtest, location: `test/${safeFile}${line === undefined ? '' : `:${line}:1`}`, code: 'test_failed' });
+    if (failures.length === 5) break;
+  }
+  return failures.length ? failures : [{ subtest: 'failure_detail_unavailable', location: `test/${safeFile}`, code: 'process_failed' }];
+}
+
+async function main() {
 
 const core = fileURLToPath(new URL('../', import.meta.url));
 const root = resolve(core, '../..');
@@ -63,9 +88,17 @@ async function execute(file) {
   results.push(result);
   await writeFile(join(output, 'results.json'), JSON.stringify({ node: process.version, output, results }, null, 2));
   console.log(`${result.code === 0 && result.complete && !timeout ? 'PASS' : 'FAIL'} ${file} (${counts.pass}/${counts.tests})${timeout ? ' TIMEOUT' : ''}`);
+  if (result.code !== 0 || !result.complete || timeout) {
+    let source = '';
+    try { source = await readFile(join(core, 'test', file), 'utf8'); } catch { /* Fixed fallback below preserves the test failure. */ }
+    for (const diagnostic of summarizeTapFailures(text, source, file)) console.log(`FAILURE_DETAIL ${JSON.stringify(diagnostic)}`);
+  }
 }
 await Promise.all(Array.from({ length: 2 }, async () => { while (cursor < parallel.length) await execute(parallel[cursor++]); }));
 for (const file of exclusive) await execute(file);
 const failed = results.filter(r => r.code !== 0 || !r.complete || r.timeout);
 console.log(JSON.stringify({ files: results.length, failed: failed.length, evidence: join(output, 'results.json') }));
 process.exitCode = failed.length ? 1 : 0;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

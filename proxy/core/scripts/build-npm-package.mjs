@@ -9,6 +9,13 @@ import { extractRuntimeSpecifiers } from "./beta-runtime-contract.mjs";
 
 export const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/** One identity for core, terminal and package staging, without mutating sources. */
+export function resolveBuildVersion(sourceVersion, env = process.env) {
+  const version = env.UPTOKEY_BUILD_VERSION || sourceVersion;
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error("compiled_version_invalid");
+  return version;
+}
+
 /** Refuse builder paths in generated code; never rewrite executable output. */
 export function assertPortableBuild(code, roots = [DEFAULT_ROOT, homedir()]) {
   const normalized = code.replaceAll("\\\\", "\\").replaceAll("\\", "/").toLowerCase();
@@ -65,12 +72,7 @@ export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROO
   mkdirSync(dist, { recursive: true });
 
   const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
-  const buildVersion = process.env.UPTOKEY_BUILD_VERSION || pkg.version;
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(buildVersion)) {
-    process.stderr.write(`compiled_version_invalid:${buildVersion}\n`);
-    process.exitCode = 1;
-    return;
-  }
+  const buildVersion = resolveBuildVersion(pkg.version);
 
   // Windows resolves the executable only when the .exe suffix is explicit in
   // child_process.spawnSync; npm's PATH may contain Bun without a shim.
@@ -99,7 +101,7 @@ export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROO
       // js-tiktoken stays external: it must be a runtime dependency of every
       // published profile (see scripts/npm-pack-beta.mjs).
       "--external=js-tiktoken",
-      "--external=tree-sitter-wasm"
+      "--external=@repomix/tree-sitter-wasms"
   ];
   // Bundler metafiles are the source of truth for THIRD-PARTY-NOTICES (exactly what
   // was inlined). They live in a private temp dir, never in dist/.
@@ -117,6 +119,7 @@ export function buildNpmPackage(args = process.argv.slice(2), root = DEFAULT_ROO
   const result = spawnSync(
     bun,
     [
+      "--no-env-file",
       "build",
       resolve(root, entry),
       "--outfile",

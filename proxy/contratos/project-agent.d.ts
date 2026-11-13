@@ -6,6 +6,7 @@
 export const PROJECT_AGENT_CONTRACT_VERSION: 1;
 
 export type ProjectAccessMode = 'read_write' | 'read_only';
+export function projectRootIdentityMaterial(resolvedPath: string, identity: { dev: number; ino: number; birthtimeMs: number }): string;
 
 export interface ProjectRootBinding {
   readonly id: string;

@@ -1,5 +1,10 @@
 import type { LocalRuntimeCapabilities, LocalRuntimeId, LocalRuntimeModel, LocalRuntimeStatus } from "./types.ts";
 
+export interface LocalRuntimeInventory {
+  status: LocalRuntimeStatus;
+  models: LocalRuntimeModel[];
+}
+
 export interface LocalRuntimeAdapter {
   readonly id: LocalRuntimeId;
   readonly endpointUrl: string;
@@ -7,6 +12,8 @@ export interface LocalRuntimeAdapter {
   health(signal?: AbortSignal): Promise<LocalRuntimeStatus>;
   capabilities(model?: string, signal?: AbortSignal): Promise<LocalRuntimeCapabilities>;
   listModels(signal?: AbortSignal): Promise<LocalRuntimeModel[]>;
+  /** Availability and models from the same observation. */
+  inventory?(signal?: AbortSignal): Promise<LocalRuntimeInventory>;
   pullModel?(model: string, signal?: AbortSignal): Promise<void>;
   removeModel?(model: string, signal?: AbortSignal): Promise<void>;
   startModel?(model: string, signal?: AbortSignal): Promise<void>;

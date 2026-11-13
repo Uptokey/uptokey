@@ -53,14 +53,15 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
     provider_auth: {}, console_state: { consoleManagedProviders: [] },
   })
   const events: unknown[] = [], changes = new Set<() => void>()
+  const panelEvents = new Map<string, (event: any) => void>()
   const account = { view: { session: { configured: true, authenticated: true, state: "connected" } } }
   let retries = 0
-  const controller = { account, hostedCatalogError: null as "account_reauthentication_required" | "hosted_model_unavailable" | null,
+  const controller = { account, view: { connections: null }, hostedCatalogError: null as "account_reauthentication_required" | "hosted_model_unavailable" | null,
     async retryHostedModels() { retries++ },
   }
   setBackend({ directory: root, controller, client: {}, subscribe: () => () => {},
     providerChoices: () => [],
-    emit: (event: unknown) => events.push(event),
+    emit: (event: any) => { events.push(event); panelEvents.get(event.type)?.(event) },
     onChange: (handler: () => void) => { changes.add(handler); return () => changes.delete(handler) },
   } as never)
   let local!: ReturnType<typeof useLocal>
@@ -92,6 +93,12 @@ async function mount(recent: Choice[], available: Choice[], current = a, favorit
     local, app, original, root, events, account, controller, retries: () => retries,
     catalogReads: () => catalogReads,
     changeSubscribers: () => changes.size,
+    async installPanels() {
+      const plugin = (await import("./plugin/panels.tsx")).default
+      await plugin.tui!({ event: { on: (type: string, handler: (event: any) => void) => panelEvents.set(type, handler) },
+        ui: { dialog, toast: () => {} }, slots: { register: () => {} }, route: { navigate: () => { throw Error("login_must_not_navigate") } },
+      } as never, undefined, { id: "uptokey.panels", source: "internal", state: "same" } as never)
+    },
     async openModels() {
       dialog.replace(() => <DialogModel />)
       const focusedUntil = Date.now() + 2000
@@ -349,31 +356,31 @@ test("Free model labels and the optional sign-in entry are localized in all ten 
 test("the complete model dialog chrome uses the selected language while model identifiers remain unchanged", async () => {
   const previous = getLang()
   const labels: [Lang, string, string, string, string][] = [
-    ["en", "Select model", "Favorites", "Recent", "Connect provider"],
-    ["pt-BR", "Selecionar modelo", "Favoritos", "Recentes", "Conectar provedor"],
-    ["es", "Seleccionar modelo", "Favoritos", "Recientes", "Conectar proveedor"],
-    ["fr", "Choisir un modèle", "Favoris", "Récents", "Connecter un fournisseur"],
-    ["de", "Modell auswählen", "Favoriten", "Zuletzt verwendet", "Anbieter verbinden"],
-    ["it", "Seleziona modello", "Preferiti", "Recenti", "Collega provider"],
-    ["ja", "モデルを選択", "お気に入り", "最近使用", "プロバイダーを接続"],
-    ["ko", "모델 선택", "즐겨찾기", "최근 사용", "제공업체 연결"],
-    ["zh-CN", "选择模型", "收藏", "最近使用", "连接提供商"],
-    ["ar", "اختيار نموذج", "المفضلة", "المستخدمة مؤخرًا", "ربط مزوّد"],
+    ["en", "Select model", "Favorites", "Recent", "Providers"],
+    ["pt-BR", "Selecionar modelo", "Favoritos", "Recentes", "Provedores"],
+    ["es", "Seleccionar modelo", "Favoritos", "Recientes", "Proveedores"],
+    ["fr", "Choisir un modèle", "Favoris", "Récents", "Fournisseurs"],
+    ["de", "Modell auswählen", "Favoriten", "Zuletzt verwendet", "Anbieter"],
+    ["it", "Seleziona modello", "Preferiti", "Recenti", "Provider"],
+    ["ja", "モデルを選択", "お気に入り", "最近使用", "プロバイダー"],
+    ["ko", "모델 선택", "즐겨찾기", "최근 사용", "제공업체"],
+    ["zh-CN", "选择模型", "收藏", "最近使用", "提供商"],
+    ["ar", "اختيار نموذج", "المفضلة", "المستخدمة مؤخرًا", "المزوّدون"],
   ]
   try {
-    for (const [lang, title, favorites, recent, connect] of labels) {
+    for (const [lang, title, favorites, recent, providers] of labels) {
       setLang(lang)
       const h = await mount([c], [a, b, c], a, [b])
       try {
         await h.openModels()
         const frame = h.app.captureCharFrame()
-        for (const label of [title, favorites, recent, connect, "model-a", "model-b", "model-c"]) {
+        for (const label of [title, favorites, recent, `${providers} ctrl+a`, "model-a", "model-b", "model-c"]) {
           expect(frame).toContain(label)
         }
         if (lang !== "en") {
           const lines = frame.split("\n").map(line => line.trim())
           for (const source of ["Select model", "Favorites", "Recent"]) expect(lines).not.toContain(source)
-          expect(frame).not.toContain("Connect provider ctrl+a")
+          expect(frame).not.toContain("Providers ctrl+a")
         }
         await h.app.mockInput.typeText("model-b"); await h.app.flush(); await h.app.renderOnce()
         expect(h.filterValue()).toBe("model-b")
@@ -381,8 +388,16 @@ test("the complete model dialog chrome uses the selected language while model id
         if (lang !== "en") expect(h.app.captureCharFrame()).not.toContain("(Favorite)")
         h.available([])
         await h.openModels()
-        expect(h.app.captureCharFrame()).toContain(tr("View all providers"))
-        if (lang !== "en") expect(h.app.captureCharFrame()).not.toContain("View all providers")
+        const emptyCatalogSelection = h.local.model.current()
+        // The current provider action manages both new and saved connections.
+        // Exercise its real shortcut with an empty model catalog, in every language.
+        expect(h.app.captureCharFrame()).toContain(`${providers} ctrl+a`)
+        h.app.mockInput.pressKey("a", { ctrl: true }); await h.app.flush(); await h.app.renderOnce()
+        expect(h.app.captureCharFrame()).toContain(providers)
+        expect(h.app.captureCharFrame()).toContain("Brave Search")
+        expect(h.app.captureCharFrame()).not.toContain(title)
+        expect(h.local.model.current()).toEqual(emptyCatalogSelection)
+        await h.unchanged()
       } finally { h.app.renderer.destroy() }
     }
   } finally { setLang(previous) }
@@ -392,18 +407,51 @@ test("a popular provider from an empty model catalog uses masked canonical key e
   const previous = getLang(); setLang("en")
   const h = await mount([], [])
   const provider = { id: "synthetic-cloud", label: "Synthetic Cloud", local: false, configured: false, executable: true, endpointUrl: "https://example.test/v1" }
-  Object.assign(getBackend(), { providerChoices: () => [provider], providerSetup: {} })
+  let preparations = 0
+  const unexpectedPrepare = async () => { preparations++; throw Error("must_not_submit_cancelled_key") }
+  Object.assign(getBackend(), { providerChoices: () => [provider], providerSetup: { prepare: unexpectedPrepare, prepareManual: unexpectedPrepare } })
   h.disconnectedProviders([{ id: provider.id, name: provider.label }])
   try {
     await h.openModels(); await Bun.sleep(5); await h.app.flush()
     expect(h.app.captureCharFrame()).toContain(provider.label)
     await h.app.mockInput.typeText(provider.label); await h.app.flush(); await h.app.renderOnce()
     h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).toContain(`Connect ${provider.label}`)
     await h.app.mockInput.typeText("synthetic-not-a-real-key"); await h.app.flush(); await h.app.renderOnce()
     expect(h.app.captureCharFrame()).not.toContain("synthetic-not-a-real-key")
     expect(h.app.captureCharFrame()).toContain("••")
     h.app.mockInput.pressEscape(); await h.app.flush()
     expect(h.dialog().stack).toHaveLength(0)
+    expect(preparations).toBe(0)
+    await h.unchanged()
+  } finally { h.app.renderer.destroy(); setLang(previous) }
+})
+
+test("browser sign-in returns through the panel plugin to the same filtered model chooser without changing the model", async () => {
+  const previous = getLang(); setLang("en")
+  const free = choice("hosted-model", "uptokey-hosted"), h = await mount([], [a, free], a)
+  let loginCalls = 0
+  Object.assign(h.account.view, { session: { configured: true, authenticated: false, loginAvailable: true, state: "signed_out" },
+    login: null, challenge: null, busy: false, requests: [], available: null, error: null, plan: { state: "unknown" } })
+  Object.assign(h.account, {
+    refresh: async () => {}, loadPlan: async () => {}, cancelPlanRead: () => {}, cancelPending: () => {},
+    login: async () => { loginCalls++; Object.assign(h.account.view, { login: { userCode: "1234ABCD", loginUrl: "https://app.uptokey.com/api/account/native/authorize?id=af4b344f-1848-4016-9c42-f3b3454fe9c1", expiresAt: Date.now() + 60_000 } }); await h.accountChanged() },
+  })
+  try {
+    await h.installPanels(); await h.openModels()
+    await h.app.mockInput.typeText("uptokey"); await h.app.flush(); await h.app.renderOnce()
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).toContain("Uptokey account")
+    h.app.mockInput.pressEnter(); await h.app.flush(); await h.accountChanged()
+    expect(loginCalls).toBe(1); expect(h.app.captureCharFrame()).toContain("1234ABCD")
+    Object.assign(h.account.view, { login: null, session: { configured: true, authenticated: true, loginAvailable: true, state: "connected" } })
+    await h.accountChanged(); await Bun.sleep(10); await h.app.flush(); await h.app.renderOnce()
+    expect(h.app.captureCharFrame()).toContain("Select model")
+    expect(h.app.captureCharFrame()).toContain(free.modelID)
+    expect(h.filterValue()).toBe("uptokey")
+    expect(h.local.model.current()).toEqual(a)
+    expect(h.dialog().stack).toHaveLength(1)
+    expect(loginCalls).toBe(1); await h.unchanged()
   } finally { h.app.renderer.destroy(); setLang(previous) }
 })
 
@@ -416,7 +464,7 @@ test("signed-out Free entry opens the existing account panel only on explicit se
     expect(h.events).toEqual([])
     await h.app.mockInput.typeText("Sign in"); await h.app.flush(); await h.app.renderOnce()
     h.app.mockInput.pressEnter(); await h.app.flush()
-    expect(h.events).toEqual([{ type: "uptokey.panel.open", properties: { name: "account" } }])
+    expect(h.events).toEqual([{ type: "uptokey.panel.open", properties: { name: "account", returnTo: "models", query: "Sign in" } }])
     expect(h.local.model.current()).toEqual(a)
     await h.unchanged()
     h.account.view.session.configured = false
@@ -460,7 +508,7 @@ test("revocation hides stale hosted search rows and offers account access withou
     expect(h.app.captureCharFrame()).not.toContain(free.modelID)
     expect(h.app.captureCharFrame()).toContain("Sign in")
     h.app.mockInput.pressEnter(); await h.app.flush()
-    expect(h.events).toEqual([{ type: "uptokey.panel.open", properties: { name: "account" } }])
+    expect(h.events).toEqual([{ type: "uptokey.panel.open", properties: { name: "account", returnTo: "models", query: "uptokey" } }])
     expect(h.local.model.current()).toEqual(a)
     await h.unchanged()
   } finally { h.app.renderer.destroy(); setLang(previous) }

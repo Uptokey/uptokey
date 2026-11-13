@@ -10,6 +10,7 @@ import { QUIMERA_DEV_DEPENDENCIES, QUIMERA_DEV_PROFILE, packageFiles, verifyStag
 import { extractRuntimeSpecifiers, frontendPackageFiles } from "./beta-runtime-contract.mjs";
 export { extractRuntimeSpecifiers } from "./beta-runtime-contract.mjs";
 import { portableDependencies } from "../src/tui/portable-runtime.mjs";
+import { resolveBuildVersion } from "./build-npm-package.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -30,7 +31,7 @@ export const PUBLISHED_RUNTIME_DEPENDENCIES = Object.freeze([
   "@hpke/core", "@napi-rs/keyring", "@simplewebauthn/server", "eventsource-parser",
   "js-tiktoken", "hono", "@hono/node-server", "@modelcontextprotocol/sdk", "zod",
   "undici",
-  "better-sqlite3", "tree-sitter-wasm",
+  "better-sqlite3", "@repomix/tree-sitter-wasms",
 ]);
 
 // The public terminal uses better-sqlite3 for its local symbol index. Version 13
@@ -116,6 +117,7 @@ export function packageManifest(pkg, lock, profile = "beta", runtimeSpecifiers =
 export function stagePackage(sourceRoot, stage, profile = "beta", options = {}) {
   if (!lstatSync(stage).isDirectory() || lstatSync(stage).isSymbolicLink() || readdirSync(stage).length) throw new Error("package_stage_not_empty");
   const pkg = JSON.parse(readFileSync(join(sourceRoot, "package.json"), "utf8"));
+  pkg.version = resolveBuildVersion(pkg.version, options.env ?? process.env);
   const lock = JSON.parse(readFileSync(join(sourceRoot, "package-lock.json"), "utf8"));
   const distDir = resolve(options.distDir ?? join(sourceRoot, "dist"));
   const frontendDir = resolve(options.frontendDir ?? join(distDir, "tui"));

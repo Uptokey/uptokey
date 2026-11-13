@@ -1,15 +1,20 @@
 import type { Dispatcher } from "undici";
 
 const streamingDispatchers = new WeakMap<Dispatcher, Dispatcher>();
+let directDispatcher: Dispatcher | undefined;
 
 /** Keep the runtime's dispatcher/pools/TLS/proxy policy; override only the body
  * silence timer of a requested inference stream. Nothing changes globally.
  * Official contract: https://undici.nodejs.org/#/docs/api/Client (bodyTimeout=0).
  */
-export async function inferenceFetch(input: string | URL, init: RequestInit, streaming: boolean): Promise<Response> {
-  if (!streaming || typeof (globalThis as { Bun?: unknown }).Bun !== "undefined") return fetch(input, init);
-  const { getGlobalDispatcher } = await import("undici");
-  const base = getGlobalDispatcher();
+export async function inferenceFetch(input: string | URL, init: RequestInit, streaming: boolean, direct = false): Promise<Response> {
+  if (typeof (globalThis as { Bun?: unknown }).Bun !== "undefined" || !streaming && !direct) return fetch(input, init);
+  const { Agent, getGlobalDispatcher } = await import("undici");
+  const base = direct ? (directDispatcher ??= new Agent()) : getGlobalDispatcher();
+  if (!streaming) {
+    const options: RequestInit & { dispatcher: Dispatcher } = { ...init, dispatcher: base };
+    return fetch(input, options);
+  }
   let dispatcher = streamingDispatchers.get(base);
   if (!dispatcher) {
     dispatcher = base.compose((dispatch) => (options, handler) => dispatch({ ...options, bodyTimeout: 0 }, handler));

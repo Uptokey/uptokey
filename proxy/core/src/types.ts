@@ -298,6 +298,8 @@ export interface DispatchContext {
   sessionId?: string;
   /** Server-owned provider boundary; omitted preserves routing, empty denies all. */
   allowedProviders?: readonly ProviderName[];
+  /** Server-owned processing scope, including model selection and egress. */
+  localProcessingOnly?: boolean;
   /** Workflow executor owns retries and accounts for each upstream attempt. */
   disableRetries?: boolean;
   accountRef?: string;
@@ -312,6 +314,7 @@ export interface DispatchContext {
 }
 
 export interface DispatchOptions {
+  localProcessingOnly?: boolean;
   /** Server-owned opt-in. Adapters admit this only on their verified official endpoint. */
   providerPromptCache?: boolean;
   proxyEndpoint?: string;

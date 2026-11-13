@@ -1,5 +1,5 @@
 import {efficiencyProcessors,headroomEndpoint,prepareEfficiency} from './workspace/efficiency-transforms.ts';
-import {responseStylePreview} from './response-style.ts';
+import {responseStyleForPolicy,responseStylePreview} from './response-style.ts';
 import {projectInferenceRequest} from './inference-request-policy.ts';
 import {detailedTokenEstimate} from './token-estimate.ts';
 import type {ChatCompletionRequest} from './types.ts';
@@ -62,7 +62,7 @@ export function registerEfficiencyRoutes(app: Hono, deps: EfficiencyHttpDeps): v
   app.use("/local/efficiency/*", requireLocalAuth);
 
   app.get("/local/efficiency/policy", (c) => {
-    const policy=getActiveEfficiencyPolicy();return c.json({policy,cacheSupport:deps.cacheSupport??null,processors:efficiencyProcessors(),style:responseStylePreview(policy.enabled?policy.responseStyle:{kind:'default',level:'lite',codeOnly:false})});
+    const policy=getActiveEfficiencyPolicy();return c.json({policy,cacheSupport:deps.cacheSupport??null,processors:efficiencyProcessors(),style:responseStyleForPolicy(policy)});
   });
 
   app.post('/local/efficiency/preview',async c=>{

@@ -45,6 +45,13 @@ export class WorkspaceApiInstruments {
   private semanticDispatchers=new Map<string,ReturnType<typeof createTypeSafeIntentDispatcher>>();
   constructor(options: ApiInstrumentsOptions = {}) { this.options=options; }
   private operations() { return this.options.enabled?.() === false ? [] : ALL_CURATED_OPERATIONS.filter(op => op.capability.effect === 'read_external' && op.serviceId !== 'typesafe'); }
+  parallelReadScope(id: string, version: number): {origin: string; maxOutputBytes: number} | undefined {
+    const operation = ALL_CURATED_OPERATIONS.find(op => op.id === id && op.capability.version === version);
+    if (operation?.metadata.authentication !== 'none' || operation.method !== 'GET' || operation.pagination ||
+      operation.capability.effect !== 'read_external' || operation.capability.retryClass !== 'read_only' ||
+      operation.capability.dataDestination.kind !== 'public_source') return undefined;
+    return {origin: new URL(operation.serverUrl).origin, maxOutputBytes: operation.capability.limits.maxOutputBytes};
+  }
   capabilities() { return [...this.operations().map(op => op.capability),...((this.options.semantic||this.options.semanticProfile)&&this.operations().length?[TYPESAFE_INTENT_CAPABILITY]:[])]; }
   private async semanticSettings(principal:string){
     if(this.options.semantic)return this.options.semantic;
@@ -341,6 +348,8 @@ export class WorkspaceApiInstruments {
       }
       return { stepId: `step_${index+1}`, operation:selected[index]!, prepared:prepareApiCall(selected[index]!,parameters), ...(step.dependencyStepId ? {dependencyStepId:step.dependencyStepId} : {}) };
     });
+    // Defaults and query encoding can make distinct inputs the same outbound request.
+    if (new Set(steps.map(step => step.prepared.callDigest)).size !== steps.length) throw new Error('api_instruments_invalid');
     signal.throwIfAborted();
     return createProvisionalComposedApiInstrumentPlan(store,principal,projectId,steps);
   }

@@ -1,10 +1,14 @@
 import {createHash} from 'node:crypto';
-import {assertEfficiencyPolicy,defaultEfficiencyPolicy,type ResponseStyle} from './efficiency-policy.ts';
+import {assertEfficiencyPolicy,defaultEfficiencyPolicy,type EfficiencyPolicy,type ResponseStyle} from './efficiency-policy.ts';
 // MIT prompt corpus already inventoried with the existing 9Router integration.
 // @ts-ignore The upstream corpus is plain ESM JavaScript.
 import {CAVEMAN_PROMPTS} from "../../integracoes/9router/app/open-sse/rtk/cavemanPrompts.js";
 // @ts-ignore The upstream corpus is plain ESM JavaScript.
 import {PONYTAIL_PROMPTS} from "../../integracoes/9router/app/open-sse/rtk/ponytailPrompt.js";
+
+export function responseStyleForPolicy(policy: EfficiencyPolicy) {
+ return responseStylePreview(policy.enabled ? policy.responseStyle : {kind:'default',level:'lite',codeOnly:false});
+}
 
 export function responseStylePreview(value:unknown){
  const style=assertEfficiencyPolicy(defaultEfficiencyPolicy({responseStyle:value as ResponseStyle})).responseStyle;

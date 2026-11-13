@@ -407,7 +407,7 @@ async function startProxy(gateway?: "9router", workspaceBrowser?: WorkspaceBrows
     if (controlIdentity && await secrets.get(DEVICE_TOKEN_ACCOUNT)) ensurePoller(controlIdentity);
     // Quimera development does not install or modify global Tailscale mappings.
     stdout.write(`Uptokey proxy ativo em ${activeServer.url.origin}\n`);
-    stdout.write("Mini-UI: http://127.0.0.1:21435/ui\n");
+    stdout.write(`Mini-UI: ${activeServer.url.origin}/ui?view=standalone\n`);
     stdout.write("Token administrativo local armazenado no secret store nativo.\n");
     if (workspaceTelemetry) stdout.write(`Langfuse local: ${config.workspaceTelemetry!.endpoint}; metadados das execuções gravadas, sem conteúdo.\n`);
     if (workspaceComposition) stdout.write("Composição LangGraph local ativa; referências e progresso no SQLite isolado. Cada efeito continua sujeito à aprovação W0.\n");

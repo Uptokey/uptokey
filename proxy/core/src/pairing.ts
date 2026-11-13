@@ -9,6 +9,7 @@ import {browserEnrollmentKey,isPublicPwaOrigin} from "./workspace/browser-enroll
 
 export const PAIRING_TTL_MS = 5 * 60 * 1_000;
 export const MAX_PENDING_PAIRINGS = 20;
+const SIGNED_APPROVAL_WAIT_MS = 8_000;
 
 export interface PairingChallenge {
   id: string;
@@ -17,6 +18,9 @@ export interface PairingChallenge {
   /** Present only for explicit public-PWA pairing; signed by its admitted key. */
   nonce?: string;
 }
+export type BrowserApprovalChoice = { id: string; userCode: string; origin: string; audience?: 'browser-extension' | 'vscode' };
+export type BrowserApprovalOffer = { status: 'none' | 'multiple' } |
+  { status: 'pending' } & BrowserApprovalChoice | { status: 'choices'; choices: BrowserApprovalChoice[] };
 
 interface PendingPairing extends PairingChallenge {
   purpose?: 'context' | 'account';
@@ -28,6 +32,8 @@ interface PendingPairing extends PairingChallenge {
   audience: PairingAudience | 'pwa';
   approved: boolean;
   deadline: number;
+  approvalWaiter?: (approved: boolean) => void;
+  resumableBrowserChallenge?: true;
 }
 
 /** Context approval carries server-derived authority, never recipient-supplied ownership. */
@@ -86,14 +92,45 @@ export class PairingService {
     this.wallNow = wallNow;
   }
 
-  create(clientName: string, audience: PairingAudience = "legacy", browserOrigin?: string, publicJwk?: unknown): PairingChallenge {
+  findUnapprovedBrowserChallenge(origin:string, publicJwk:unknown):PairingChallenge|undefined {
+    if(!isPublicPwaOrigin(origin))return undefined;
+    const key=JSON.stringify(parseWorkspacePublicJwk(publicJwk));
+    this.pruneExpired();
+    const pending=[...this.pending.values()].find(row=>row.resumableBrowserChallenge&&!row.approved&&
+      row.browserOrigin===origin&&JSON.stringify(row.publicJwk)===key);
+    return pending?this.publicChallenge(pending):undefined;
+  }
+
+  browserApprovalOffer(includeChoices = false, includeExtensions = false, includeEditor = false): BrowserApprovalOffer {
+    this.pruneExpired();
+    const choices: BrowserApprovalChoice[] = [];
+    for (const pending of this.pending.values()) {
+      if (pending.approved || pending.purpose) continue;
+      const origin = pending.browserOrigin;
+      if (pending.audience === 'pwa' && isPublicPwaOrigin(origin)) {
+        choices.push({ id: pending.id, userCode: pending.userCode, origin });
+      } else if (includeExtensions && pending.audience === 'browser-extension' &&
+          origin && /^chrome-extension:\/\/[a-p]{32}$/.test(origin)) {
+        choices.push({ id: pending.id, userCode: pending.userCode, origin, audience: 'browser-extension' });
+      } else if (includeEditor && pending.audience === 'vscode' && !origin && pending.publicJwk && pending.nonce) {
+        choices.push({ id: pending.id, userCode: pending.userCode, origin: 'local-vscode', audience: 'vscode' });
+      }
+    }
+    if (!choices.length) return { status: 'none' };
+    if (choices.length === 1) return { status: 'pending', ...choices[0]! };
+    if (!includeChoices || new Set(choices.map(choice => choice.userCode)).size !== choices.length) return { status: 'multiple' };
+    return { status: 'choices', choices };
+  }
+
+  create(clientName: string, audience: PairingAudience = "legacy", browserOrigin?: string, publicJwk?: unknown, resumableBrowserChallenge=false): PairingChallenge {
     const admittedAudience = parsePairingAudience(audience);
     if (admittedAudience === 'pwa' && !isPublicPwaOrigin(browserOrigin) || browserOrigin !== undefined && !(
       admittedAudience === 'browser-extension' && /^chrome-extension:\/\/[a-p]{32}$/.test(browserOrigin) || admittedAudience === 'pwa' && isPublicPwaOrigin(browserOrigin)
     )) throw new Error('pairing_origin_invalid');
-    if (publicJwk !== undefined && admittedAudience !== 'pwa') throw Error('pairing_key_invalid');
+    if (publicJwk !== undefined && admittedAudience !== 'pwa' && admittedAudience !== 'vscode' &&
+        !(admittedAudience === 'browser-extension' && browserOrigin)) throw Error('pairing_key_invalid');
     if (admittedAudience === 'pwa' && publicJwk === undefined) throw Error('pairing_key_required');
-    const key = admittedAudience === 'pwa' ? parseWorkspacePublicJwk(publicJwk) : undefined;
+    const key = publicJwk === undefined ? undefined : parseWorkspacePublicJwk(publicJwk);
     this.pruneExpired();
     if (this.pending.size >= MAX_PENDING_PAIRINGS) throw new Error("pairing_capacity_exceeded");
     const normalizedName = normalizeClientName(clientName);
@@ -107,11 +144,17 @@ export class PairingService {
       audience: admittedAudience,
       ...(browserOrigin ? { browserOrigin } : {}),
       ...(key ? { publicJwk: key } : {}),
+      ...(key&&resumableBrowserChallenge?{resumableBrowserChallenge:true as const}:{}),
       expiresAt: new Date(wall + PAIRING_TTL_MS).toISOString(),
       approved: false,
       deadline: observed + PAIRING_TTL_MS
     };
-    if(key)challenge.nonce=`uptokey-public-pwa-pairing-v1:${challenge.id}:${createHash('sha256').update(JSON.stringify([admittedAudience,browserOrigin,key])).digest('hex')}:${randomBytes(32).toString('base64url')}`;
+    if (key) {
+      const domain = admittedAudience === 'pwa' ? 'uptokey-public-pwa-pairing-v1' :
+        admittedAudience === 'browser-extension' ? 'uptokey-extension-pairing-v1' : 'uptokey-vscode-pairing-v1';
+      const binding = createHash('sha256').update(JSON.stringify([admittedAudience, browserOrigin, key])).digest('hex');
+      challenge.nonce = `${domain}:${challenge.id}:${binding}:${randomBytes(32).toString('base64url')}`;
+    }
     this.pending.set(challenge.id, challenge);
     return this.publicChallenge(challenge);
   }
@@ -121,6 +164,7 @@ export class PairingService {
     const challenge = this.active(id);
     if (!challenge || challenge.purpose || challenge.audience !== approvedAudience || !safeCodeEqual(challenge.userCode, userCode.trim().toUpperCase())) return false;
     challenge.approved = true;
+    challenge.approvalWaiter?.(true);
     return true;
   }
 
@@ -195,37 +239,96 @@ export class PairingService {
    * is the human gesture that authorizes enrollment; later consents are per-plan
    * signatures bound to principal/project/plan digest.
    */
-  async consume(id: string, publicJwk?: unknown, browserOrigin?: string, signature?: unknown): Promise<PairedClient | undefined> {
+  async consume(id: string, publicJwk?: unknown, browserOrigin?: string, signature?: unknown, approvalSignal?: AbortSignal): Promise<PairedClient | undefined> {
     const key = publicJwk === undefined ? undefined : parseWorkspacePublicJwk(publicJwk);
+    if (approvalSignal && !await this.waitForBoundApproval(id, key, browserOrigin, signature, approvalSignal, 'pwa')) return undefined;
     return this.exclusive(async () => {
+      if (approvalSignal?.aborted) return undefined;
       const challenge = this.active(id);
       if (!challenge?.approved || challenge.purpose || challenge.browserOrigin !== browserOrigin) return undefined;
-      if(challenge.audience==='pwa') {
-        if(!key)throw Error('pairing_key_required');
-        if(JSON.stringify(key)!==JSON.stringify(challenge.publicJwk)||!challenge.nonce||typeof signature!=='string'||!/^[A-Za-z0-9_-]{86}$/.test(signature))throw Error('pairing_proof_invalid');
-        const bytes=Buffer.from(signature,'base64url');
-        if(bytes.length!==64||bytes.toString('base64url')!==signature||!verify('sha256',Buffer.from(challenge.nonce),{key:createPublicKey({key:{...key},format:'jwk'}),dsaEncoding:'ieee-p1363'},bytes))throw Error('pairing_proof_invalid');
+      if(challenge.publicJwk) {
+        this.assertPublicProof(challenge, key, signature);
       }else if(signature!==undefined)throw Error('pairing_proof_invalid');
       const paired = await provisionClient(this.secrets, challenge.clientName, challenge.audience==='pwa'?12*60*60*1000:undefined, "pairing", parsePairingAudience(challenge.audience), key, browserOrigin);
       if(key&&browserOrigin&&(challenge.audience==='browser-extension'||challenge.audience==='pwa')) {
+        let enrolled: boolean;
         try {
-          await serialClientAuthority(this.secrets,'browser-enrollment:'+browserEnrollmentKey(browserOrigin,key),async()=>{
-            const index=browserEnrollmentKey(browserOrigin,key);
+          const index=browserEnrollmentKey(browserOrigin,key);
+          enrolled=await serialClientAuthority(this.secrets,'browser-enrollment:'+index,async()=>{
+            if(approvalSignal?.aborted)return false;
             const previous=await this.secrets.get(index);
             if(previous&&await this.secrets.get('local:client:'+previous))throw Error('browser_identity_already_paired');
             await this.secrets.set('local:client:'+paired.clientId+':expires',new Date(Date.now()+12*60*60*1000).toISOString());
+            if(approvalSignal?.aborted)return false;
             await this.secrets.set(index,paired.clientId);
+            // The enrollment index and challenge commit under the same lock.
+            const expired=challenge.audience==='pwa'&&!this.active(id);
+            if(expired||approvalSignal?.aborted){
+              if(await this.secrets.get(index)===paired.clientId){
+                if(previous===undefined)await this.secrets.delete(index);
+                else await this.secrets.set(index,previous);
+              }
+              if(expired)throw Error('pairing_invalid_or_expired');
+              return false;
+            }
+            this.pending.delete(id);
+            return true;
           });
         } catch(error) {await revokePairedClientAsAdministrator(this.secrets,paired.clientId);throw error;}
-      }
-      // Vault I/O may outlive the approval window. Do not return newly issued
-      // authority after its original one-use challenge has expired.
-      if(challenge.audience==='pwa'&&!this.active(id)) {
-        await revokePairedClientAsAdministrator(this.secrets,paired.clientId);
-        throw Error('pairing_invalid_or_expired');
-      }
-      this.pending.delete(id);
+        if(!enrolled){await revokePairedClientAsAdministrator(this.secrets,paired.clientId);return undefined;}
+      }else this.pending.delete(id);
       return paired;
+    });
+  }
+
+  async cancelBrowserPairing(id: string, publicJwk: unknown, origin: string, signature: unknown): Promise<void> {
+    const key = parseWorkspacePublicJwk(publicJwk);
+    await this.exclusive(async () => {
+      const challenge = this.active(id);
+      if (!challenge || challenge.purpose || challenge.audience !== 'pwa' || challenge.browserOrigin !== origin) return;
+      this.assertPublicProof(challenge, key, signature, `uptokey-public-pwa-cancel-v1:${challenge.nonce}`);
+      this.pending.delete(id);
+      challenge.approvalWaiter?.(false);
+    });
+  }
+
+  private assertPublicProof(challenge: PendingPairing, key: BrowserPublicJwk | undefined, signature: unknown, message = challenge.nonce): void {
+    if(!key)throw Error('pairing_key_required');
+    if(JSON.stringify(key)!==JSON.stringify(challenge.publicJwk)||!challenge.nonce||!message||typeof signature!=='string'||!/^[A-Za-z0-9_-]{86}$/.test(signature))throw Error('pairing_proof_invalid');
+    const bytes=Buffer.from(signature,'base64url');
+    if(bytes.length!==64||bytes.toString('base64url')!==signature||!verify('sha256',Buffer.from(message),{key:createPublicKey({key:{...key},format:'jwk'}),dsaEncoding:'ieee-p1363'},bytes))throw Error('pairing_proof_invalid');
+  }
+
+  waitForEditorApproval(id: string, publicJwk: unknown, signature: unknown, signal: AbortSignal): Promise<boolean> {
+    const key = parseWorkspacePublicJwk(publicJwk);
+    return this.waitForBoundApproval(id, key, undefined, signature, signal, 'vscode');
+  }
+
+  waitForExtensionApproval(id: string, publicJwk: unknown, origin: string, signature: unknown, signal: AbortSignal): Promise<boolean> {
+    const key = parseWorkspacePublicJwk(publicJwk);
+    return this.waitForBoundApproval(id, key, origin, signature, signal, 'browser-extension');
+  }
+
+  private waitForBoundApproval(id: string, key: BrowserPublicJwk | undefined, origin: string | undefined,
+    signature: unknown, signal: AbortSignal, audience: 'pwa' | 'vscode' | 'browser-extension'): Promise<boolean> {
+    const challenge = this.active(id);
+    if (signal.aborted || !challenge?.publicJwk || challenge.purpose || challenge.audience !== audience || challenge.browserOrigin !== origin) return Promise.resolve(false);
+    this.assertPublicProof(challenge, key, signature);
+    if (challenge.approved) return Promise.resolve(true);
+    if (challenge.approvalWaiter) return Promise.resolve(false);
+    // One signed request per challenge waits outside the serialization queue.
+    // Provisioning still rechecks approval, expiry and the proof under that queue.
+    return new Promise(resolve => {
+      const finish = (approved: boolean) => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', cancel);
+        delete challenge.approvalWaiter;
+        resolve(approved);
+      };
+      const cancel = () => finish(false);
+      const timer = setTimeout(cancel, Math.min(SIGNED_APPROVAL_WAIT_MS, Math.max(0, challenge.deadline - this.now())));
+      challenge.approvalWaiter = finish;
+      signal.addEventListener('abort', cancel, { once: true });
     });
   }
 

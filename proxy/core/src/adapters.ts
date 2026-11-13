@@ -4,6 +4,7 @@ import tls from "node:tls";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { DispatchOptions } from "./types.ts";
+import { isLocalEndpointUrl } from "./endpoint-policy.ts";
 import { inferenceFetch } from "./streaming-transport.ts";
 import { byteChunks, byteStream } from "./portable-streams.ts";
 
@@ -13,19 +14,25 @@ export async function dispatchFetch(
   options?: DispatchOptions,
   streaming = false,
 ): Promise<Response> {
+  const local = options?.localProcessingOnly === true;
+  if (local && (!isLocalEndpointUrl(url) || options?.proxyEndpoint && !options.usedDirect)) {
+    return Response.json({ error: { type: "local_processing_denied" } }, { status: 403 });
+  }
   const originHeaders = new Headers(init.headers);
   if (originHeaders.has("proxy-authorization")) {
     originHeaders.delete("proxy-authorization");
     init = { ...init, headers: originHeaders };
   }
-  if (!options?.proxyEndpoint || options?.usedDirect) {
-    return await inferenceFetch(url, init, streaming);
+  const proxyEndpoint = options?.usedDirect ? undefined : options?.proxyEndpoint;
+  const directBun = local && typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+  if (!proxyEndpoint && !directBun) {
+    return await inferenceFetch(url, init, streaming, local);
   }
 
   const targetUrl = new URL(url);
-  const proxyUrl = new URL(options.proxyEndpoint);
-  if (!["http:", "https:"].includes(proxyUrl.protocol) || !["http:", "https:"].includes(targetUrl.protocol)) throw new Error("proxy_protocol_unsupported");
-  const proxyRequest = proxyUrl.protocol === "https:" ? https.request : http.request;
+  const proxyUrl = proxyEndpoint ? new URL(proxyEndpoint) : undefined;
+  if (proxyUrl && !["http:", "https:"].includes(proxyUrl.protocol) || !["http:", "https:"].includes(targetUrl.protocol)) throw new Error("proxy_protocol_unsupported");
+  const proxyRequest = proxyUrl?.protocol === "https:" ? https.request : http.request;
   // Reuse the Fetch serializer for multipart boundaries, binary and stream bodies.
   const outgoing = new Request(url, { ...init, duplex: "half" } as RequestInit);
   const method = outgoing.method;
@@ -70,7 +77,17 @@ export async function dispatchFetch(
     }
 
 
-    if (targetUrl.protocol === "http:") {
+    if (!proxyUrl) {
+      // Bun's supported release reads the proxy environment in fetch even
+      // with proxy:false. A direct HTTP socket keeps this request on loopback.
+      const request = targetUrl.protocol === "https:" ? https.request : http.request;
+      req = request(targetUrl, { method, headers: headersRecord, agent: false }, receiveResponse);
+      req.once("error", error => {
+        init.signal?.removeEventListener("abort", onAbort);
+        reject(error);
+      });
+      sendBody(req);
+    } else if (targetUrl.protocol === "http:") {
       const proxyPort = Number(proxyUrl.port) || (proxyUrl.protocol === "https:" ? 443 : 80);
       req = proxyRequest(
         {
@@ -81,7 +98,7 @@ export async function dispatchFetch(
           headers: {
             ...headersRecord,
             host: targetUrl.host,
-            ...(options.proxyAuthorization ? { "proxy-authorization": options.proxyAuthorization } : {}),
+            ...(options?.proxyAuthorization ? { "proxy-authorization": options.proxyAuthorization } : {}),
           },
         },
         receiveResponse
@@ -104,7 +121,7 @@ export async function dispatchFetch(
         path: `${targetUrl.hostname}:${targetPort}`,
         headers: {
           Host: `${targetUrl.hostname}:${targetPort}`,
-          ...(options.proxyAuthorization ? { "proxy-authorization": options.proxyAuthorization } : {}),
+          ...(options?.proxyAuthorization ? { "proxy-authorization": options.proxyAuthorization } : {}),
         },
       });
 
@@ -236,9 +253,39 @@ export class DeepSeekAdapter extends GenericOpenAIAdapter {
   }
 }
 
+export function ollamaLocalModelReference(modelId: string | undefined): string | undefined {
+  const model = modelId?.trim().replace(/:local$/i, "");
+  if (!model || /:(?:local|cloud|[^/:]*-cloud)$/i.test(model)) return undefined;
+  // Older Ollama versions reject a second tag separator instead of
+  // interpreting "local" as an ordinary model tag.
+  const hasTag = model.lastIndexOf(":") > model.lastIndexOf("/");
+  return `${model}${hasTag ? "" : ":latest"}:local`;
+}
+
+const ollamaLocalResponses = new WeakSet<Response>();
+
+/** Only the adapter can mark the original live response. Upstream headers and cache copies cannot supply this evidence. */
+export function wasOllamaLoopbackDispatch(response: Response): boolean {
+  return ollamaLocalResponses.has(response);
+}
+
 export class OllamaAdapter extends GenericOpenAIAdapter {
   constructor(endpointUrl: string | (() => string) = "http://127.0.0.1:11434/v1/chat/completions") {
     super("ollama", endpointUrl);
+  }
+
+  wireEnvelope(request: ChatCompletionRequest, options?: DispatchOptions): ChatCompletionRequest | undefined {
+    if (!options?.localProcessingOnly) return request;
+    const model = ollamaLocalModelReference(request.model);
+    return model ? { ...request, model } : undefined;
+  }
+
+  override async dispatch(request: ChatCompletionRequest, apiKey: string, signal: AbortSignal, timeoutMs?: number, options?: DispatchOptions): Promise<Response> {
+    const wire = this.wireEnvelope(request, options);
+    if (!wire) return Response.json({ error: { type: "ollama_local_model_required" } }, { status: 404 });
+    const response = await super.dispatch(wire, apiKey, signal, timeoutMs, options);
+    if (options?.localProcessingOnly && response.ok) ollamaLocalResponses.add(response);
+    return response;
   }
 }
 

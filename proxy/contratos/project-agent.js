@@ -1,6 +1,11 @@
 import { isDataRecord, projectStringArray, projectDataArray } from './plain-data.js';
 import { canonicalJson } from './canonical.js';
 
+/** Stable material for the filesystem digest without exposing a local path. */
+export function projectRootIdentityMaterial(resolvedPath, { dev, ino, birthtimeMs }) {
+  return `${dev}:${ino || resolvedPath.toLowerCase()}:${birthtimeMs || 0}`;
+}
+
 // SHA-256 puro (FIPS 180-4): o contrato roda no browser e no Node, e
 // `node:crypto` é externalizado pelo bundler do PWA. Saída idêntica ao
 // createHash('sha256') do Node (verificada em test/sha256-parity).

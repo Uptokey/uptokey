@@ -2,7 +2,6 @@ import { createRequire } from "node:module";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { Language, Node, Parser } from "web-tree-sitter";
-import { getWasmPath } from "tree-sitter-wasm";
 
 export type SupportedLanguage =
   | "javascript" | "typescript" | "python" | "go" | "rust" | "java"
@@ -51,6 +50,8 @@ export interface SymbolIndex {
 }
 
 const require = createRequire(import.meta.url);
+// The WASM binding holds a module-wide runtime. Concurrent callers must share its initialization.
+let parserReady: Promise<void> | undefined;
 const EXTENSIONS: Record<string, SupportedLanguage> = {
   ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
   ".ts": "typescript", ".tsx": "typescript", ".py": "python", ".go": "go", ".rs": "rust",
@@ -84,17 +85,21 @@ function kindFor(type: string): SymbolKind {
 function rangeOf(node: Node): SymbolRange {
   return { startIndex: node.startIndex, endIndex: node.endIndex, startPosition: { ...node.startPosition }, endPosition: { ...node.endPosition } };
 }
-function nameNode(node: Node): Node | null {
+function isIdentifier(type: string, language: SupportedLanguage): boolean {
+  return IDENTIFIER.test(type) || language === "php" && type === "name";
+}
+function nameNode(node: Node, language: SupportedLanguage): Node | null {
+  const isName = (candidate: Node) => isIdentifier(candidate.type, language) || candidate.type.endsWith("identifier");
   for (const field of ["name", "declarator", "left", "pattern"]) {
     const candidate = node.childForFieldName(field);
-    if (candidate && (IDENTIFIER.test(candidate.type) || candidate.type.endsWith("identifier"))) {
+    if (candidate && isName(candidate)) {
       return candidate;
     }
     if (candidate) {
-      for (const child of candidate.namedChildren) if (IDENTIFIER.test(child.type) || child.type.endsWith("identifier")) return child;
+      for (const child of candidate.namedChildren) if (isName(child)) return child;
     }
   }
-  for (const child of node.namedChildren) if (IDENTIFIER.test(child.type) || child.type.endsWith("identifier")) return child;
+  for (const child of node.namedChildren) if (isName(child)) return child;
   return null;
 }
 
@@ -109,7 +114,6 @@ class SymbolIndexImpl implements SymbolIndex {
   private readonly persistedFiles = new Set<string>();
   private referencesDirty = false;
   private readonly languages = new Map<SupportedLanguage, Language>();
-  private parserPromise: Promise<void> | undefined;
   private nextId = 1;
   private readonly dbPath: string;
 
@@ -131,9 +135,9 @@ class SymbolIndexImpl implements SymbolIndex {
     const identifiers: { name: string; range: SymbolRange }[] = [];
     const declarationRanges = new Set<string>();
     const visit = (node: Node, scope: string[]) => {
-      if (node.isNamed && IDENTIFIER.test(node.type)) identifiers.push({ name: node.text, range: rangeOf(node) });
+      if (node.isNamed && isIdentifier(node.type, language)) identifiers.push({ name: node.text, range: rangeOf(node) });
       const isDeclaration = node.isNamed && DECLARATION.test(node.type);
-      const childName = isDeclaration ? nameNode(node) : null;
+      const childName = isDeclaration ? nameNode(node, language) : null;
       const nextScope = childName && childName.text ? [...scope, childName.text] : scope;
       if (childName && childName.text) {
         const symbol: Symbol = { id: this.nextId++, name: childName.text, kind: kindFor(node.type), file: path, range: rangeOf(node), scope, language };
@@ -274,14 +278,19 @@ class SymbolIndexImpl implements SymbolIndex {
     return groups.sort(([a], [b]) => this.files.get(a)!.order - this.files.get(b)!.order);
   }
   private async parserFor(language: SupportedLanguage): Promise<Parser> {
-    await this.ensureParser();
+    parserReady ??= Parser.init({ locateFile: () => require.resolve("web-tree-sitter/web-tree-sitter.wasm") })
+      .catch((error: unknown) => {
+        parserReady = undefined;
+        throw error;
+      });
+    await parserReady;
+    const grammar = this.languages.get(language) ?? await Language.load(
+      require.resolve(`@repomix/tree-sitter-wasms/out/tree-sitter-${language}.wasm`),
+    );
+    this.languages.set(language, grammar);
     const parser = new Parser();
-    const grammar = this.languages.get(language) ?? await Language.load(getWasmPath(language));
-    this.languages.set(language, grammar); parser.setLanguage(grammar); return parser;
-  }
-  private async ensureParser(): Promise<void> {
-    if (!this.parserPromise) this.parserPromise = Parser.init({ locateFile: () => require.resolve("web-tree-sitter/web-tree-sitter.wasm") });
-    await this.parserPromise;
+    parser.setLanguage(grammar);
+    return parser;
   }
 }
 

@@ -707,7 +707,7 @@ export async function createProvisionalComposedApiInstrumentPlan(
   validatePlanBindings(
     plan,
     snapshot,
-    stepConfigs.map(c => c.operation.capability)
+    [...new Map(stepConfigs.map(({operation}) => [operation.id, operation.capability])).values()]
   );
 
   await store.putPlan(principalId, plan, snapshot);

@@ -552,12 +552,20 @@ node scripts/configure-antigravity-mcp.mjs probe</pre><button type="button" clas
       return Boolean(control && control.checked);
     }
 
+    const providerChangesPending = new Set();
+    function setProviderChangePending(provider, pending) {
+      if (pending) providerChangesPending.add(provider);
+      else providerChangesPending.delete(provider);
+      const actions = document.querySelectorAll('[data-save="' + provider + '"], [data-revoke="' + provider + '"]');
+      actions.forEach(button => { button.disabled = pending; });
+    }
+
     // Salvar Chave do Provedor
     async function saveProvider(event, provider) {
       event.preventDefault();
+      if (providerChangesPending.has(provider)) return;
       const input = document.querySelector('[data-key="' + provider + '"]');
       const key = input ? input.value : '';
-      const button = document.querySelector('[data-save="' + provider + '"]');
       const msg = document.querySelector('[data-msg="' + provider + '"]');
 
       if (!key) {
@@ -566,7 +574,7 @@ node scripts/configure-antigravity-mcp.mjs probe</pre><button type="button" clas
         return;
       }
 
-      button.disabled = true;
+      setProviderChangePending(provider, true);
       msg.className = 'msg';
       msg.textContent = 'Gravando com segurança no cofre nativo...';
 
@@ -585,36 +593,39 @@ node scripts/configure-antigravity-mcp.mjs probe</pre><button type="button" clas
           throw new Error(errType);
         }
         msg.className = 'msg ok';
-        msg.textContent = provider + ' salvo com sucesso no cofre nativo!';
+        const unchanged = input.value === key;
+        msg.textContent = unchanged
+          ? provider + ' salvo com sucesso no cofre nativo!'
+          : 'Chave enviada salva. A edição posterior continua no campo.';
         const pill = document.querySelector('[data-state="' + provider + '"]');
         if (pill) {
           pill.className = 'pill on';
           pill.innerHTML = '<i class="dot"></i>ativo';
         }
-        input.value = '';
+        if (unchanged) input.value = '';
         updateLiveStatus();
       } catch (error) {
         msg.className = 'msg err';
         msg.textContent = 'Erro ao salvar: ' + explainLocalError(error && error.message ? error.message : 'save_failed');
       } finally {
-        button.disabled = false;
+        setProviderChangePending(provider, false);
       }
     }
 
     // Revogar Chave do Provedor
     async function revokeProvider(provider) {
-      const button = document.querySelector('[data-revoke="' + provider + '"]');
+      if (providerChangesPending.has(provider)) return;
       const msg = document.querySelector('[data-msg="' + provider + '"]');
       const confirmInput = document.querySelector('[data-revoke-confirm="' + provider + '"]');
-      const confirmation = confirmInput && typeof confirmInput.value === 'string' ? confirmInput.value.trim() : '';
+      const confirmation = confirmInput.value;
 
-      if (confirmation !== 'REVOGAR') {
+      if (confirmation.trim() !== 'REVOGAR') {
         msg.className = 'msg err';
         msg.textContent = 'Digite exatamente REVOGAR para confirmar a exclusão.';
         return;
       }
 
-      button.disabled = true;
+      setProviderChangePending(provider, true);
       msg.className = 'msg';
       msg.textContent = 'Removendo do cofre local...';
 
@@ -634,13 +645,13 @@ node scripts/configure-antigravity-mcp.mjs probe</pre><button type="button" clas
           pill.className = 'pill';
           pill.innerHTML = '<i class="dot"></i>não configurado';
         }
-        confirmInput.value = '';
+        if (confirmInput.value === confirmation) confirmInput.value = '';
         updateLiveStatus();
       } catch (error) {
         msg.className = 'msg err';
         msg.textContent = 'Erro ao revogar: ' + explainLocalError(error && error.message ? error.message : 'revoke_failed');
       } finally {
-        button.disabled = false;
+        setProviderChangePending(provider, false);
       }
     }
 
@@ -1236,7 +1247,7 @@ function providerCard(id: "groq" | "gemini", label: string, configured: boolean,
       <button data-revoke="${id}" class="secondary" type="button">Revogar ${label}</button>
     </div>
 
-    <div data-msg="${id}" class="msg"></div>
+    <div data-msg="${id}" class="msg" role="status"></div>
   </section>`;
 
 }

@@ -1,3 +1,4 @@
+import { canonicalJson } from '../../../contratos/canonical.js';
 import type { CuratedOperation, ParameterDefinition, ParameterSchema } from './types.ts';
 
 /** Browser-safe projection. Execution contracts remain W0; no SDK or Node imports. */
@@ -70,7 +71,9 @@ export function parseApiCompositePlanInput(input: unknown): ApiCompositePlanInpu
     const command = parseApiPlanInput({ expectedRevision: input.expectedRevision, catalogDigest: input.catalogDigest, operationId: step.operationId, parameters: step.parameters });
     return { operationId: command.operationId, parameters: command.parameters, ...(step.dependencyStepId !== undefined ? { dependencyStepId: 'step_1' as const } : {}) };
   });
-  if (new Set(steps.map(s => s.operationId)).size !== steps.length) return fail();
+  const repeatedOperation = new Set(steps.map(step => step.operationId)).size !== steps.length;
+  if (repeatedOperation &&
+    (steps.some(step => step.dependencyStepId) || new Set(steps.map(step => canonicalJson(step))).size !== steps.length)) return fail();
   return { expectedRevision: input.expectedRevision as number, catalogDigest: input.catalogDigest as string, steps };
 }
 
