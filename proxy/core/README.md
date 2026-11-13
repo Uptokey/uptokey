@@ -1,6 +1,13 @@
 # Uptokey
 
-A coding assistant in your terminal, with a local service for your provider connections, project tools and conversations. Provider API keys are stored in the operating system's secret store.
+**Keep your AI API keys in your OS credential vault.**
+
+Connect your terminal and AI tools through a local BYOK proxy and revocable tokens. Use the included terminal assistant, OpenAI-compatible local API or MCP server with the models you choose.
+
+**Windows Credential Manager · macOS Keychain · Linux Secret Service**
+
+Give a connected tool its own scoped Uptokey token instead of a copy of your provider key. You can rotate or revoke that token without replacing the provider key. The local proxy retrieves your key to authenticate requests to your selected provider; cloud models receive the context you authorize.
+
 
 - **Portable terminal beta:** Windows, macOS and Linux, on x64 or ARM64, with Node.js **22.12.0 or newer**. npm installs the matching renderer and runtime; no separate Bun setup is needed. Platform execution results accompany each release artifact.
 - **Local API:** `http://127.0.0.1:21435/v1` by default.
@@ -84,6 +91,10 @@ OpenAI-compatible clients can use `http://127.0.0.1:21435/v1` with an authorized
 `npx --yes uptokey@latest mcp` exposes the documented stdio tools. See [SPEC-MCP-V1.md](./SPEC-MCP-V1.md). Provider credentials and local vault tokens are not returned as MCP tool results.
 
 This tarball contains the local core and terminal frontend. It does not include the PWA or Tauri desktop distribution. Other platform packages require their own built and tested renderer.
+
+## How keys are handled
+
+The npm runtime uses native `@napi-rs/keyring` bindings for Windows Credential Manager, macOS Keychain and Linux Secret Service. Connection profiles hold credential references; the local proxy retrieves the provider key when an authorized request needs it. Connected tools use Uptokey client tokens, whose operation and model permissions can be limited, rotated or revoked.
 
 ## Build and verify (maintainers)
 

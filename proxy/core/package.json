@@ -1,6 +1,6 @@
 {
   "name": "@uptokey/proxy-local",
-  "version": "0.1.0-beta.26",
+  "version": "0.1.0-beta.27",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "bin": {
@@ -96,7 +96,7 @@
     "node": ">=22.12.0",
     "bun": ">=1.2.0"
   },
-  "description": "Terminal coding assistant and local BYOK API (127.0.0.1:21435/v1) with an OS secret store",
+  "description": "Keep your AI API keys in your OS credential vault. Connect your terminal and AI tools through a local BYOK proxy and revocable tokens.",
   "main": "dist/cli.js",
   "files": [
     "dist",
@@ -113,7 +113,20 @@
     "doc": "docs",
     "test": "test"
   },
-  "keywords": [],
+  "keywords": [
+    "api-keys",
+    "credential-vault",
+    "keychain",
+    "security",
+    "byok",
+    "local-proxy",
+    "terminal",
+    "tui",
+    "coding-agent",
+    "llm",
+    "openai-compatible",
+    "local-first"
+  ],
   "author": "",
   "overrides": {
     "zod": "4.6.6"

@@ -1,8 +1,8 @@
 {
   "schema": "uptokey-public-source-v2",
-  "generatedAtUtc": "2026-11-12T23:37:54.1955583Z",
+  "generatedAtUtc": "2026-11-13T02:00:01.725Z",
   "sourceCommit": null,
-  "sourceWorkingTree": "not-inspected",
+  "sourceWorkingTree": "controlled_beta26_derivative_metadata_docs_only",
   "files": [
     {
       "Source": "packaging/public-source/.gitattributes",
@@ -55,8 +55,8 @@
     {
       "Source": "packaging/public-source/package.json",
       "Destination": "package.json",
-      "SourceSha256": "306f99df146a6823f7e4b794a7d35014ed0daf20c8687bc65b84a071804b1cf7",
-      "Sha256": "306f99df146a6823f7e4b794a7d35014ed0daf20c8687bc65b84a071804b1cf7"
+      "SourceSha256": "d1c6f3f4e2a3d05070d0436667ece9273e7caa22d463b702c99a25e1a1837f8b",
+      "Sha256": "d1c6f3f4e2a3d05070d0436667ece9273e7caa22d463b702c99a25e1a1837f8b"
     },
     {
       "Source": "proxy/CAMINHOS.json",
@@ -769,20 +769,20 @@
     {
       "Source": "proxy/core/package-lock.json",
       "Destination": "proxy/core/package-lock.json",
-      "SourceSha256": "3563541a3dc15f019bb5bbbaf3a91937d0dee3943c7e5b6b915c9ec912ef6677",
-      "Sha256": "3563541a3dc15f019bb5bbbaf3a91937d0dee3943c7e5b6b915c9ec912ef6677"
+      "SourceSha256": "ad2ce183c81908c71a0f5a1830af35d6fb817f1cf7d22c7ea4013bcb6d5e5089",
+      "Sha256": "ad2ce183c81908c71a0f5a1830af35d6fb817f1cf7d22c7ea4013bcb6d5e5089"
     },
     {
       "Source": "proxy/core/package.json",
       "Destination": "proxy/core/package.json",
-      "SourceSha256": "63167dbd9a96bafbe7867eafef3e74cac7534affdd041b9b109a0fddab42ffde",
-      "Sha256": "63167dbd9a96bafbe7867eafef3e74cac7534affdd041b9b109a0fddab42ffde"
+      "SourceSha256": "0cf9ee0c8b2b58648ef32af3b62efaa0bc35cbd1cc4294da6359814ae1e78935",
+      "Sha256": "0cf9ee0c8b2b58648ef32af3b62efaa0bc35cbd1cc4294da6359814ae1e78935"
     },
     {
       "Source": "proxy/core/README.md",
       "Destination": "proxy/core/README.md",
-      "SourceSha256": "39ae47f097f21b93ddfa0cd00f1aedd6303875f46501cec989636155e1e11217",
-      "Sha256": "39ae47f097f21b93ddfa0cd00f1aedd6303875f46501cec989636155e1e11217"
+      "SourceSha256": "02f1a654a69d54b924e30c1def2ae84d46a9f41d8f61e3c41e08c1280417473b",
+      "Sha256": "02f1a654a69d54b924e30c1def2ae84d46a9f41d8f61e3c41e08c1280417473b"
     },
     {
       "Source": "proxy/core/scripts/artifact-version-evidence.d.mts",
@@ -1393,8 +1393,8 @@
     {
       "Source": "proxy/core/scripts/npm-pack-beta.mjs",
       "Destination": "proxy/core/scripts/npm-pack-beta.mjs",
-      "SourceSha256": "0a52471f5e488dbe733eeba96731e308ee4dcda48709a8ec59049f3522acd0b6",
-      "Sha256": "0a52471f5e488dbe733eeba96731e308ee4dcda48709a8ec59049f3522acd0b6"
+      "SourceSha256": "e7693aa3d4ad12297be6e8f5953c63d5b01e01b08c2607f267d6acc2e4752bc6",
+      "Sha256": "e7693aa3d4ad12297be6e8f5953c63d5b01e01b08c2607f267d6acc2e4752bc6"
     },
     {
       "Source": "proxy/core/scripts/opentui-upstream-type-baseline.json",
@@ -8371,8 +8371,8 @@
     {
       "Source": "packaging/public-source/README.md",
       "Destination": "README.md",
-      "SourceSha256": "1ac26781c93052a00cefaac4b1f2abb6bcc48dc60dc4146bbe8b5997387eb837",
-      "Sha256": "1ac26781c93052a00cefaac4b1f2abb6bcc48dc60dc4146bbe8b5997387eb837"
+      "SourceSha256": "6c3e8273512075b3f3f79276de73846b8958de2302d3e79e264e924e5eabd133",
+      "Sha256": "6c3e8273512075b3f3f79276de73846b8958de2302d3e79e264e924e5eabd133"
     },
     {
       "Source": "packaging/public-source/scripts/verify-public-source.mjs",

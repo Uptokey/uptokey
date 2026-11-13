@@ -73,7 +73,7 @@ export function packageManifest(pkg, lock, profile = "beta", runtimeSpecifiers =
   engines: { node: ">=22.12.0" },
   dependencies,
   publishConfig: { access: "public", tag: "beta" },
-  keywords: ["coding-agent", "terminal", "tui", "byok", "llm", "proxy", "openai-compatible", "local-first"]
+  keywords: ["api-keys", "credential-vault", "keychain", "security", "byok", "local-proxy", "terminal", "tui", "coding-agent", "llm", "openai-compatible", "local-first"]
   };
   if (profile === "beta" && frontendInfo) {
     frontendPackageFiles(frontendInfo);

@@ -1,6 +1,6 @@
 {
   "name": "uptokey-public-source",
-  "version": "0.1.0-beta.26",
+  "version": "0.1.0-beta.27",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "engines": {
@@ -18,5 +18,20 @@
     "url": "https://github.com/Uptokey/uptokey.git"
   },
   "homepage": "https://www.uptokey.com",
-  "bugs": "https://github.com/Uptokey/uptokey/issues"
+  "bugs": "https://github.com/Uptokey/uptokey/issues",
+  "description": "Keep your AI API keys in your OS credential vault. Connect your terminal and AI tools through a local BYOK proxy and revocable tokens.",
+  "keywords": [
+    "api-keys",
+    "credential-vault",
+    "keychain",
+    "security",
+    "byok",
+    "local-proxy",
+    "terminal",
+    "tui",
+    "coding-agent",
+    "llm",
+    "openai-compatible",
+    "local-first"
+  ]
 }
